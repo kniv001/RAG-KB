@@ -1,9 +1,13 @@
-# 一键启动：本地服务 + Cloudflare 隧道（后台），并打印公网地址
+# 一键启动：PostgreSQL + 本地服务 + Cloudflare 隧道，并打印公网地址与凭据
 $repo = Split-Path $PSScriptRoot -Parent
 
-Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force
+Write-Host "--- postgres ---" -ForegroundColor Cyan
+& "$PSScriptRoot\pg.ps1" start
+
+Write-Host "--- app ---" -ForegroundColor Cyan
 $p = (Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue).OwningProcess
 if ($p) { Stop-Process -Id $p -Force }
+Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Seconds 2
 
 Start-Process -FilePath "$repo\.venv\Scripts\python.exe" `
@@ -11,12 +15,12 @@ Start-Process -FilePath "$repo\.venv\Scripts\python.exe" `
     -WorkingDirectory $repo -WindowStyle Hidden `
     -RedirectStandardOutput "$repo\data\app.out.log" -RedirectStandardError "$repo\data\app.err.log"
 
+Write-Host "--- tunnel ---" -ForegroundColor Cyan
 Start-Process -FilePath "$repo\bin\cloudflared.exe" `
     -ArgumentList 'tunnel', '--url', 'http://127.0.0.1:8000', '--no-autoupdate' `
     -WindowStyle Hidden `
     -RedirectStandardOutput "$repo\data\tunnel.out.log" -RedirectStandardError "$repo\data\tunnel.err.log"
 
-Write-Host "waiting for tunnel ..." -ForegroundColor Cyan
 $url = $null
 for ($i = 0; $i -lt 30; $i++) {
     Start-Sleep -Seconds 2

@@ -10,6 +10,11 @@ data/*
 
 # 二进制工具
 bin/
+pgsql/
+pgsql_tmp/
+
+# 数据库数据目录
+pgdata/
 
 # 隧道与日志
 *.log

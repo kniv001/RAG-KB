@@ -1,47 +1,38 @@
-"""个人 RAG 知识库 · 应用骨架
+"""个人 RAG 知识库 · 应用
 
-Step 1 目标：验证「外网浏览器 → Cloudflare 隧道 → 本机 FastAPI」链路。
-本文件只做上传收件与登记，尚未接入切分/向量化/检索。
+当前阶段：文档上传入库（PostgreSQL + pgvector），切分/向量化/检索待接。
 """
 
 from __future__ import annotations
 
-import json
 import uuid
-from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
 
+from app import db
 from app.auth import BasicAuthMiddleware
 
 BASE = Path(__file__).resolve().parent.parent
-DATA = BASE / "data"
-UPLOADS = DATA / "uploads"
-INDEX = DATA / "docs.json"
+UPLOADS = BASE / "data" / "uploads"
 
 UPLOADS.mkdir(parents=True, exist_ok=True)
 
 ALLOWED_SUFFIX = {".txt", ".md", ".markdown", ".pdf", ".docx", ".csv", ".json", ".html"}
 MAX_BYTES = 50 * 1024 * 1024
 
-app = FastAPI(title="RAG KB", version="0.1.0")
+app = FastAPI(title="RAG KB", version="0.2.0")
 app.add_middleware(BasicAuthMiddleware)
 
 
-def now() -> str:
-    return datetime.now().isoformat(timespec="seconds")
-
-
-def load_docs() -> list[dict]:
-    if INDEX.exists():
-        return json.loads(INDEX.read_text("utf-8"))
-    return []
-
-
-def save_docs(docs: list[dict]) -> None:
-    INDEX.write_text(json.dumps(docs, ensure_ascii=False, indent=2), "utf-8")
+@app.on_event("startup")
+def _startup() -> None:
+    try:
+        db.init_schema()
+        print("[db] schema ready", flush=True)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[db] schema init failed: {type(exc).__name__}: {exc}", flush=True)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -51,12 +42,22 @@ def home() -> str:
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"ok": True, "service": "rag-kb", "version": app.version, "time": now()}
+    return {"ok": True, "service": "rag-kb", "version": app.version, "db": db.health()}
 
 
 @app.get("/api/docs")
 def list_docs() -> dict:
-    docs = load_docs()
+    try:
+        with db.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, name, suffix, bytes, uploaded_at, status, chunk_count"
+                " FROM documents ORDER BY uploaded_at"
+            )
+            docs = cur.fetchall()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(503, f"数据库不可用：{exc}") from exc
+    for d in docs:
+        d["uploaded_at"] = d["uploaded_at"].isoformat(timespec="seconds")
     return {"count": len(docs), "docs": docs}
 
 
@@ -81,29 +82,30 @@ async def upload(file: UploadFile = File(...)) -> dict:
                 raise HTTPException(413, f"超过上限 {MAX_BYTES // 1024 // 1024} MB")
             fh.write(chunk)
 
-    doc = {
-        "id": doc_id,
-        "name": name,
-        "suffix": suffix,
-        "bytes": size,
-        "stored": str(dest.relative_to(BASE)).replace("\\", "/"),
-        "uploaded_at": now(),
-        "status": "stored",  # 后续：chunked → embedded → indexed
-    }
-    docs = load_docs()
-    docs.append(doc)
-    save_docs(docs)
-    return {"ok": True, "doc": doc}
+    rel = str(dest.relative_to(BASE)).replace("\\", "/")
+    try:
+        with db.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO documents (id, name, suffix, bytes, stored_path)"
+                " VALUES (%s, %s, %s, %s, %s)",
+                (doc_id, name, suffix, size, rel),
+            )
+    except Exception as exc:  # noqa: BLE001
+        dest.unlink(missing_ok=True)
+        raise HTTPException(503, f"数据库不可用：{exc}") from exc
+
+    return {"ok": True, "doc": {"id": doc_id, "name": name, "bytes": size, "status": "stored"}}
 
 
 @app.delete("/api/docs/{doc_id}")
 def delete_doc(doc_id: str) -> dict:
-    docs = load_docs()
-    keep = [d for d in docs if d["id"] != doc_id]
-    if len(keep) == len(docs):
+    try:
+        with db.connect() as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM documents WHERE id = %s RETURNING stored_path", (doc_id,))
+            row = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(503, f"数据库不可用：{exc}") from exc
+    if not row:
         raise HTTPException(404, "文档不存在")
-    for d in docs:
-        if d["id"] == doc_id:
-            (BASE / d["stored"]).unlink(missing_ok=True)
-    save_docs(keep)
+    (BASE / row["stored_path"]).unlink(missing_ok=True)
     return {"ok": True, "removed": doc_id}
