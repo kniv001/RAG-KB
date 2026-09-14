@@ -87,6 +87,7 @@
     <button data-tab="chat" class="on">对话</button>
     <button data-tab="search">搜索</button>
     <button data-tab="docs">文档</button>
+    <button data-tab="cache">缓存</button>
     <button data-tab="settings">设置</button>
   </nav>
 
@@ -106,6 +107,28 @@
         <button class="act" id="csend">发送</button>
       </div>
       <div id="cstatus" style="font-size:13px;color:var(--muted);min-height:18px;margin-top:6px"></div>
+    </div>
+  </section>
+
+  <!-- ============ 缓存 ============ -->
+  <section id="tab-cache" class="hide">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <h2 style="margin:0">三层缓存</h2>
+        <button class="ghost" id="crefresh">刷新</button>
+      </div>
+      <div id="cstats"></div>
+      <div class="row" style="margin-top:12px">
+        <button class="ghost" data-clear="embeddings">清向量缓存</button>
+        <button class="ghost" data-clear="answers">清回答缓存</button>
+        <button class="ghost" data-clear="parses">清解析缓存</button>
+        <button class="ghost" data-clear="" style="color:#a33">全部清空</button>
+      </div>
+      <div style="font-size:12px;color:var(--muted);margin-top:10px">
+        键都是内容哈希且含模型名/上下文哈希 —— <b>改了输入就自动不命中</b>，不存在返回陈旧结果的窗口。
+        因此这里清缓存只是释放空间，<b>不影响正确性</b>。
+      </div>
+      <div id="cclear"></div>
     </div>
   </section>
 
@@ -202,8 +225,39 @@ async function health(){
 // ---------- 标签页 ----------
 document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
   document.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x === b));
-  ['chat','search','docs','settings'].forEach(t =>
+  ['chat','search','docs','cache','settings'].forEach(t =>
     $('#tab-'+t).classList.toggle('hide', t !== b.dataset.tab));
+  if (b.dataset.tab === 'cache') loadCache();
+});
+
+// ---------- 缓存 ----------
+const CACHE_LABELS = { embeddings:'向量缓存', answers:'回答缓存', parses:'解析缓存' };
+const CACHE_DESC = {
+  embeddings:'键 = 文本哈希 + 模型名。重建索引、跨文档重复内容时直接复用，省掉最贵的向量计算。',
+  answers:'键 = 问题 + 上下文哈希 + 历史哈希 + provider + model。资料或历史一变，键就变，不会返回陈旧答案。',
+  parses:'键 = 文件内容哈希。同一文件重传或重建索引时跳过 PDF/docx 解析。',
+};
+async function loadCache(){
+  try {
+    const r = await api('/api/cache/stats');
+    $('#cstats').innerHTML = Object.entries(r.stats).map(([k, v]) => `
+      <div class="prov">
+        <div><b>${CACHE_LABELS[k] || k}</b>
+          <span class="k">· ${v.n} 条 · 累计命中 ${v.hits} 次</span></div>
+        <div class="k">${esc(CACHE_DESC[k] || '')}</div>
+        <div class="k">最近命中：${v.last ? esc(v.last) : '—'}</div>
+      </div>`).join('');
+  } catch(e){ $('#cstats').textContent = '✘ ' + e.message; }
+}
+$('#crefresh').onclick = loadCache;
+document.querySelectorAll('[data-clear]').forEach(b => b.onclick = async () => {
+  const which = b.dataset.clear;
+  if (which === '' && !confirm('确定清空全部缓存？向量缓存清掉后重建索引会明显变慢。')) return;
+  try {
+    const r = await api('/api/cache' + (which ? '?which=' + which : ''), {method:'DELETE'});
+    $('#cclear').textContent = '已清空：' + Object.entries(r.removed).map(([k,n]) => `${CACHE_LABELS[k]||k} ${n} 条`).join('，');
+    loadCache();
+  } catch(e){ $('#cclear').textContent = '✘ ' + e.message; }
 });
 
 // ---------- 设置 ----------
@@ -290,11 +344,27 @@ async function loadDocs(){
 }
 
 async function indexOne(id, btn){
-  const old = btn.textContent; btn.disabled = true; btn.textContent = '索引中…';
-  $('#status').textContent = '解析 / 切分 / 向量化中，请稍候…';
+  const old = btn.textContent; btn.disabled = true; btn.textContent = '提交中…';
+  $('#status').textContent = '已提交后台任务（大文档可能耗时数分钟，Cloudflare 不会掐断了）…';
   try {
     const j = await post(`/api/docs/${id}/index`, {});
-    $('#status').textContent = `✔ ${j.name}：${j.chars} 字 → ${j.chunks} 块（${j.embed_model} ${j.dim}维）`;
+    // 轮询直到结束
+    for (;;) {
+      await new Promise(r => setTimeout(r, 1200));
+      const t = (await api('/api/tasks/' + j.task_id)).task;
+      const pct = t.total > 0 ? Math.floor(t.progress / t.total * 100) : 0;
+      btn.textContent = t.total > 0 ? `${pct}%` : '处理中';
+      $('#status').textContent = `[${t.status}] ${t.message || ''}` + (t.total ? ` (${t.progress}/${t.total})` : '');
+      if (t.status !== 'running') {
+        if (t.status === 'done') {
+          const r = t.result || {};
+          $('#status').textContent = `✔ ${r.name}：${r.chars} 字 → ${r.chunks} 块（${esc(r.embed_model)} ${r.dim}维）`;
+        } else {
+          $('#status').textContent = `✘ ${t.message}`;
+        }
+        break;
+      }
+    }
   } catch(e){ $('#status').textContent = `✘ ${e.message}`; }
   btn.disabled = false; btn.textContent = old; loadDocs(); health();
 }
@@ -383,7 +453,7 @@ async function sendChat(){
     const j = await post('/api/chat', {question:q, conv_id:CONV, provider:p, model:m});
     CONV = j.conv_id;
     await openConv(CONV);
-    $('#cstatus').textContent = `完成 · ${j.model} · ${((Date.now()-t0)/1000).toFixed(1)}s · 召回 ${j.sources.length} 段`;
+    $('#cstatus').textContent = `完成 · ${j.model}${j.cached ? ' · ⚡缓存命中' : ''} · ${((Date.now()-t0)/1000).toFixed(1)}s · 召回 ${j.sources.length} 段`;
   } catch(e){
     $('#thread').innerHTML += `<div class="msg assistant" style="color:#a33">✘ ${esc(e.message)}</div>`;
     $('#cstatus').textContent = '';

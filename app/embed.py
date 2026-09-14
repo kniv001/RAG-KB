@@ -1,15 +1,18 @@
-"""向量化门面。
+"""向量化门面 —— 带缓存。
 
-真正的传输在 providers.py（本地 Ollama / 任意 OpenAI 兼容端点，可在设置里切换），
-这里只负责把错误统一成 EmbedError，并暴露"当前生效的向量模型标识"。
+流程：先按 (文本, 模型) 哈希查缓存 → 只对未命中的部分调 provider → 结果写回缓存。
+向量化是整个索引链最慢的一步，缓存命中时重建索引几乎瞬间完成。
 
-魔改点：想让不同文档走不同的 embedding，改 embed_texts 的 provider/model 参数即可；
-    但注意 chunks.embed_model 是按"当前设置"整体写入的，混用需自行调整。
+真正的传输在 providers.py（本地 Ollama / 任意 OpenAI 兼容端点，设置里可切）。
 """
 
 from __future__ import annotations
 
-from app import providers, settings
+from typing import Callable
+
+from app import cache, config, providers, settings
+
+Progress = Callable[[int, int, str], None]
 
 
 class EmbedError(RuntimeError):
@@ -21,13 +24,38 @@ def current_model() -> str:
     return settings.current_embed_model()
 
 
-def embed_texts(texts: list[str]) -> list[list[float]]:
+def embed_texts(texts: list[str], on_progress: Progress | None = None) -> list[list[float]]:
     if not texts:
         return []
-    try:
-        return providers.embed(texts)
-    except providers.ProviderError as exc:
-        raise EmbedError(str(exc)) from exc
+
+    model = current_model()
+    hits, misses = cache.get_embeddings(texts, model)
+
+    vectors: list[list[float] | None] = [None] * len(texts)
+    for i, vec in hits.items():
+        vectors[i] = vec
+
+    if on_progress:
+        on_progress(len(hits), len(texts), f"向量缓存命中 {len(hits)}/{len(texts)}")
+
+    if misses:
+        miss_texts = [texts[i] for i in misses]
+        batch = max(1, config.EMBED_BATCH)
+        done = len(hits)
+        for start in range(0, len(miss_texts), batch):
+            part = miss_texts[start : start + batch]
+            try:
+                part_vecs = providers.embed(part)
+            except providers.ProviderError as exc:
+                raise EmbedError(str(exc)) from exc
+            cache.put_embeddings(part, part_vecs, model)
+            for idx, vec in zip(misses[start : start + batch], part_vecs):
+                vectors[idx] = vec
+            done += len(part)
+            if on_progress:
+                on_progress(done, len(texts), f"向量化 {done}/{len(texts)}")
+
+    return [v if v is not None else [] for v in vectors]
 
 
 def embed_query(text: str) -> list[float]:

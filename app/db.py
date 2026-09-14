@@ -104,6 +104,57 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 
 CREATE INDEX IF NOT EXISTS messages_conv_idx ON messages (conv_id, id);
+
+CREATE TABLE IF NOT EXISTS index_tasks (
+    id         text PRIMARY KEY,
+    doc_id     text NOT NULL,
+    kind       text NOT NULL DEFAULT 'index',
+    status     text NOT NULL DEFAULT 'running',   -- running | done | error
+    progress   integer NOT NULL DEFAULT 0,
+    total      integer NOT NULL DEFAULT 0,
+    message    text,
+    result     jsonb,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS index_tasks_doc_idx ON index_tasks (doc_id, created_at DESC);
+
+-- ---------- 缓存三表 ----------
+-- 向量缓存刻意用 text 存而非 vector 类型：缓存只按 key 精确查，从不做相似度检索，
+-- 用 text 就不被 embed_dim 的 DDL 绑死，将来换维度不同的向量模型无需迁移缓存表。
+
+CREATE TABLE IF NOT EXISTS cache_embeddings (
+    key         text PRIMARY KEY,
+    model       text NOT NULL,
+    vec         text NOT NULL,
+    dim         integer NOT NULL,
+    hits        integer NOT NULL DEFAULT 0,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    last_hit_at timestamptz
+);
+
+CREATE TABLE IF NOT EXISTS cache_answers (
+    key         text PRIMARY KEY,
+    question    text NOT NULL,
+    answer      text NOT NULL,
+    provider    text,
+    model       text,
+    sources     jsonb,
+    hits        integer NOT NULL DEFAULT 0,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    last_hit_at timestamptz
+);
+
+CREATE TABLE IF NOT EXISTS cache_parses (
+    key         text PRIMARY KEY,
+    name        text,
+    text        text NOT NULL,
+    chars       integer NOT NULL,
+    hits        integer NOT NULL DEFAULT 0,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    last_hit_at timestamptz
+);
 """
 
 

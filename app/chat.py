@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import uuid
 
-from app import db, generate, retrieve
+from app import db, pipeline, retrieve
 
 
 def create(title: str | None = None, provider: str | None = None, model: str | None = None) -> dict:
@@ -126,22 +126,14 @@ def ask(
     hits = retrieve.search(question, top_k=top_k, mode=mode)
 
     if hits:
-        result = generate.answer(question, hits, history=hist, provider=provider, model=model)
-        answer, used_p, used_m = result["content"], result["provider"], result["model"]
+        g = pipeline.answer_with_cache(
+            question, hits, history=hist, provider=provider, model=model
+        )
+        answer, used_p, used_m = g["content"], g["provider"], g["model"]
+        sources, cached = g["sources"], g["cached"]
     else:
         answer, used_p, used_m = "资料中没有相关内容。", provider, model
-
-    sources = [
-        {
-            "doc_id": h["doc_id"],
-            "doc_name": h["doc_name"],
-            "seq": h["seq"],
-            "score": h["score"],
-            "distance": h["distance"],
-            "preview": h["content"][:200],
-        }
-        for h in hits
-    ]
+        sources, cached = [], False
 
     append(conv_id, "user", question)
     append(conv_id, "assistant", answer, sources=sources, provider=used_p, model=used_m)
@@ -154,4 +146,5 @@ def ask(
         "provider": used_p,
         "model": used_m,
         "sources": sources,
+        "cached": cached,
     }

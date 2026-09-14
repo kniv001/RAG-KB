@@ -72,6 +72,36 @@ OpenAI / 本地 vLLM / LM Studio。
 | `keyword` | 关键词召回（ASCII 词 + 中文二元组，ILIKE 计数打分） |
 | `hybrid` | **默认**，两路召回后用 RRF 融合 |
 
+## 三层缓存（全在 PostgreSQL，重启不丢）
+
+| 层 | 键 | 省掉什么 |
+|---|---|---|
+| 向量 | `sha256(文本 + 模型)` | 最贵的向量计算；重建索引、跨文档重复内容直接复用 |
+| 解析 | `sha256(文件内容)` | PDF/docx 解析 |
+| 回答 | `sha256(问题 + 上下文哈希 + 历史哈希 + provider + model)` | 本地模型数十秒的推理 |
+
+**两个关键设计：**
+
+1. **键里含所有影响结果的参数**——上下文哈希、历史哈希、模型名、温度。资料改了、对话历史变了、
+   换了模型，键就变，**不存在返回陈旧结果的窗口**。所以「缓存」页的清空按钮只是释放空间，
+   不影响正确性。
+2. **向量缓存用 `text` 存而非 `vector` 类型**——缓存只按 key 精确查、从不做相似度检索，
+   因此不被 `embed_dim` 的 DDL 绑死；将来换 1536 维的向量模型，缓存表无需迁移。
+
+**实测**：重建索引从数秒降到 **1.76s**（解析+向量全命中）；重复提问从 21.8s 降到 **0.44s**。
+
+## 异步索引：为什么必须
+
+**Cloudflare 免费版对源站响应有 100 秒硬超时（524），无法延长。** 一篇大 PDF 的
+切分+向量化很容易超过 100 秒，同步接口必然被 CF 掐断。
+
+因此 `POST /api/docs/{id}/index` 立即返回 **202 + task_id**，前端轮询 `/api/tasks/{tid}` 显示进度。
+任务状态写在 `index_tasks` 表里，刷新页面、重启应用都不丢；进程重启时启动钩子会把残留的
+`running` 任务标记为中断。
+
+> 若将来要多 worker 部署，把 `app/tasks.py` 的 `submit()` 换成真正的队列（RQ / arq / Celery）即可，
+> 上层接口不用动。
+
 ## 目录
 
 ```
@@ -104,11 +134,13 @@ bin/ pgsql/ pgdata/ data/      均 gitignore
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | POST | `/api/upload` | 上传文档 |
-| POST | `/api/docs/{id}/index` | 解析→切分→向量化→入库 |
+| POST | `/api/docs/{id}/index` | **202 + task_id**（异步，见下） |
+| GET | `/api/tasks/{tid}` `/api/docs/{id}/task` | 任务进度 / 该文档最近任务 |
 | POST | `/api/search` | 检索（`mode` / `doc_id` / `top_k`） |
 | POST | `/api/ask` | 无状态问答 |
 | POST | `/api/chat` | 多轮对话（不传 `conv_id` 则新建） |
 | GET | `/api/conversations` `/api/conversations/{id}` | 会话列表 / 明细 |
+| GET | `/api/cache/stats` · DELETE `/api/cache?which=` | 缓存统计 / 清空 |
 | GET/PUT | `/api/settings` `/api/settings/defaults` | 设置 |
 | GET | `/api/providers/{id}/probe` | 探测某提供方可用模型 |
 | GET | `/api/health` | 数据库 + 向量模型自检 + 失效文档 |
@@ -127,7 +159,9 @@ bin/ pgsql/ pgdata/ data/      均 gitignore
 - [x] **Step 3** 存储：PostgreSQL 18.6 + pgvector 0.8.6
 - [x] **Step 4** RAG 管线：切分 → 向量化 → 三模式检索 → 生成；多轮对话落库
 - [x] **Step 5** 混合模型：本地 Ollama 与 OpenAI 兼容 API 运行时可切
-- [ ] **Step 6** 固定域名：named tunnel + Cloudflare Access（等域名实名通过）
+- [x] **Step 6** 索引异步化（规避 CF 100s 超时）+ 三层缓存
+- [ ] **Step 7** 固定域名：named tunnel + Cloudflare Access（域名 `rag-kb-awa.xyz` 委派已下发，待 CF 显示 Active）
+- [ ] **Step 8** 对话流式输出（SSE）：进一步规避 100s 超时，并改善本地模型的等待体验
 
 ## 已知事项（踩过的坑）
 

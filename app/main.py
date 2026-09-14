@@ -13,13 +13,33 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from app import chat, config, db, embed, pipeline, providers, retrieve, settings, store
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from app import cache, chat, config, db, embed, pipeline, providers, retrieve, settings, store, tasks
 from app.auth import BasicAuthMiddleware
 
-app = FastAPI(title="RAG KB", version="0.4.0")
+app = FastAPI(title="RAG KB", version="0.5.0")
 app.add_middleware(BasicAuthMiddleware)
 
 config.UPLOADS.mkdir(parents=True, exist_ok=True)
+
+
+class NoStoreMiddleware(BaseHTTPMiddleware):
+    """/api/* 一律禁止缓存。
+
+    内容是私有的（Basic 认证之后），绝不能让 Cloudflare 边缘或浏览器把
+    问答结果缓存下来 —— 那既可能串号，也可能在资料更新后返回陈旧答案。
+    """
+
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
+            response.headers["Pragma"] = "no-cache"
+        return response
+
+
+app.add_middleware(NoStoreMiddleware)
 
 
 @app.on_event("startup")
@@ -27,7 +47,8 @@ def _startup() -> None:
     try:
         db.init_schema()
         settings.load()
-        print("[db] schema ready", flush=True)
+        n = tasks.reap_orphans()
+        print(f"[db] schema ready (reaped {n} orphan task(s))", flush=True)
     except Exception as exc:  # noqa: BLE001
         print(f"[db] startup failed: {type(exc).__name__}: {exc}", flush=True)
 
@@ -147,12 +168,56 @@ async def upload(file: UploadFile = File(...)) -> dict:
     return {"ok": True, "doc": {"id": doc_id, "name": name, "bytes": size, "status": "stored"}}
 
 
-@app.post("/api/docs/{doc_id}/index")
+@app.post("/api/docs/{doc_id}/index", status_code=202)
 def index_doc(doc_id: str) -> dict:
-    try:
-        return {"ok": True, **pipeline.index_document(doc_id)}
-    except Exception as exc:  # noqa: BLE001
-        raise _err(exc) from exc
+    """建索引是耗时操作（大文档可超百秒），必须异步 ——
+    Cloudflare 免费版对源站有 100 秒硬超时，同步接口会被 524 掐断。
+    这里立即返回 202 + 任务 id，前端轮询 /api/tasks/{tid}。"""
+    doc = store.get_document(doc_id)
+    if not doc:
+        raise HTTPException(404, "文档不存在")
+    tid = tasks.submit(doc_id, lambda report: pipeline.index_document(doc_id, report))
+    return {"ok": True, "accepted": True, "task_id": tid, "doc_id": doc_id,
+            "poll": f"/api/tasks/{tid}"}
+
+
+@app.get("/api/tasks/{tid}")
+def get_task(tid: str) -> dict:
+    t = tasks.get(tid)
+    if not t:
+        raise HTTPException(404, "任务不存在")
+    for f in ("created_at", "updated_at"):
+        if t.get(f):
+            t[f] = t[f].isoformat(timespec="seconds")
+    return {"ok": True, "task": t}
+
+
+@app.get("/api/docs/{doc_id}/task")
+def get_doc_task(doc_id: str) -> dict:
+    t = tasks.latest_for(doc_id)
+    if t:
+        for f in ("created_at", "updated_at"):
+            if t.get(f):
+                t[f] = t[f].isoformat(timespec="seconds")
+    return {"ok": True, "task": t}
+
+
+# ---------------- 缓存运维 ----------------
+
+@app.get("/api/cache/stats")
+def cache_stats() -> dict:
+    s = cache.stats()
+    for v in s.values():
+        if v.get("last"):
+            v["last"] = v["last"].isoformat(timespec="seconds")
+    return {"ok": True, "stats": s}
+
+
+@app.delete("/api/cache")
+def cache_clear(which: str | None = None) -> dict:
+    if which and which not in ("embeddings", "answers", "parses"):
+        raise HTTPException(400, "which 只能是 embeddings / answers / parses，或留空全清")
+    return {"ok": True, "removed": cache.clear(which)}
 
 
 @app.get("/api/docs/{doc_id}/chunks")
