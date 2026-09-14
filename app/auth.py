@@ -50,9 +50,17 @@ USER, PASSWORD = _load_credentials()
 
 
 class BasicAuthMiddleware(BaseHTTPMiddleware):
-    """全站保护：未认证一律 401。"""
+    """全站保护：未认证一律 401。
+
+    例外：/api/whoami 免认证 —— 它只回显调用方自己的 IP 和协议栈，
+    不含知识库任何内容，但用于排查"某设备连不上"时必须能在登录前打开。
+    """
+
+    PUBLIC_PATHS = {"/api/whoami"}
 
     async def dispatch(self, request, call_next):
+        if request.url.path in self.PUBLIC_PATHS:
+            return await call_next(request)
         header = request.headers.get("authorization", "")
         if header.startswith("Basic "):
             try:

@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
@@ -89,6 +89,29 @@ class DefaultsBody(BaseModel):
     embed_provider: str | None = None
     embed_model: str | None = None
     chat_temperature: float | None = Field(default=None, ge=0, le=2)
+
+
+@app.get("/api/whoami")
+def whoami(request: Request) -> dict:
+    """自报家门：告诉调用方它这次是用 IPv4 还是 IPv6 连进来的。
+
+    排查"某设备连不上"时非常有用 —— 浏览器/系统会按 RFC 6724 优先选 IPv6，
+    只要这个接口能打开，就能一眼看出它实际走了哪条协议栈。
+    Cloudflare 会带上 CF-Connecting-IP（真实客户端 IP），
+    经过隧道时 request.client.host 只会是 127.0.0.1，所以优先取它。
+    """
+    ip = request.headers.get("cf-connecting-ip") or (request.client.host if request.client else "?")
+    via_tunnel = bool(request.headers.get("cf-connecting-ip"))
+    return {
+        "ok": True,
+        "client_ip": ip,
+        "family": "IPv6" if ":" in ip else "IPv4",
+        "scheme": request.headers.get("x-forwarded-proto"),
+        "country": request.headers.get("cf-ipcountry"),
+        "host": request.headers.get("host"),
+        "via_cloudflare": via_tunnel,
+        "user_agent": request.headers.get("user-agent", "")[:150],
+    }
 
 
 @app.get("/api/settings")
