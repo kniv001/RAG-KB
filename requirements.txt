@@ -3,3 +3,6 @@ uvicorn[standard]
 python-multipart
 psycopg[binary]
 pgvector
+httpx
+pypdf
+python-docx

@@ -5,101 +5,402 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RAG 知识库</title>
 <style>
-  :root { --bg:#faf9f7; --fg:#1e1c19; --muted:#6b6560; --line:#e2ddd6; --accent:#2f6f4f; }
+  :root { --bg:#faf9f7; --fg:#1e1c19; --muted:#6b6560; --line:#e2ddd6; --accent:#2f6f4f;
+          --warn:#9a6b1f; --err:#a33; --soft:#f7f9f7; }
   * { box-sizing:border-box; }
-  body { margin:0; padding:24px 16px 64px; background:var(--bg); color:var(--fg);
+  body { margin:0; padding:16px 16px 48px; background:var(--bg); color:var(--fg);
          font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif; }
-  .wrap { max-width:720px; margin:0 auto; }
-  h1 { font-size:22px; margin:0 0 4px; }
-  .sub { color:var(--muted); font-size:13px; margin-bottom:24px; }
-  .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:18px; margin-bottom:16px; }
-  #drop { border:2px dashed var(--line); border-radius:10px; padding:32px 16px; text-align:center;
-          color:var(--muted); cursor:pointer; transition:.15s; }
+  .wrap { max-width:820px; margin:0 auto; }
+  h1 { font-size:20px; margin:0 0 2px; }
+  .sub { color:var(--muted); font-size:12px; margin-bottom:14px; }
+  .sub .bad { color:var(--err); } .sub .warn { color:var(--warn); }
+  nav { display:flex; gap:4px; margin-bottom:14px; flex-wrap:wrap; }
+  nav button { background:none; border:1px solid var(--line); border-radius:20px;
+               padding:6px 16px; font-size:13px; color:var(--muted); cursor:pointer; font-family:inherit; }
+  nav button.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:14px; }
+  .card h2 { font-size:14px; margin:0 0 12px; font-weight:600; }
+  button.act { background:var(--accent); color:#fff; border:0; border-radius:7px;
+               padding:8px 16px; font-size:14px; cursor:pointer; font-family:inherit; }
+  button.act:disabled { opacity:.45; cursor:default; }
+  button.ghost { background:none; color:var(--muted); padding:4px 8px; font-size:12px;
+                 border:0; cursor:pointer; font-family:inherit; }
+  button.mini { padding:4px 10px; font-size:12px; border:0; border-radius:6px;
+                background:var(--accent); color:#fff; cursor:pointer; font-family:inherit; }
+  #drop { border:2px dashed var(--line); border-radius:10px; padding:22px 16px; text-align:center;
+          color:var(--muted); cursor:pointer; }
   #drop.over { border-color:var(--accent); background:#f2f8f4; color:var(--accent); }
-  input[type=file] { display:none; }
-  button { background:var(--accent); color:#fff; border:0; border-radius:7px;
-           padding:9px 18px; font-size:14px; cursor:pointer; }
-  .doc { display:flex; justify-content:space-between; gap:12px; align-items:center;
-         padding:9px 0; border-bottom:1px solid var(--line); font-size:14px; }
+  input[type=file], .hide { display:none; }
+  textarea, input[type=text], select { width:100%; border:1px solid var(--line); border-radius:8px;
+      padding:9px 10px; font:inherit; font-size:14px; background:#fff; color:var(--fg); }
+  textarea { resize:vertical; min-height:62px; }
+  textarea:focus, input:focus, select:focus { outline:none; border-color:var(--accent); }
+  .row { display:flex; gap:8px; align-items:center; margin-top:10px; flex-wrap:wrap; }
+  .row label { font-size:13px; color:var(--muted); display:flex; align-items:center; gap:5px; }
+  .grow { flex:1; min-width:150px; }
+  #status { font-size:13px; color:var(--muted); min-height:20px; margin-top:8px; white-space:pre-wrap; }
+  .doc { display:flex; justify-content:space-between; gap:10px; align-items:center;
+         padding:10px 0; border-bottom:1px solid var(--line); font-size:14px; }
   .doc:last-child { border-bottom:0; }
+  .doc .name { word-break:break-all; }
   .doc .meta { color:var(--muted); font-size:12px; }
+  .doc .ops { display:flex; gap:4px; flex-shrink:0; }
   .pill { display:inline-block; padding:1px 8px; border-radius:20px; font-size:11px;
           background:#eef5f0; color:var(--accent); }
-  .del { color:#a33; cursor:pointer; background:none; border:0; font-size:12px; padding:4px; }
-  #status { font-size:13px; color:var(--muted); min-height:20px; margin-top:10px; }
+  .pill.off { background:#f2efe9; color:var(--muted); }
+  .pill.err { background:#fbeaea; color:var(--err); }
+  .msg { padding:11px 13px; border-radius:9px; margin-bottom:9px; font-size:14px;
+         white-space:pre-wrap; word-break:break-word; }
+  .msg.user { background:#eef4f0; margin-left:14%; }
+  .msg.assistant { background:var(--soft); margin-right:6%; }
+  .msg .meta { font-size:11px; color:var(--muted); margin-top:7px; white-space:normal; }
+  .srcs { font-size:12px; color:var(--muted); margin-top:8px; padding-top:8px;
+          border-top:1px dashed var(--line); white-space:normal; }
+  .src { padding:4px 0; }
+  .src b { color:var(--fg); }
+  .conv { padding:9px 11px; border-radius:8px; cursor:pointer; font-size:13px;
+          display:flex; justify-content:space-between; gap:8px; align-items:center; }
+  .conv:hover { background:var(--soft); }
+  .conv.on { background:#eef4f0; }
+  .conv .t { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .conv .d { font-size:11px; color:var(--muted); flex-shrink:0; }
+  #thread { max-height:56vh; overflow:auto; margin-bottom:10px; }
+  .hit { padding:11px 0; border-bottom:1px solid var(--line); font-size:14px; }
+  .hit:last-child { border-bottom:0; }
+  .hit .hd { font-size:12px; color:var(--muted); margin-bottom:5px; }
+  .hit .hd b { color:var(--fg); font-size:13px; }
+  .hit .sc { color:var(--accent); }
+  .hit .body { white-space:pre-wrap; word-break:break-word; font-size:13.5px; }
+  .prov { padding:9px 0; border-bottom:1px solid var(--line); font-size:13px; }
+  .prov:last-child { border-bottom:0; }
+  .prov .k { color:var(--muted); font-size:12px; }
+  .prov .ok { color:var(--accent); } .prov .no { color:var(--err); }
+  code { background:#f2efe9; padding:1px 5px; border-radius:4px; font-size:12px; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>RAG 知识库</h1>
-  <div class="sub">Step 1 链路验证 · <span id="health">检测中…</span></div>
+  <div class="sub" id="health">检测中…</div>
 
-  <div class="card">
-    <div id="drop">
-      <div style="font-size:15px;margin-bottom:6px">点击选择文件，或拖拽到这里</div>
-      <div style="font-size:12px">支持 txt / md / pdf / docx / csv / json / html，单个 ≤ 50MB</div>
-    </div>
-    <input type="file" id="file" multiple>
-    <div id="status"></div>
-  </div>
+  <nav>
+    <button data-tab="chat" class="on">对话</button>
+    <button data-tab="search">搜索</button>
+    <button data-tab="docs">文档</button>
+    <button data-tab="settings">设置</button>
+  </nav>
 
-  <div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-      <strong style="font-size:14px">已入库文档 <span class="pill" id="count">0</span></strong>
-      <button id="refresh" style="background:none;color:var(--muted);padding:4px 8px">刷新</button>
+  <!-- ============ 对话 ============ -->
+  <section id="tab-chat">
+    <div class="card">
+      <h2 style="display:flex;justify-content:space-between;align-items:center">
+        会话 <button class="ghost" id="newconv">+ 新对话</button>
+      </h2>
+      <div id="convs"></div>
     </div>
-    <div id="list"></div>
-  </div>
+    <div class="card">
+      <div id="thread"></div>
+      <textarea id="cq" placeholder="就你的资料提问…（Ctrl+Enter 发送）"></textarea>
+      <div class="row">
+        <select id="cmodel" class="grow"></select>
+        <button class="act" id="csend">发送</button>
+      </div>
+      <div id="cstatus" style="font-size:13px;color:var(--muted);min-height:18px;margin-top:6px"></div>
+    </div>
+  </section>
+
+  <!-- ============ 搜索 ============ -->
+  <section id="tab-search" class="hide">
+    <div class="card">
+      <h2>检索</h2>
+      <input type="text" id="sq" placeholder="输入关键词或问句，回车检索">
+      <div class="row">
+        <label>模式
+          <select id="smode" style="width:auto">
+            <option value="hybrid">混合（向量+关键词）</option>
+            <option value="vector">纯向量</option>
+            <option value="keyword">纯关键词</option>
+          </select>
+        </label>
+        <label class="grow">限定文档 <select id="sdoc"><option value="">全部</option></select></label>
+        <button class="act" id="sgo">检索</button>
+      </div>
+      <div id="sstatus" style="font-size:13px;color:var(--muted);min-height:18px;margin-top:6px"></div>
+    </div>
+    <div class="card"><div id="sres"></div></div>
+  </section>
+
+  <!-- ============ 文档 ============ -->
+  <section id="tab-docs" class="hide">
+    <div class="card">
+      <h2>上传</h2>
+      <div id="drop">
+        <div style="font-size:15px;margin-bottom:6px">点击选择文件，或拖拽到这里</div>
+        <div style="font-size:12px">txt / md / pdf / docx / csv / json / html，单个 ≤ 50MB</div>
+      </div>
+      <input type="file" id="file" multiple>
+      <div class="row"><label><input type="checkbox" id="autoindex" checked> 上传后自动建索引</label></div>
+      <div id="status"></div>
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <h2 style="margin:0">已入库 <span class="pill" id="count">0</span></h2>
+        <button class="ghost" id="refresh">刷新</button>
+      </div>
+      <div id="list"></div>
+    </div>
+  </section>
+
+  <!-- ============ 设置 ============ -->
+  <section id="tab-settings" class="hide">
+    <div class="card">
+      <h2>默认模型</h2>
+      <div class="row">
+        <label class="grow">对话 <select id="defchat"></select></label>
+        <label class="grow">向量 <select id="defembed"></select></label>
+        <button class="act" id="savedef">保存</button>
+      </div>
+      <div id="setstatus" style="font-size:13px;color:var(--muted);min-height:18px;margin-top:6px"></div>
+    </div>
+    <div class="card">
+      <h2>模型提供方</h2>
+      <div id="provs"></div>
+      <div style="font-size:12px;color:var(--muted);margin-top:12px">
+        增删改 <code>data/settings.json</code> 即可接入任何 OpenAI 兼容服务，不用改代码。
+      </div>
+    </div>
+  </section>
 </div>
 
 <script>
 const $ = s => document.querySelector(s);
-const drop = $('#drop'), input = $('#file');
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmt = b => b < 1024 ? b+' B' : b < 1048576 ? (b/1024).toFixed(1)+' KB' : (b/1048576).toFixed(1)+' MB';
+let SETTINGS = null, CONV = null, DOCS = [];
 
-function fmt(b){ return b < 1024 ? b+' B' : b < 1048576 ? (b/1024).toFixed(1)+' KB' : (b/1048576).toFixed(1)+' MB'; }
+async function api(path, opts){
+  const r = await fetch(path, opts);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status));
+  return j;
+}
+const post = (p, body) => api(p, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
 
+// ---------- 健康 ----------
 async function health(){
   try {
-    const r = await fetch('/api/health').then(r=>r.json());
-    $('#health').textContent = `服务在线 · ${r.time}`;
-  } catch(e){ $('#health').textContent = '服务离线'; }
+    const h = await api('/api/health');
+    const db = h.db || {}, em = h.embed || {};
+    let s = `PostgreSQL ${db.ok ? '✅' : '❌'} · 向量模型 `;
+    s += em.ok ? `✅ ${esc(em.model)}(${em.dim_actual}维)` : `<span class="bad">❌ ${esc(em.error || '不可用')}</span>`;
+    s += ` · ${db.documents ?? 0} 文档 / ${db.chunks ?? 0} 分块 / ${db.conversations ?? 0} 会话`;
+    if (h.stale && h.stale.length) s += ` · <span class="warn">⚠ ${h.stale.length} 篇文档用的不是当前向量模型，需重建索引</span>`;
+    $('#health').innerHTML = s;
+  } catch(e){ $('#health').innerHTML = '<span class="bad">服务离线</span>'; }
 }
 
-async function load(){
-  const r = await fetch('/api/docs').then(r=>r.json());
-  $('#count').textContent = r.count;
-  $('#list').innerHTML = r.count ? r.docs.slice().reverse().map(d =>
-    `<div class="doc">
-       <div><div>${d.name}</div>
-         <div class="meta">${fmt(d.bytes)} · ${d.uploaded_at} · <span class="pill">${d.status}</span></div></div>
-       <button class="del" data-id="${d.id}">删除</button>
-     </div>`).join('') : '<div class="meta">还没有文档</div>';
-  $('#list').querySelectorAll('.del').forEach(b => b.onclick = async () => {
-    await fetch('/api/docs/'+b.dataset.id, {method:'DELETE'}); load();
+// ---------- 标签页 ----------
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x === b));
+  ['chat','search','docs','settings'].forEach(t =>
+    $('#tab-'+t).classList.toggle('hide', t !== b.dataset.tab));
+});
+
+// ---------- 设置 ----------
+function fillModelSelect(sel, keep){
+  const parts = [];
+  SETTINGS.providers.forEach(p => p.chat_models.forEach(m => parts.push({id:`${p.id}|${m}`, label:`${p.label} · ${m}`})));
+  sel.innerHTML = parts.map(p => `<option value="${p.id}">${esc(p.label)}</option>`).join('');
+  if (keep) sel.value = keep;
+}
+function fillEmbedSelect(sel, keep){
+  const parts = [];
+  SETTINGS.providers.forEach(p => p.embed_models.forEach(m => parts.push({id:`${p.id}|${m}`, label:`${p.label} · ${m}`})));
+  sel.innerHTML = parts.map(p => `<option value="${p.id}">${esc(p.label)}</option>`).join('');
+  if (keep) sel.value = keep;
+}
+const joinKey = d => d.provider + '|' + d.model;
+
+async function loadSettings(){
+  SETTINGS = await api('/api/settings');
+  fillModelSelect($('#cmodel'), joinKey(SETTINGS.default_chat));
+  fillModelSelect($('#defchat'), joinKey(SETTINGS.default_chat));
+  fillEmbedSelect($('#defembed'), joinKey(SETTINGS.default_embed));
+
+  $('#provs').innerHTML = SETTINGS.providers.map(p => `
+    <div class="prov">
+      <div><b>${esc(p.label)}</b> <span class="k">· ${esc(p.kind)} · ${esc(p.base)}</span></div>
+      <div class="k">对话模型：${esc(p.chat_models.join(', ') || '—')}</div>
+      <div class="k">向量模型：${esc(p.embed_models.join(', ') || '—')}
+        ${p.kind === 'openai' ? '· Key ' + (p.has_key ? '<span class="ok">已设置</span>' : '<span class="no">未设置</span>') : ''}</div>
+      <div class="row"><button class="ghost" data-probe="${p.id}">探测可用性</button></div>
+      <div class="k" id="probe-${p.id}"></div>
+    </div>`).join('');
+  $('#provs').querySelectorAll('[data-probe]').forEach(b => b.onclick = async () => {
+    const el = $('#probe-' + b.dataset.probe); el.textContent = '探测中…';
+    try {
+      const r = await api('/api/providers/' + b.dataset.probe + '/probe');
+      el.innerHTML = r.ok ? `<span class="ok">可用</span> · ${esc((r.models||[]).slice(0,12).join(', '))}`
+                          : `<span class="no">不可用</span> · ${esc(r.error)}`;
+    } catch(e){ el.innerHTML = `<span class="no">${esc(e.message)}</span>`; }
   });
 }
 
-async function send(files){
+$('#savedef').onclick = async () => {
+  const [cp, cm] = $('#defchat').value.split('|');
+  const [ep, em] = $('#defembed').value.split('|');
+  $('#setstatus').textContent = '保存中…';
+  try {
+    SETTINGS = await api('/api/settings/defaults', {method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({chat_provider:cp, chat_model:cm, embed_provider:ep, embed_model:em})});
+    // public() 返回结构一致，重新填充
+    SETTINGS = await api('/api/settings');
+    fillModelSelect($('#cmodel'), cp+'|'+cm);
+    $('#setstatus').textContent = '✔ 已保存';
+    health();
+  } catch(e){ $('#setstatus').textContent = '✘ ' + e.message; }
+};
+
+// ---------- 文档 ----------
+async function loadDocs(){
+  const r = await api('/api/docs'); DOCS = r.docs;
+  $('#count').textContent = r.count;
+  $('#sdoc').innerHTML = '<option value="">全部</option>' +
+    DOCS.map(d => `<option value="${d.id}">${esc(d.name)}</option>`).join('');
+  if (!r.count) { $('#list').innerHTML = '<div class="meta" style="color:#6b6560">还没有文档</div>'; return; }
+  const cur = SETTINGS ? joinKey(SETTINGS.default_embed) : '';
+  $('#list').innerHTML = DOCS.slice().reverse().map(d => {
+    const done = d.chunk_count > 0;
+    const stale = done && d.embed_model && cur && d.embed_model !== cur;
+    const cls = d.status === 'error' ? 'err' : stale ? 'err' : done ? '' : 'off';
+    const label = d.status === 'error' ? '失败' : stale ? `需重建(${d.embed_model})` : done ? `${d.chunk_count} 块` : '未索引';
+    return `<div class="doc">
+      <div><div class="name">${esc(d.name)}</div>
+        <div class="meta">${fmt(d.bytes)} · ${esc(d.uploaded_at)} · <span class="pill ${cls}">${esc(label)}</span></div></div>
+      <div class="ops">
+        <button class="mini" data-idx="${d.id}">${done ? '重建' : '建索引'}</button>
+        <button class="ghost" data-del="${d.id}">删除</button>
+      </div></div>`;
+  }).join('');
+  $('#list').querySelectorAll('[data-idx]').forEach(b => b.onclick = () => indexOne(b.dataset.idx, b));
+  $('#list').querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+    if (!confirm('删除该文档及其全部分块？')) return;
+    await api('/api/docs/'+b.dataset.del, {method:'DELETE'}); loadDocs(); health();
+  });
+}
+
+async function indexOne(id, btn){
+  const old = btn.textContent; btn.disabled = true; btn.textContent = '索引中…';
+  $('#status').textContent = '解析 / 切分 / 向量化中，请稍候…';
+  try {
+    const j = await post(`/api/docs/${id}/index`, {});
+    $('#status').textContent = `✔ ${j.name}：${j.chars} 字 → ${j.chunks} 块（${j.embed_model} ${j.dim}维）`;
+  } catch(e){ $('#status').textContent = `✘ ${e.message}`; }
+  btn.disabled = false; btn.textContent = old; loadDocs(); health();
+}
+
+async function sendFiles(files){
   for (const f of files){
     $('#status').textContent = `上传中：${f.name} …`;
     const fd = new FormData(); fd.append('file', f);
     try {
-      const r = await fetch('/api/upload', {method:'POST', body: fd});
-      const j = await r.json();
-      $('#status').textContent = r.ok ? `✔ ${j.doc.name} 已入库` : `✘ ${j.detail || '失败'}`;
-    } catch(e){ $('#status').textContent = `✘ 上传失败：${e.message}`; }
+      const j = await api('/api/upload', {method:'POST', body: fd});
+      $('#status').textContent = `✔ ${j.doc.name} 已上传`;
+      if ($('#autoindex').checked) await indexOne(j.doc.id, document.createElement('button'));
+    } catch(e){ $('#status').textContent = `✘ ${e.message}`; }
   }
-  load();
+  loadDocs(); health();
 }
 
-drop.onclick = () => input.click();
-input.onchange = () => { send(input.files); input.value=''; };
-['dragenter','dragover'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add('over'); }));
-['dragleave','drop'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.remove('over'); }));
-drop.addEventListener('drop', ev => send(ev.dataTransfer.files));
-$('#refresh').onclick = load;
+$('#drop').onclick = () => $('#file').click();
+$('#file').onchange = () => { sendFiles($('#file').files); $('#file').value=''; };
+['dragenter','dragover'].forEach(e => $('#drop').addEventListener(e, ev => { ev.preventDefault(); $('#drop').classList.add('over'); }));
+['dragleave','drop'].forEach(e => $('#drop').addEventListener(e, ev => { ev.preventDefault(); $('#drop').classList.remove('over'); }));
+$('#drop').addEventListener('drop', ev => sendFiles(ev.dataTransfer.files));
+$('#refresh').onclick = () => { loadDocs(); health(); };
 
-health(); load();
+// ---------- 搜索 ----------
+async function doSearch(){
+  const q = $('#sq').value.trim(); if (!q) return;
+  $('#sstatus').textContent = '检索中…';
+  $('#sres').innerHTML = '';
+  try {
+    const j = await post('/api/search', {question:q, mode:$('#smode').value, doc_id:$('#sdoc').value || null});
+    $('#sstatus').textContent = `模式 ${j.mode} · 命中 ${j.sources.length} 段`;
+    $('#sres').innerHTML = j.sources.length ? j.sources.map(s => `
+      <div class="hit">
+        <div class="hd"><b>${esc(s.doc_name)}</b> 第 ${s.seq} 块
+          ${s.score != null ? `<span class="sc">· 相似度 ${s.score}</span>` : ''}
+          ${s.hits != null ? `<span class="sc">· 关键词命中 ${s.hits}</span>` : ''}</div>
+        <div class="body">${esc(s.content)}</div>
+      </div>`).join('') : '<div style="color:#6b6560;font-size:13px">没有命中</div>';
+  } catch(e){ $('#sstatus').textContent = '✘ ' + e.message; }
+}
+$('#sgo').onclick = doSearch;
+$('#sq').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+
+// ---------- 对话 ----------
+async function loadConvs(){
+  const r = await api('/api/conversations');
+  $('#convs').innerHTML = r.count ? r.conversations.map(c => `
+    <div class="conv ${c.id === CONV ? 'on' : ''}" data-c="${c.id}">
+      <span class="t">${esc(c.title)}</span>
+      <span class="d">${c.turns} 条</span>
+    </div>`).join('') : '<div style="color:#6b6560;font-size:13px">还没有会话</div>';
+  $('#convs').querySelectorAll('[data-c]').forEach(el => el.onclick = () => openConv(el.dataset.c));
+}
+
+function renderThread(msgs){
+  $('#thread').innerHTML = msgs.map(m => {
+    const srcs = (m.sources && m.sources.length) ? `<div class="srcs">来源：` +
+      m.sources.map((s,i) => `<div class="src">[${i+1}] <b>${esc(s.doc_name)}</b> 第 ${s.seq} 块 · 相似度 ${s.score}</div>`).join('') +
+      `</div>` : '';
+    const meta = m.role === 'assistant' && m.model ? `<div class="meta">${esc(m.provider||'')} · ${esc(m.model)}</div>` : '';
+    return `<div class="msg ${m.role}">${esc(m.content)}${meta}${srcs}</div>`;
+  }).join('');
+  $('#thread').scrollTop = $('#thread').scrollHeight;
+}
+
+async function openConv(cid){
+  CONV = cid;
+  const r = await api('/api/conversations/' + cid);
+  renderThread(r.messages);
+  loadConvs();
+}
+$('#newconv').onclick = () => { CONV = null; $('#thread').innerHTML = ''; loadConvs(); };
+
+async function sendChat(){
+  const q = $('#cq').value.trim(); if (!q) return;
+  const [p, m] = $('#cmodel').value.split('|');
+  $('#cq').value = '';
+  const cur = $('#thread').innerHTML;
+  $('#thread').innerHTML = cur + `<div class="msg user">${esc(q)}</div>`;
+  $('#thread').scrollTop = $('#thread').scrollHeight;
+  $('#csend').disabled = true;
+  $('#cstatus').textContent = `生成中…（${esc(m)}，本地模型可能需数十秒）`;
+  const t0 = Date.now();
+  try {
+    const j = await post('/api/chat', {question:q, conv_id:CONV, provider:p, model:m});
+    CONV = j.conv_id;
+    await openConv(CONV);
+    $('#cstatus').textContent = `完成 · ${j.model} · ${((Date.now()-t0)/1000).toFixed(1)}s · 召回 ${j.sources.length} 段`;
+  } catch(e){
+    $('#thread').innerHTML += `<div class="msg assistant" style="color:#a33">✘ ${esc(e.message)}</div>`;
+    $('#cstatus').textContent = '';
+  }
+  $('#csend').disabled = false;
+  loadConvs(); health();
+}
+$('#csend').onclick = sendChat;
+$('#cq').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendChat(); });
+
+// ---------- 启动 ----------
+(async () => {
+  await loadSettings();
+  await loadDocs();
+  await loadConvs();
+  health();
+})();
 </script>
 </body>
 </html>

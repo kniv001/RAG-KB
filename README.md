@@ -1,6 +1,7 @@
 # RAG 知识库
 
-个人 RAG 检索知识库 —— 浏览器上传文档 + 交互问答，文档信息存入 PostgreSQL + pgvector。
+个人 RAG 检索知识库 —— 浏览器上传文档、多轮对话、混合检索；
+文档与向量存 PostgreSQL + pgvector，模型本地/云端可切换。
 
 ## 为什么用隧道而不是公网 IP
 
@@ -22,75 +23,122 @@ v6 被 RST；换移动数据同样被拒；本机三层嫌疑——Windows 防�
                                            [FastAPI 应用]
                                                 │
                                     [PostgreSQL 18.6 + pgvector]
+                                                │
+                                    [Ollama 本地 / 云端 API]
 ```
+
+## 架构：分层，每层可单独替换
+
+```
+                      ┌── parse.py     文件 → 纯文本
+索引：main → pipeline ┼── chunk.py     文本 → 分块
+                      ├── embed.py     分块 → 向量
+                      └── store.py     向量 → PostgreSQL
+
+                      ┌── retrieve.py  问题 → 召回（vector / keyword / hybrid）
+问答：main → pipeline ┼── generate.py  提示词 + 调用模型
+      main → chat.py  └── providers.py 传输层（ollama / openai 兼容）
+```
+
+| 想改什么 | 改哪里 |
+|---|---|
+| 切分策略 | `chunk.py` 的 `split()`，保持 `str -> list[str]` |
+| 换 embedding 模型 | 改 `data/settings.json`，**并重建索引**（维度或空间变了） |
+| 接一家新的模型服务 | 改 `data/settings.json`，加一条 `kind: openai` 的 provider，**不用改代码** |
+| 改提示词 / 引用格式 | `generate.py` 的 `SYSTEM` 与 `build_messages()` |
+| 混合检索权重、加 rerank | `retrieve.py` 的 `search()`，签名不变 |
+| 多轮记忆策略 | `chat.py` 的 `history()` |
+| 整条链路换玩法 | `pipeline.py` 的两个函数，路由层不用动 |
+
+## 模型：本地与云端混合，运行时可切
+
+配置在 `data/settings.json`（含 API Key，已 gitignore；模板见 `settings.example.json`）。
+任何 **OpenAI 兼容端点**都能接：DeepSeek / 通义百炼 / Moonshot / 智谱 / 硅基流动 /
+OpenAI / 本地 vLLM / LM Studio。
+
+- **默认模型**在「设置」页切换，落盘到 settings.json
+- **每次请求**也可覆盖：`/api/chat`、`/api/ask` 传 `provider` + `model`
+- 每条助手消息都记录实际使用的 provider/model，可回溯
+
+> 向量模型切换是**重操作**：不同模型的向量空间不可比较。
+> 每个分块都记录了 `embed_model`，检索时按当前模型过滤 —— 切换后旧块自动失效而不是返回垃圾结果，
+> 「文档」页会把这类文档标成"需重建"。
+
+## 检索：三种模式
+
+| 模式 | 说明 |
+|---|---|
+| `vector` | pgvector 余弦检索（HNSW 索引） |
+| `keyword` | 关键词召回（ASCII 词 + 中文二元组，ILIKE 计数打分） |
+| `hybrid` | **默认**，两路召回后用 RRF 融合 |
 
 ## 目录
 
 ```
-app/main.py            FastAPI 应用（上传入库 / 列表 / 删除）
-app/auth.py            HTTP Basic 全站中间件
-app/db.py              PostgreSQL + pgvector 存储层（连接 / 建表 / 健康检查）
-web/index.html         前端页面
-scripts/start.ps1      一键启动：PG + 应用 + 隧道
-scripts/pg.ps1         PostgreSQL 启停（start|stop|status|restart）
-scripts/run.ps1        仅启动应用（前台）
-scripts/tunnel.ps1     仅启动隧道（前台）
-scripts/tunnel_test_direct.ps1   隧道连通性诊断（需管理员）
-bin/                   cloudflared.exe            (gitignore)
-pgsql/                 PostgreSQL 18.6 绿色版     (gitignore)
-pgdata/                数据库数据目录             (gitignore)
-data/                  上传文件 / 凭据 / 日志     (gitignore)
-```
-
-## 数据库
-
-PostgreSQL 18.6（免安装绿色版，解压即用）+ pgvector 0.8.6，**只监听 `127.0.0.1:5432`**。
-
-| 表 | 内容 |
-|---|---|
-| `documents` | 文档元数据：id / 名称 / 大小 / 存储路径 / 状态 / 分块数 |
-| `chunks` | 分块与向量：doc_id / seq / content / `vector(1024)`，带 HNSW 余弦索引 |
-
-凭据文件（均已 gitignore）：`data/pgapp.txt`（应用角色 `ragkb`）、`data/pgpass.txt`（超级用户 `postgres`）。
-
-向量维度由 `KB_EMBED_DIM` 控制（默认 **1024**，对应 bge-m3）；**改动需重建 `chunks` 表**。
-
-```powershell
-.\scripts\pg.ps1 start | stop | status | restart
+app/main.py        路由层（只做 HTTP）
+app/pipeline.py    索引链路 + 无状态问答
+app/chat.py        多轮对话（会话与消息持久化）
+app/parse.py       pdf/docx/md/html/csv/json → 文本
+app/chunk.py       切分
+app/embed.py       向量化门面
+app/store.py       分块与向量持久化、失效检测
+app/retrieve.py    三模式检索
+app/generate.py    提示词与生成
+app/providers.py   模型传输层（ollama / openai 兼容）
+app/settings.py    运行时设置
+app/db.py          PostgreSQL 连接与建表
+web/index.html     前端：对话 / 搜索 / 文档 / 设置
+scripts/           启动与运维脚本
+bin/ pgsql/ pgdata/ data/      均 gitignore
 ```
 
 ## 使用
 
 ```powershell
-.\scripts\start.ps1     # 拉起 PG + 应用 + 隧道，打印公网地址与登录凭据
+.\scripts\start.ps1              # 一键拉起 PG + 应用 + 隧道
+.\scripts\pg.ps1 status          # 数据库启停：start|stop|status|restart
 ```
+
+## 主要接口
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/upload` | 上传文档 |
+| POST | `/api/docs/{id}/index` | 解析→切分→向量化→入库 |
+| POST | `/api/search` | 检索（`mode` / `doc_id` / `top_k`） |
+| POST | `/api/ask` | 无状态问答 |
+| POST | `/api/chat` | 多轮对话（不传 `conv_id` 则新建） |
+| GET | `/api/conversations` `/api/conversations/{id}` | 会话列表 / 明细 |
+| GET/PUT | `/api/settings` `/api/settings/defaults` | 设置 |
+| GET | `/api/providers/{id}/probe` | 探测某提供方可用模型 |
+| GET | `/api/health` | 数据库 + 向量模型自检 + 失效文档 |
 
 ## 认证
 
-全站 HTTP Basic（`app/auth.py` 中间件）。凭据优先级：
-环境变量 `KB_USER` / `KB_PASS` > `data/auth.json`（首次启动自动生成随机密码）。
+全站 HTTP Basic（`app/auth.py`）。凭据：环境变量 `KB_USER`/`KB_PASS` > `data/auth.json`。
 
 > 升级路径：域名解析生效后换 **named tunnel + Cloudflare Access**，
 > 把"共享密码"升级为身份验证 + 边缘拦截。
 
 ## 进度
 
-- [x] **Step 1** 链路验证：Cloudflare 隧道，外网浏览器可达（实测 401/200 符合预期）
+- [x] **Step 1** 链路验证：Cloudflare 隧道，外网浏览器可达
 - [x] **Step 2** 认证层：HTTP Basic 全站保护，经隧道端到端验证
-- [x] **Step 3** 存储：PostgreSQL 18.6 + pgvector 0.8.6，上传 → 入库端到端验证通过
-- [ ] **Step 4** RAG 管线：切分 → 向量化（Ollama bge-m3）→ 检索 → 生成
-- [ ] **Step 5** 固定域名：named tunnel + Cloudflare Access（等域名实名认证通过）
+- [x] **Step 3** 存储：PostgreSQL 18.6 + pgvector 0.8.6
+- [x] **Step 4** RAG 管线：切分 → 向量化 → 三模式检索 → 生成；多轮对话落库
+- [x] **Step 5** 混合模型：本地 Ollama 与 OpenAI 兼容 API 运行时可切
+- [ ] **Step 6** 固定域名：named tunnel + Cloudflare Access（等域名实名通过）
 
 ## 已知事项（踩过的坑）
 
 - **不要把 PostgreSQL 挂在可能被杀掉的 shell 下面。** `pg_ctl start` 启动的 postgres 会继承
-  stdout 句柄，导致 shell 管道永不关闭而挂死；更严重的是，若随后杀掉该 shell 的进程树，会连带
-  干掉 postmaster 的子进程，触发 `0xC0000142`(STATUS_DLL_INIT_FAILED) 崩溃恢复，进而卡在
-  Windows 共享内存预留失败（`error code 487`）的死循环里，所有连接超时。
+  stdout 句柄导致管道挂死；若随后杀掉该进程树，会连带干掉 postmaster 的子进程，触发
+  `0xC0000142` 崩溃恢复，进而卡在 Windows 共享内存预留失败（`error code 487`）死循环。
   `scripts/pg.ps1` 用 `Start-Process` 完全脱离进程树来规避。
-- **pgvector 不是 trusted 扩展**（`vector.control` 无 `trusted = true`），必须由超级用户执行
-  `CREATE EXTENSION vector;`。已在 `ragkb` 库装好。
-- **快速隧道 URL 每次重启都会变**，长期使用必须上 named tunnel。
-- 本机曾有一个 `Meta Tunnel`(wintun) 网卡劫持全部 DNS，并把流量塞进一个承载不了 7844 端口的
+- **pgvector 不是 trusted 扩展**，必须由超级用户执行 `CREATE EXTENSION vector;`。
+- **PowerShell 5.1 的 `Invoke-RestMethod` 会把无 charset 的 JSON 按 Latin-1 解码**，
+  中文显示成乱码。用 `curl.exe` 或显式指定编码读取，数据本身没问题。
+- **快速隧道 URL 每次重启都会变**，长期使用需 named tunnel。
+- 本机曾有一个 `Meta Tunnel`(wintun) 网卡劫持全部 DNS 并把流量塞进一个承载不了 7844 端口的
   代理，导致 Cloudflare 隧道无法建连。该网卡现已不存在。若重启代理客户端后隧道再次连不上，
   在代理规则里给 `cloudflared.exe` 加一条 `DIRECT`。

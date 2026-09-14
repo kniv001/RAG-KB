@@ -1,0 +1,37 @@
+{
+  "_说明": "把本文件复制为 data/settings.json 后填写。data/ 已 gitignore，API Key 不会入库。首次启动也会自动生成一份。",
+  "_新增服务": "任何 OpenAI 兼容端点（DeepSeek / 通义 / Moonshot / 智谱 / 硅基流动 / OpenAI / vLLM / LM Studio）加一条 kind=openai 的 provider 即可，不用改代码。",
+
+  "providers": {
+    "local": {
+      "kind": "ollama",
+      "label": "本地 Ollama",
+      "base": "http://127.0.0.1:11434",
+      "api_key": "",
+      "chat_models": ["qwen3:8b", "qwen3.5:9b", "llama3.1:8b"],
+      "embed_models": ["bge-m3"]
+    },
+    "deepseek": {
+      "kind": "openai",
+      "label": "DeepSeek API",
+      "base": "https://api.deepseek.com/v1",
+      "api_key": "在此填 sk-...",
+      "chat_models": ["deepseek-chat", "deepseek-reasoner"],
+      "embed_models": []
+    },
+    "dashscope": {
+      "_说明": "阿里云百炼（通义千问）示例，按需启用",
+      "kind": "openai",
+      "label": "通义千问 API",
+      "base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "api_key": "",
+      "chat_models": ["qwen-plus", "qwen-max", "qwen-turbo"],
+      "embed_models": ["text-embedding-v3"]
+    }
+  },
+
+  "default_chat": { "provider": "local", "model": "qwen3:8b" },
+  "default_embed": { "provider": "local", "model": "bge-m3" },
+  "embed_dim": 1024,
+  "chat_temperature": 0.2
+}

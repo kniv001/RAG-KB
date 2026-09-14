@@ -2,9 +2,10 @@
 
 连接参数优先级：环境变量 > 仓库内默认值。
   KB_DB_HOST / KB_DB_PORT / KB_DB_NAME / KB_DB_USER / KB_DB_PASSWORD
-  KB_EMBED_DIM  向量维度（默认 1024，对应 bge-m3；改维度需重建表）
 
-凭据文件：data/pgapp.txt（首次配置时生成，已 gitignore）
+向量维度与当前向量模型由 data/settings.json 决定（settings.embed_dim / default_embed）。
+chunks.embed_model 记录每块是用哪个模型生成的 —— 不同模型的向量空间不可比较，
+检索时按当前模型过滤，切换模型后旧块自动失效（需重建索引），避免静默返回垃圾结果。
 """
 
 from __future__ import annotations
@@ -16,8 +17,9 @@ from typing import Any
 import psycopg
 from psycopg.rows import dict_row
 
+from app import settings
+
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_EMBED_DIM = 1024
 
 
 def _password() -> str:
@@ -41,7 +43,7 @@ def conninfo() -> str:
 
 
 def embed_dim() -> int:
-    return int(os.environ.get("KB_EMBED_DIM", DEFAULT_EMBED_DIM))
+    return int(settings.load().get("embed_dim", 1024))
 
 
 def connect() -> psycopg.Connection:
@@ -57,7 +59,8 @@ CREATE TABLE IF NOT EXISTS documents (
     stored_path text NOT NULL,
     uploaded_at timestamptz NOT NULL DEFAULT now(),
     status      text NOT NULL DEFAULT 'stored',
-    chunk_count integer NOT NULL DEFAULT 0
+    chunk_count integer NOT NULL DEFAULT 0,
+    embed_model text NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS chunks (
@@ -66,13 +69,41 @@ CREATE TABLE IF NOT EXISTS chunks (
     seq         integer NOT NULL,
     content     text NOT NULL,
     embedding   vector({dim}),
+    embed_model text NOT NULL DEFAULT '',
     created_at  timestamptz NOT NULL DEFAULT now(),
     UNIQUE (doc_id, seq)
 );
 
-CREATE INDEX IF NOT EXISTS chunks_doc_idx ON chunks (doc_id);
+-- 兼容已存在的库
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS embed_model text NOT NULL DEFAULT '';
+ALTER TABLE chunks    ADD COLUMN IF NOT EXISTS embed_model text NOT NULL DEFAULT '';
+
+CREATE INDEX IF NOT EXISTS chunks_doc_idx   ON chunks (doc_id);
+CREATE INDEX IF NOT EXISTS chunks_model_idx ON chunks (embed_model);
 CREATE INDEX IF NOT EXISTS chunks_embedding_idx
     ON chunks USING hnsw (embedding vector_cosine_ops);
+
+CREATE TABLE IF NOT EXISTS conversations (
+    id         text PRIMARY KEY,
+    title      text NOT NULL DEFAULT '新对话',
+    provider   text,
+    model      text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id         bigserial PRIMARY KEY,
+    conv_id    text NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    role       text NOT NULL,
+    content    text NOT NULL,
+    sources    jsonb,
+    provider   text,
+    model      text,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS messages_conv_idx ON messages (conv_id, id);
 """
 
 
@@ -87,14 +118,14 @@ def health() -> dict[str, Any]:
         with connect() as conn, conn.cursor() as cur:
             cur.execute("SELECT version() AS v, current_database() AS db")
             row = cur.fetchone()
-            cur.execute(
-                "SELECT extversion FROM pg_extension WHERE extname = 'vector'"
-            )
+            cur.execute("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
             ext = cur.fetchone()
             cur.execute("SELECT count(*) AS n FROM documents")
             docs = cur.fetchone()["n"]
             cur.execute("SELECT count(*) AS n FROM chunks")
             chunks = cur.fetchone()["n"]
+            cur.execute("SELECT count(*) AS n FROM conversations")
+            convs = cur.fetchone()["n"]
         return {
             "ok": True,
             "server": str(row["v"]).split(" on ")[0],
@@ -103,6 +134,7 @@ def health() -> dict[str, Any]:
             "embed_dim": embed_dim(),
             "documents": docs,
             "chunks": chunks,
+            "conversations": convs,
         }
     except Exception as exc:  # noqa: BLE001 - 健康检查不应抛
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
