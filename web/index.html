@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAG 知识库</title>
+<style>
+  :root { --bg:#faf9f7; --fg:#1e1c19; --muted:#6b6560; --line:#e2ddd6; --accent:#2f6f4f; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:24px 16px 64px; background:var(--bg); color:var(--fg);
+         font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif; }
+  .wrap { max-width:720px; margin:0 auto; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .sub { color:var(--muted); font-size:13px; margin-bottom:24px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:18px; margin-bottom:16px; }
+  #drop { border:2px dashed var(--line); border-radius:10px; padding:32px 16px; text-align:center;
+          color:var(--muted); cursor:pointer; transition:.15s; }
+  #drop.over { border-color:var(--accent); background:#f2f8f4; color:var(--accent); }
+  input[type=file] { display:none; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:7px;
+           padding:9px 18px; font-size:14px; cursor:pointer; }
+  .doc { display:flex; justify-content:space-between; gap:12px; align-items:center;
+         padding:9px 0; border-bottom:1px solid var(--line); font-size:14px; }
+  .doc:last-child { border-bottom:0; }
+  .doc .meta { color:var(--muted); font-size:12px; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:20px; font-size:11px;
+          background:#eef5f0; color:var(--accent); }
+  .del { color:#a33; cursor:pointer; background:none; border:0; font-size:12px; padding:4px; }
+  #status { font-size:13px; color:var(--muted); min-height:20px; margin-top:10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>RAG 知识库</h1>
+  <div class="sub">Step 1 链路验证 · <span id="health">检测中…</span></div>
+
+  <div class="card">
+    <div id="drop">
+      <div style="font-size:15px;margin-bottom:6px">点击选择文件，或拖拽到这里</div>
+      <div style="font-size:12px">支持 txt / md / pdf / docx / csv / json / html，单个 ≤ 50MB</div>
+    </div>
+    <input type="file" id="file" multiple>
+    <div id="status"></div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <strong style="font-size:14px">已入库文档 <span class="pill" id="count">0</span></strong>
+      <button id="refresh" style="background:none;color:var(--muted);padding:4px 8px">刷新</button>
+    </div>
+    <div id="list"></div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const drop = $('#drop'), input = $('#file');
+
+function fmt(b){ return b < 1024 ? b+' B' : b < 1048576 ? (b/1024).toFixed(1)+' KB' : (b/1048576).toFixed(1)+' MB'; }
+
+async function health(){
+  try {
+    const r = await fetch('/api/health').then(r=>r.json());
+    $('#health').textContent = `服务在线 · ${r.time}`;
+  } catch(e){ $('#health').textContent = '服务离线'; }
+}
+
+async function load(){
+  const r = await fetch('/api/docs').then(r=>r.json());
+  $('#count').textContent = r.count;
+  $('#list').innerHTML = r.count ? r.docs.slice().reverse().map(d =>
+    `<div class="doc">
+       <div><div>${d.name}</div>
+         <div class="meta">${fmt(d.bytes)} · ${d.uploaded_at} · <span class="pill">${d.status}</span></div></div>
+       <button class="del" data-id="${d.id}">删除</button>
+     </div>`).join('') : '<div class="meta">还没有文档</div>';
+  $('#list').querySelectorAll('.del').forEach(b => b.onclick = async () => {
+    await fetch('/api/docs/'+b.dataset.id, {method:'DELETE'}); load();
+  });
+}
+
+async function send(files){
+  for (const f of files){
+    $('#status').textContent = `上传中：${f.name} …`;
+    const fd = new FormData(); fd.append('file', f);
+    try {
+      const r = await fetch('/api/upload', {method:'POST', body: fd});
+      const j = await r.json();
+      $('#status').textContent = r.ok ? `✔ ${j.doc.name} 已入库` : `✘ ${j.detail || '失败'}`;
+    } catch(e){ $('#status').textContent = `✘ 上传失败：${e.message}`; }
+  }
+  load();
+}
+
+drop.onclick = () => input.click();
+input.onchange = () => { send(input.files); input.value=''; };
+['dragenter','dragover'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add('over'); }));
+['dragleave','drop'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', ev => send(ev.dataTransfer.files));
+$('#refresh').onclick = load;
+
+health(); load();
+</script>
+</body>
+</html>

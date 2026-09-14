@@ -1,0 +1,16 @@
+# 环境
+.venv/
+__pycache__/
+*.pyc
+.env
+
+# 运行时数据（文档正文与索引，不入库）
+data/*
+!data/.gitkeep
+
+# 二进制工具
+bin/
+
+# 隧道与日志
+*.log
+.tunnel-url
