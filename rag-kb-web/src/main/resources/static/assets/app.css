@@ -38,6 +38,12 @@
 
 * { box-sizing: border-box; }
 
+/* hidden 属性必须能压过任何 display 声明。
+   不加这条的话，下面 #app{display:flex} 与 .gate{display:grid} 会把
+   UA 样式表的 [hidden]{display:none} 顶掉 —— 元素属性上是 hidden，
+   屏幕上却照样显示。登录成功但遮罩不消失，就是这么来的。 */
+[hidden] { display: none !important; }
+
 html, body {
   height: 100%;
   margin: 0;

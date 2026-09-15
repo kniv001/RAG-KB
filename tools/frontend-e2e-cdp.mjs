@@ -138,8 +138,29 @@ try {
   ok('样式表已加载', assets.css > 0, `${assets.css} 个`);
   ok('模块脚本已挂载', assets.js);
 
-  console.log('\n=== 2. 执行登录（走真实加密）===');
+  console.log('\n=== 2. 登录（走真实加密）===');
   const cred = JSON.parse(fs.readFileSync('D:/vs/rag-kb/data/auth.json.migrated', 'utf8'));
+
+  // 先故意输错一次：登录失败必须看得见报错，而不是静默什么都不发生
+  await cdp.eval(`(() => {
+    document.querySelector('#username').value = ${JSON.stringify(cred.user)};
+    document.querySelector('#password').value = 'definitely-not-the-password';
+    document.querySelector('#loginForm').requestSubmit();
+    return true;
+  })()`);
+  await sleep(2500);
+  const wrong = await cdp.eval(`(() => {
+    const e = document.querySelector('#loginErr');
+    const g = document.querySelector('#gate');
+    return {
+      errShown: !!e && !e.hidden && getComputedStyle(e).display !== 'none',
+      errText: e?.textContent || '',
+      stillOnGate: getComputedStyle(g).display !== 'none',
+    };
+  })()`);
+  ok('密码错误时显示报错', wrong.errShown, wrong.errText.slice(0, 40));
+  ok('  且仍停在登录页', wrong.stillOnGate);
+
   await cdp.eval(`(() => {
     document.querySelector('#username').value = ${JSON.stringify(cred.user)};
     document.querySelector('#password').value = ${JSON.stringify(cred.password)};
@@ -148,17 +169,29 @@ try {
   })()`);
 
   await sleep(3500);
-  const after = await cdp.eval(`({
-    gateHidden: document.querySelector('#gate').hidden,
-    appHidden: document.querySelector('#app').hidden,
-    who: document.querySelector('#whoami').textContent,
-    convs: document.querySelectorAll('#convList .conv').length,
-    err: document.querySelector('#loginErr').hidden ? '' : document.querySelector('#loginErr').textContent
-  })`);
-  ok('登录成功（登录页已隐藏）', after.gateHidden, `错误信息="${after.err}"`);
-  ok('主界面已显示', !after.appHidden);
+  // 必须看计算样式，不能看 element.hidden —— 属性为 true 但 CSS 里
+  // 写了 display 的元素照样显示（[hidden] 只靠 UA 样式表的 display:none 生效）。
+  // 第一版就是查了属性，把「登录成功但遮罩不消失」这个 bug 放过去了。
+  const after = await cdp.eval(`(() => {
+    const vis = (s) => { const e = document.querySelector(s); return !!e && getComputedStyle(e).display !== 'none'; };
+    return {
+      gateVisible: vis('#gate'),
+      appVisible: vis('#app'),
+      who: document.querySelector('#whoami').textContent,
+      convs: document.querySelectorAll('#convList .conv').length,
+      err: document.querySelector('#loginErr').hidden ? '' : document.querySelector('#loginErr').textContent
+    };
+  })()`);
+  ok('登录成功（登录页真的不可见了）', !after.gateVisible, `错误信息="${after.err}"`);
+  ok('主界面真的显示了', after.appVisible);
   ok('用户名已渲染', after.who === cred.user, after.who);
   ok('会话列表已加载', after.convs > 0, `${after.convs} 个会话`);
+
+  // 这一类 bug 的通杀检查：任何带 hidden 属性的元素都不该可见
+  const stuck = await cdp.eval(`[...document.querySelectorAll('[hidden]')]
+    .filter(e => getComputedStyle(e).display !== 'none')
+    .map(e => e.id || e.className || e.tagName)`);
+  ok('带 hidden 属性的元素全部真的隐藏', stuck.length === 0, stuck.join('、'));
 
   console.log('\n=== 3. 发一个问题，验证流式渲染 ===');
   // 措辞每次不同 → 保证回答缓存未命中。命中时后端一次性推完整段，
@@ -213,11 +246,14 @@ try {
   console.log('\n=== 4. 设置抽屉 ===');
   await cdp.eval(`document.querySelector('#openSettings').click()`);
   await sleep(1200);
-  const drawer = await cdp.eval(`({
-    open: !document.querySelector('#settings').hidden,
-    body: (document.querySelector('#setBody')?.textContent || '').length,
-    tabs: document.querySelectorAll('#setTabs button').length
-  })`);
+  const drawer = await cdp.eval(`(() => {
+    const d = document.querySelector('#settings');
+    return {
+      open: !!d && getComputedStyle(d).display !== 'none',
+      body: (document.querySelector('#setBody')?.textContent || '').length,
+      tabs: document.querySelectorAll('#setTabs button').length
+    };
+  })()`);
   ok('抽屉已打开', drawer.open);
   ok('四个页签', drawer.tabs === 4);
   ok('缓存页有内容', drawer.body > 20, `${drawer.body} 字`);
@@ -230,9 +266,10 @@ try {
   }
 
   console.log('\n=== 5. 控制台 ===');
-  // 首次打开时没有 refresh Cookie，boot() 会试一次刷新并拿到 401 ——
-  // 那是正常分支（它在 try/catch 里），不该算报错
-  const expected = /\/api\/auth\/refresh/;
+  // 两类预期内的 401：
+  //   /api/auth/refresh —— 首次打开没有 refresh Cookie，boot() 试一次必得 401
+  //   /api/auth/login   —— 步骤 2 故意输错密码那一次
+  const expected = /\/api\/auth\/(refresh|login)/;
   const noisy = /favicon|DevTools|Autofill/i;
   const realErrors = errors.filter((e) => !noisy.test(e) && !expected.test(e));
   const expectedHits = errors.filter((e) => expected.test(e) && !noisy.test(e));
