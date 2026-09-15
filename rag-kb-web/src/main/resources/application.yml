@@ -44,6 +44,28 @@ spring:
       max-file-size: 50MB
       max-request-size: 50MB
 
+  # 【临时】JWT 双令牌模块落地后删除这一段，改由 users 表 + {bcrypt} 校验。
+  # {noop} 前缀表示明文比对 —— 只因为这是本地开发用的临时账号。
+  # 注意必须加引号：YAML 里 { 是流式映射的起始符，不引会被解析成对象。
+  security:
+    user:
+      name: ${KB_ADMIN_USER:dev}
+      password: '{noop}${KB_ADMIN_PASSWORD:dev-only-change-me}'
+      roles: ADMIN
+
+# ---------------- 端到端加密 ----------------
+# Cloudflare 会终止 TLS，因此能读到经它转发的明文。开启本层后链路上只见密文。
+# 边界：前端 JS 本身也由 CF 分发，所以这层「防偷看」但不「防使坏（替换 JS）」——
+# 完整端到端需要客户端由自己控制（桌面端 / App）。
+ragkb:
+  crypto:
+    enabled: ${KB_CRYPTO_ENABLED:true}
+    key-dir: data/keys
+    rsa-key-size: 3072
+    timestamp-tolerance-seconds: 300
+    nonce-check: true
+    nonce-ttl-seconds: 600
+
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true

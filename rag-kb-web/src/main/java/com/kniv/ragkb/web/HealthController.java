@@ -4,6 +4,8 @@ import com.kniv.ragkb.common.api.R;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -34,6 +36,18 @@ public class HealthController {
         body.put("version", "0.1.0");
         body.put("time", Instant.now().toString());
         return R.ok(body);
+    }
+
+    /**
+     * 回显请求体。用于验证加密链路：服务端能正确回显，说明请求体确实被解开了。
+     * 明文时代它就是个玩具；加密之后它是「体通道通不通」最直接的证据。
+     */
+    @PostMapping("/ping")
+    public R<Map<String, Object>> echo(@RequestBody(required = false) Map<String, Object> body) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("echo", body);
+        out.put("receivedKeys", body == null ? 0 : body.size());
+        return R.ok(out);
     }
 
     @GetMapping("/health")
