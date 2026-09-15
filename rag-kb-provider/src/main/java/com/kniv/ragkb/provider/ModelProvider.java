@@ -49,6 +49,25 @@ public interface ModelProvider {
     void chatStream(String model, List<ChatMessage> messages, double temperature,
                     Consumer<String> onToken);
 
+    /**
+     * 流式对话，并把模型的<b>思考过程</b>一并推出来。
+     *
+     * <p><b>为什么需要它</b>：qwen3 这类混合推理模型在正文之前会先写几千字的推理，
+     * 而推理走的是 {@code thinking} 通道，只看 {@code content} 的话这段被整个丢掉 ——
+     * 实测用户要对着黑屏等 <b>12~46 秒</b>（首个 content 帧的时刻），
+     * 而<b>首个 thinking 帧只要 0.2~2.5 秒</b>。推出去，等待才有内容可看。
+     *
+     * <p>总耗时不变 —— 这是把「黑屏」换成「可见的进度」，不是提速。
+     * 注意 {@code think:false} 对回答路径是净亏（推理会转进正文污染输出，实测过），
+     * 所以只能这样处理。
+     *
+     * <p>默认实现丢弃思考：没有推理通道的提供方行为不变。
+     */
+    default void chatStream(String model, List<ChatMessage> messages, double temperature,
+                            Consumer<String> onToken, Consumer<String> onThinking) {
+        chatStream(model, messages, temperature, onToken);
+    }
+
     /** 批量向量化。返回顺序与入参一致。 */
     List<float[]> embed(String model, List<String> texts);
 

@@ -97,6 +97,15 @@ public class AgenticRagService {
 
     private static final double TEMPERATURE = 0.2;
 
+    /**
+     * 思考片段的合并阈值：攒够这么多字才推一次 SSE。
+     *
+     * <p>逐 token 推会产生几千个事件（实测一段思考 1700~5500 字），而每个事件都要
+     * 单独过一遍 AES-GCM 加密再发出去。思考的用途只是「让用户看到在动」，
+     * 不需要逐字。60 字约合 40 个 token，在这个模型的生成速度下约半秒一批。
+     */
+    private static final int THINKING_FLUSH_CHARS = 60;
+
     private final ProviderRegistry providers;
     private final Retriever retriever;
     private final RagProperties props;
@@ -337,10 +346,27 @@ public class AgenticRagService {
         messages.add(ChatMessage.user(user.toString()));
 
         StringBuilder out = new StringBuilder();
-        providers.chatStream(ref, messages, TEMPERATURE, piece -> {
-            out.append(piece);
-            onEvent.accept(AgentEvent.answerToken(piece));
-        });
+        StringBuilder thinkBuf = new StringBuilder();
+        Consumer<String> onThinking = thinkBuf::append;
+        if (props.getAgent().isStreamThinking()) {
+            // 攒够一批再推，见 THINKING_FLUSH_CHARS
+            onThinking = piece -> {
+                thinkBuf.append(piece);
+                if (thinkBuf.length() >= THINKING_FLUSH_CHARS) {
+                    onEvent.accept(AgentEvent.thinking(thinkBuf.toString()));
+                    thinkBuf.setLength(0);
+                }
+            };
+        }
+        providers.chatStream(ref, messages, TEMPERATURE,
+                piece -> {
+                    out.append(piece);
+                    onEvent.accept(AgentEvent.answerToken(piece));
+                },
+                onThinking);
+        if (thinkBuf.length() > 0) {
+            onEvent.accept(AgentEvent.thinking(thinkBuf.toString()));
+        }
 
         if (out.length() > 0) {
             String sourcesJson;

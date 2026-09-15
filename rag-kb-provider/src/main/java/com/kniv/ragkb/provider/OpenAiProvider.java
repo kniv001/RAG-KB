@@ -55,6 +55,19 @@ public class OpenAiProvider extends AbstractProvider {
     @Override
     public void chatStream(String model, List<ChatMessage> messages, double temperature,
                            java.util.function.Consumer<String> onToken) {
+        chatStream(model, messages, temperature, onToken, t -> { });
+    }
+
+    /**
+     * 同时推 {@code delta.reasoning_content}（推理）与 {@code delta.content}（正文）。
+     *
+     * <p>推理字段是 DeepSeek 系（deepseek-reasoner）的约定，普通模型没有这个字段，
+     * {@code asText("")} 会返回空串，走默认路径不受影响。
+     */
+    @Override
+    public void chatStream(String model, List<ChatMessage> messages, double temperature,
+                           java.util.function.Consumer<String> onToken,
+                           java.util.function.Consumer<String> onThinking) {
         postStream("/chat/completions", chatBody(model, messages, temperature, true), line -> {
             String t = line.strip();
             if (t.isEmpty() || !t.startsWith(SSE_PREFIX)) {
@@ -70,7 +83,12 @@ public class OpenAiProvider extends AbstractProvider {
                     throw new ProviderException(id,
                             "模型报错：" + n.path("error").path("message").asText(payload));
                 }
-                String piece = n.path("choices").path(0).path("delta").path("content").asText("");
+                JsonNode delta = n.path("choices").path(0).path("delta");
+                String think = delta.path("reasoning_content").asText("");
+                if (!think.isEmpty()) {
+                    onThinking.accept(think);
+                }
+                String piece = delta.path("content").asText("");
                 if (!piece.isEmpty()) {
                     onToken.accept(piece);
                 }

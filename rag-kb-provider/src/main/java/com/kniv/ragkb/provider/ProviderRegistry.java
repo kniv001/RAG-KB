@@ -115,6 +115,12 @@ public class ProviderRegistry {
         get(ref.providerId()).chatStream(ref.model(), messages, temperature, onToken);
     }
 
+    /** 流式对话，附带模型的思考片段。见 {@link ModelProvider#chatStream}。 */
+    public void chatStream(Ref ref, List<ChatMessage> messages, double temperature,
+                           Consumer<String> onToken, Consumer<String> onThinking) {
+        get(ref.providerId()).chatStream(ref.model(), messages, temperature, onToken, onThinking);
+    }
+
     public List<float[]> embed(String ref, List<String> texts) {
         Ref r = resolveEmbed(ref);
         return get(r.providerId()).embed(r.model(), texts);

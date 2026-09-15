@@ -76,6 +76,19 @@ public class RagProperties {
          */
         private boolean structuredOutput = true;
 
+        /**
+         * 是否把模型的思考过程流式推给前端（{@code thinking} 事件）。
+         *
+         * <p>回答路径的瓶颈是模型在正文前先写几千字推理 —— 实测首个正文帧要等
+         * <b>12~46 秒</b>，而首个<b>思考</b>帧只要 0.2~2.5 秒。推出去，等待才有内容可看。
+         *
+         * <p>总耗时不变，这是把「黑屏」换成「可见的进度」。注意 {@code think:false}
+         * 对回答路径是净亏（推理会转进正文污染输出），所以只能这样处理。
+         *
+         * <p>前端应当把 thinking 事件折叠展示，绝不能混进正文 —— 它是过程不是结论。
+         */
+        private boolean streamThinking = true;
+
         /** 每轮规划的查询数上限 */
         private int queriesPerRound = 3;
 

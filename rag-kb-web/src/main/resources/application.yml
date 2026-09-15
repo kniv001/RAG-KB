@@ -103,6 +103,9 @@ ragkb:
       # 规划/评估强制结构化输出（关思考 + 语法约束 JSON）—— 实测 plan 51.5s → 0.94s
       # 关掉可回到「模型先想几千 token 再吐 JSON」的旧行为，仅用于对照
       structured-output: true
+      # 把模型的思考过程流式推给前端。首个思考帧只要 0.2~2.5s，而首个正文帧要 12~46s ——
+      # 不推的话用户就是对着黑屏干等。总耗时不变，只是把黑屏换成可见的进度。
+      stream-thinking: true
       queries-per-round: 3
       top-k-per-query: 4
       max-contexts: 12        # 多轮累积的上限，防止把上下文撑爆

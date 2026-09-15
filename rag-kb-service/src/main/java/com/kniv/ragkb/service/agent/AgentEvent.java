@@ -16,6 +16,11 @@ public record AgentEvent(String type, Map<String, Object> data) {
     public static final String RETRIEVE = "retrieve";
     public static final String ASSESS = "assess";
     public static final String ANSWER = "answer";
+    /**
+     * 模型的思考片段。与 {@link #ANSWER} 严格分开 —— 前端应当折叠展示，
+     * 绝不能混进正文：它是过程不是结论，混进去会污染回答。
+     */
+    public static final String THINKING = "thinking";
     public static final String META = "meta";
     public static final String DONE = "done";
     public static final String ERROR = "error";
@@ -42,5 +47,10 @@ public record AgentEvent(String type, Map<String, Object> data) {
 
     public static AgentEvent answerToken(String text) {
         return of(ANSWER, "t", text);
+    }
+
+    /** @param text 一批思考片段（调用方已按块合并，不是逐 token） */
+    public static AgentEvent thinking(String text) {
+        return of(THINKING, "t", text);
     }
 }

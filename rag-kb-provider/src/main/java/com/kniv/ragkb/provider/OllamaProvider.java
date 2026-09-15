@@ -71,6 +71,19 @@ public class OllamaProvider extends AbstractProvider {
     @Override
     public void chatStream(String model, List<ChatMessage> messages, double temperature,
                            java.util.function.Consumer<String> onToken) {
+        chatStream(model, messages, temperature, onToken, t -> { });
+    }
+
+    /**
+     * 同时推 {@code message.thinking} 与 {@code message.content}。
+     *
+     * <p>Ollama 把推理和正文拆成两个字段，且推理在前。只读 content 就会把
+     * 开头那 12~46 秒的等待整个吞掉。
+     */
+    @Override
+    public void chatStream(String model, List<ChatMessage> messages, double temperature,
+                           java.util.function.Consumer<String> onToken,
+                           java.util.function.Consumer<String> onThinking) {
         ObjectNode body = chatBody(model, messages, temperature, true);
         postStream("/api/chat", body, line -> {
             String t = line.strip();
@@ -81,6 +94,10 @@ public class OllamaProvider extends AbstractProvider {
                 JsonNode n = mapper.readTree(t);
                 if (n.path("error").isTextual()) {
                     throw new ProviderException(id, "模型报错：" + n.path("error").asText());
+                }
+                String think = n.path("message").path("thinking").asText("");
+                if (!think.isEmpty()) {
+                    onThinking.accept(think);
                 }
                 String piece = n.path("message").path("content").asText("");
                 if (!piece.isEmpty()) {
