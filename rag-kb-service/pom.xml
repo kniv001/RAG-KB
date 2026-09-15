@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.kniv.ragkb</groupId>
+        <artifactId>rag-kb-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>rag-kb-service</artifactId>
+    <name>rag-kb-service</name>
+    <description>业务层：RAG 管线（解析/切分/向量化/检索/生成）、会话、三层缓存、异步任务</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.kniv.ragkb</groupId>
+            <artifactId>rag-kb-dao</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.kniv.ragkb</groupId>
+            <artifactId>rag-kb-security</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.kniv.ragkb</groupId>
+            <artifactId>rag-kb-provider</artifactId>
+        </dependency>
+
+        <!-- 文档解析：PDF / DOCX -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>3.0.5</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>5.4.1</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+    </dependencies>
+</project>

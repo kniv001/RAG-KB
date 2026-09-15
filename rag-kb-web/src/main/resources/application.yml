@@ -1,0 +1,74 @@
+server:
+  port: 8080
+  shutdown: graceful
+  # 只监听本机 —— 对外一律经 Cloudflare 隧道，不开任何入站端口
+  address: 127.0.0.1
+  tomcat:
+    threads:
+      max: 50
+      min-spare: 5
+
+spring:
+  application:
+    name: rag-kb
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+
+  datasource:
+    url: jdbc:postgresql://127.0.0.1:5432/ragkb
+    username: ${KB_DB_USER:ragkb}
+    # 密码不进仓库：启动脚本从 data/pgapp.txt 读出后作为环境变量注入
+    password: ${KB_DB_PASSWORD:}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 5000
+      pool-name: ragkb-pool
+
+  data:
+    redis:
+      host: ${KB_REDIS_HOST:127.0.0.1}
+      port: ${KB_REDIS_PORT:6379}
+      password: ${KB_REDIS_PASSWORD:}
+      database: 0
+      timeout: 5s
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 4
+          min-idle: 1
+
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    # 开发期打印 SQL，上线前改成 NoLoggingImpl
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    banner: false
+    db-config:
+      id-type: input
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    root: INFO
+    com.kniv.ragkb: DEBUG
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n"

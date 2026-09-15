@@ -1,0 +1,22 @@
+# Maven
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+
+# 运行时数据（凭据、上传文档、日志）
+data/
+
+# 日志
+*.log
+
+# 系统
+.DS_Store
+Thumbs.db

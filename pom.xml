@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.5.16</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.kniv.ragkb</groupId>
+    <artifactId>rag-kb-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <name>rag-kb-parent</name>
+    <description>个人 RAG 知识库 —— Java 版（Spring Boot 3 + MyBatis-Plus + Redis）</description>
+
+    <!--
+      模块依赖方向（单向，不允许回环）：
+        common  ← 所有模块
+        domain  ← common
+        dao     ← domain
+        security← domain
+        provider← common
+        service ← dao + security + provider
+        web     ← service（唯一带 spring-boot-maven-plugin 的模块）
+    -->
+    <modules>
+        <module>rag-kb-common</module>
+        <module>rag-kb-domain</module>
+        <module>rag-kb-dao</module>
+        <module>rag-kb-security</module>
+        <module>rag-kb-provider</module>
+        <module>rag-kb-service</module>
+        <module>rag-kb-web</module>
+    </modules>
+
+    <properties>
+        <java.version>21</java.version>
+        <maven.compiler.release>21</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
+        <mybatis-plus.version>3.5.17</mybatis-plus.version>
+        <jjwt.version>0.13.0</jjwt.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- ===== 内部模块 ===== -->
+            <dependency>
+                <groupId>com.kniv.ragkb</groupId>
+                <artifactId>rag-kb-common</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.kniv.ragkb</groupId>
+                <artifactId>rag-kb-domain</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.kniv.ragkb</groupId>
+                <artifactId>rag-kb-dao</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.kniv.ragkb</groupId>
+                <artifactId>rag-kb-security</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.kniv.ragkb</groupId>
+                <artifactId>rag-kb-provider</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.kniv.ragkb</groupId>
+                <artifactId>rag-kb-service</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <!-- ===== 三方 ===== -->
+            <dependency>
+                <groupId>com.baomidou</groupId>
+                <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+                <version>${mybatis-plus.version}</version>
+            </dependency>
+            <!-- 只带注解，供 domain 模块标注实体，不引入自动配置与数据源 -->
+            <dependency>
+                <groupId>com.baomidou</groupId>
+                <artifactId>mybatis-plus-annotation</artifactId>
+                <version>${mybatis-plus.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>io.jsonwebtoken</groupId>
+                <artifactId>jjwt-api</artifactId>
+                <version>${jjwt.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.jsonwebtoken</groupId>
+                <artifactId>jjwt-impl</artifactId>
+                <version>${jjwt.version}</version>
+                <scope>runtime</scope>
+            </dependency>
+            <dependency>
+                <groupId>io.jsonwebtoken</groupId>
+                <artifactId>jjwt-jackson</artifactId>
+                <version>${jjwt.version}</version>
+                <scope>runtime</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-maven-plugin</artifactId>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
+</project>
