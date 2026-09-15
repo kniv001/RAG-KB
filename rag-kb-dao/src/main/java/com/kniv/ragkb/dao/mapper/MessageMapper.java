@@ -5,6 +5,7 @@ import com.kniv.ragkb.domain.entity.Message;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 import java.util.List;
 
@@ -33,4 +34,75 @@ public interface MessageMapper extends BaseMapper<Message> {
 
     @Select("SELECT count(*) FROM messages WHERE conv_id = #{convId}")
     int countByConversation(@Param("convId") String convId);
+
+    // ---------------- 历史索引 ----------------
+
+    /**
+     * 取还没向量化的消息，用于增量索引。
+     *
+     * <p>只索引增量而不是每次重算整个会话：向量化是这条链上最贵的一步，
+     * 而历史只会追加、不会改写。
+     */
+    @Select("""
+            SELECT id, conv_id, role, content FROM messages
+            WHERE conv_id = #{convId} AND embedding IS NULL AND content <> ''
+            ORDER BY id LIMIT #{limit}
+            """)
+    List<Message> pendingIndex(@Param("convId") String convId, @Param("limit") int limit);
+
+    @Update("UPDATE messages SET embedding = #{vec}::vector, embed_model = #{model} WHERE id = #{id}")
+    int setEmbedding(@Param("id") long id, @Param("vec") String vectorLiteral,
+                     @Param("model") String embedModel);
+
+    /**
+     * 在本会话内做向量召回。
+     *
+     * <p>与 {@code chunks} 的检索刻意分开：那是全局知识库，这是单个会话的历史，
+     * 混在一起会让「上次我们聊到哪」被无关文档淹没。
+     *
+     * <p>{@code embed_model} 过滤不能省：不同向量模型的输出不在同一空间，
+     * 混着查会静默返回垃圾结果，而且从结果上完全看不出来。
+     *
+     * <p><b>{@code <=>} 必须写成字面量，不能写成 {@code &lt;=&gt;}。</b>
+     * XML 实体只在 {@code <script>} 块里才被解码 —— ChunkMapper 的同类查询有
+     * {@code <script>}（因为它要用 {@code <if>}），所以那边写转义是对的；
+     * 照抄到没有 script 的注解上，转义符会原样发给数据库，直接语法错。
+     */
+    @Select("""
+            SELECT id, conv_id, role, content,
+                   (embedding <=> #{q}::vector) AS distance
+            FROM messages
+            WHERE conv_id = #{convId}
+              AND embedding IS NOT NULL
+              AND embed_model = #{model}
+            ORDER BY embedding <=> #{q}::vector
+            LIMIT #{limit}
+            """)
+    List<Message> searchByVector(@Param("convId") String convId,
+                                 @Param("q") String vectorLiteral,
+                                 @Param("model") String embedModel,
+                                 @Param("limit") int limit);
+
+    /**
+     * 把命中的消息连同它前后各一条一起取出来。
+     *
+     * <p>一轮对话由相邻的两条（用户提问 + 助手回答）组成。只返回命中的那一条，
+     * 模型会看到一段没有来由的回答；带上邻居才是一段能读懂的历史片段。
+     * 多带一条的代价可以忽略，而少了它整段就没用。
+     */
+    @Select("""
+            <script>
+            SELECT id, conv_id, role, content FROM messages
+            WHERE conv_id = #{convId} AND id IN (
+                SELECT unnest(#{ids}::bigint[])
+                UNION SELECT unnest(#{ids}::bigint[]) - 1
+                UNION SELECT unnest(#{ids}::bigint[]) + 1
+            )
+            ORDER BY id
+            </script>
+            """)
+    List<Message> withNeighbors(@Param("convId") String convId, @Param("ids") Long[] ids);
+
+    @Select("SELECT count(*) FROM messages WHERE conv_id = #{convId} AND embedding IS NOT NULL")
+    int countIndexed(@Param("convId") String convId);
 }

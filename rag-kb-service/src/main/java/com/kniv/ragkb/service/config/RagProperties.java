@@ -32,6 +32,35 @@ public class RagProperties {
 
     private Agent agent = new Agent();
 
+    private History history = new History();
+
+    /**
+     * 会话历史索引 —— 超出最近窗口的旧轮次不再整段丢弃，而是向量化后按需召回。
+     *
+     * <p>注意它是<b>增量</b>：窗口内的近轮次仍是原文全文，不受检索质量影响。
+     * 只有超出窗口的部分才依赖召回，所以最坏情况是「退回到改造前的行为」，
+     * 而不是「丢掉了本来有的东西」。
+     */
+    @Data
+    public static class History {
+
+        private boolean enabled = true;
+
+        /** 每次召回多少条旧消息（邻接的上下文会额外带上，不计入这个数） */
+        private int topK = 4;
+
+        /**
+         * 注入提示词的历史片段字符上限。
+         *
+         * <p>窗口总共 10240 token，其中知识库资料最多可占 12 块 × 600 字 ≈ 5400 token。
+         * 1200 字约合 900 token，是能在不挤掉资料的前提下给出有效召回的量。
+         */
+        private int excerptChars = 1200;
+
+        /** 单次补索引的消息条数上限：老会话首次触发时不能一次全量向量化把请求卡住 */
+        private int indexBatch = 64;
+    }
+
     /** Agentic RAG 参数 */
     @Data
     public static class Agent {

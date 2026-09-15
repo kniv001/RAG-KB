@@ -61,6 +61,17 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE INDEX IF NOT EXISTS messages_conv_idx ON messages (conv_id, id);
 
+-- 历史索引：旧轮次不再整段丢弃，而是向量化后按需召回。
+--
+-- 为什么值得：KV 缓存每 token 约 147KB，而向量每 600 token 只要 4KB —— 差约 2.2 万倍。
+-- 100 轮对话全量进上下文要 6.2GB 显存（8GB 卡物理上不可能），而索引只要 0.3MB。
+-- 真正省下的是「没被召回的那绝大部分」：召回回来的那几轮照样付全额的 KV。
+--
+-- 刻意不给 embedding 建 HNSW 索引：检索永远带 conv_id 过滤，单个会话至多几百条，
+-- messages_conv_idx 上的顺序扫描是微秒级；HNSW 在这种规模反而更慢且要维护。
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS embedding   vector(1024);
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS embed_model text NOT NULL DEFAULT '';
+
 CREATE TABLE IF NOT EXISTS index_tasks (
     id         text PRIMARY KEY,
     doc_id     text NOT NULL,

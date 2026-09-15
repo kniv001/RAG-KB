@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.kniv.ragkb.domain.handler.JsonbTypeHandler;
+import com.kniv.ragkb.domain.handler.VectorTypeHandler;
 import lombok.Data;
 
 import java.time.OffsetDateTime;
@@ -41,6 +42,23 @@ public class Message {
     private String provider;
 
     private String model;
+
+    /**
+     * 历史索引用的向量（vector(1024)），为空表示这条还没索引。
+     *
+     * <p>用途与 {@code chunks.embedding} 不同：chunks 是知识库文档的分块，检索范围是全局；
+     * 这里是<b>对话历史</b>，检索范围限定在本会话内。旧轮次不再因为超出
+     * {@code HISTORY_LIMIT} 就被整段丢弃，而是可以被召回。
+     *
+     * <p>必须带 VectorTypeHandler 且类上标 {@code autoResultMap = true} ——
+     * 缺任一个，驱动会按 varchar 发送，写入 vector 列直接报类型错
+     * （chunks 表上已经踩过同款）。
+     */
+    @com.baomidou.mybatisplus.annotation.TableField(typeHandler = VectorTypeHandler.class)
+    private float[] embedding;
+
+    /** 生成该向量时用的模型标识，形如 local:bge-m3。不同模型的向量不在同一空间，混查会静默返回垃圾 */
+    private String embedModel;
 
     private OffsetDateTime createdAt;
 }

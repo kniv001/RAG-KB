@@ -15,9 +15,11 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -38,6 +40,7 @@ public class ChatService {
     private final ConversationMapper conversations;
     private final MessageMapper messages;
     private final AgenticRagService rag;
+    private final HistoryIndexService historyIndex;
     private final ObjectMapper mapper;
 
     public record Outcome(String convId, String answer, List<ChunkHit> sources,
@@ -58,6 +61,7 @@ public class ChatService {
 
         Conversation conv;
         List<ChatMessage> history;
+        String excerpt = null;
         if (convId == null || convId.isBlank()) {
             conv = create(question, model);
             history = List.of();
@@ -66,7 +70,11 @@ public class ChatService {
             if (conv == null) {
                 throw new IllegalArgumentException("会话不存在：" + convId);
             }
-            history = recentHistory(convId);
+            List<Message> recent = recentMessages(convId);
+            history = toChatMessages(recent);
+            // 超出最近窗口的旧轮次：不再是整段丢弃，而是向量召回。
+            // 排除窗口内那些 —— 它们已经在提示词里了，再召回一遍是纯浪费。
+            excerpt = historyIndex.retrieve(convId, question, idsOf(recent)).text();
         }
 
         // 先把 convId 推给前端：否则第一轮回答完才知道会话 id，追问会断链
@@ -80,13 +88,17 @@ public class ChatService {
 
         AgenticRagService.AgentResult result =
                 "classic".equalsIgnoreCase(strategy)
-                        ? rag.classic(question, model, retrieval, docId, history, sink)
-                        : rag.agentic(question, model, retrieval, docId, history, sink);
+                        ? rag.classic(question, model, retrieval, docId, history, excerpt, sink)
+                        : rag.agentic(question, model, retrieval, docId, history, excerpt, sink);
 
         append(conv.getId(), "user", question, null, null, null);
         append(conv.getId(), "assistant", result.answer(),
                 toSourcesJson(result.sources()), conv.getProvider(), conv.getModel());
         conversations.touch(conv.getId(), conv.getProvider(), conv.getModel());
+
+        // 把刚写入的两条补上向量，供后续轮次召回。放在回答之后，用户已经拿到结果了；
+        // 内部吞掉异常 —— 索引只是锦上添花，不能让它把一次成功的问答变成失败
+        historyIndex.indexPending(conv.getId());
 
         return new Outcome(conv.getId(), result.answer(), result.sources(),
                 result.rounds(), result.queries());
@@ -122,8 +134,17 @@ public class ChatService {
 
     /** 供模型看的历史（时间正序，只含 role/content）。 */
     public List<ChatMessage> recentHistory(String convId) {
+        return toChatMessages(recentMessages(convId));
+    }
+
+    /** 最近窗口的原始消息（时间正序）。带 id，供历史召回排除用。 */
+    private List<Message> recentMessages(String convId) {
         List<Message> recent = messages.recentForContext(convId, HISTORY_LIMIT);
         Collections.reverse(recent);   // 查询是倒序取的
+        return recent;
+    }
+
+    private List<ChatMessage> toChatMessages(List<Message> recent) {
         List<ChatMessage> out = new ArrayList<>(recent.size());
         for (Message m : recent) {
             if (m.getContent() != null && !m.getContent().isBlank()) {
@@ -131,6 +152,16 @@ public class ChatService {
             }
         }
         return out;
+    }
+
+    private Set<Long> idsOf(List<Message> msgs) {
+        Set<Long> ids = new HashSet<>(msgs.size() * 2);
+        for (Message m : msgs) {
+            if (m.getId() != null) {
+                ids.add(m.getId());
+            }
+        }
+        return ids;
     }
 
     private void append(String convId, String role, String content,
