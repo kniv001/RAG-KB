@@ -73,6 +73,12 @@ ragkb:
     refresh-cookie-name: kb_refresh
     refresh-cookie-path: /api/auth     # 限定路径，减少 Cookie 暴露面
 
+  # ---------------- 存储 ----------------
+  storage:
+    root: .                  # 相对启动目录；documents.stored_path 存的就是相对它的路径
+    uploads-dir: data/uploads
+    max-upload-mb: 50
+
   # ---------------- 切分 ----------------
   # 与 Python 版保持一致：两套系统共用一个库，切分口径不同会导致同一篇文档
   # 在两边的检索结果对不上。

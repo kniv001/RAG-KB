@@ -2,9 +2,11 @@ package com.kniv.ragkb.service.agent;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kniv.ragkb.domain.dto.CachedAnswer;
 import com.kniv.ragkb.domain.dto.ChunkHit;
 import com.kniv.ragkb.provider.ProviderRegistry;
 import com.kniv.ragkb.provider.model.ChatMessage;
+import com.kniv.ragkb.service.cache.CacheService;
 import com.kniv.ragkb.service.config.RagProperties;
 import com.kniv.ragkb.service.retrieve.Retriever;
 import lombok.RequiredArgsConstructor;
@@ -82,10 +84,13 @@ public class AgenticRagService {
             3. 用中文回答，简洁准确；涉及要点时用条目列出。
             4. 引用了某段资料的地方，用 [编号] 标注来源。""";
 
+    private static final double TEMPERATURE = 0.2;
+
     private final ProviderRegistry providers;
     private final Retriever retriever;
     private final RagProperties props;
     private final ObjectMapper mapper;
+    private final CacheService cache;
 
     /** 一次问答的产物。queries 记录实际检索过哪些查询，便于事后复盘检索质量。 */
     public record AgentResult(String answer, List<ChunkHit> sources, int rounds, List<String> queries) {
@@ -95,6 +100,15 @@ public class AgenticRagService {
 
     public AgentResult agentic(String question, String modelRef, String mode, String docId,
                                Consumer<AgentEvent> onEvent) {
+        return agentic(question, modelRef, mode, docId, List.of(), onEvent);
+    }
+
+    /**
+     * @param history 最近若干轮对话（时间正序）。规划与回答都会用到 ——
+     *                没有它，「那它呢」这类追问无法解析指代，检索会跑偏。
+     */
+    public AgentResult agentic(String question, String modelRef, String mode, String docId,
+                               List<ChatMessage> history, Consumer<AgentEvent> onEvent) {
         RagProperties.Agent cfg = props.getAgent();
         ProviderRegistry.Ref ref = providers.resolveChat(modelRef);
         // 规划与评估走小模型（若已配置）：这两步只需输出 JSON，却占了大部分耗时
@@ -102,7 +116,7 @@ public class AgenticRagService {
 
         Map<Long, ChunkHit> collected = new LinkedHashMap<>();
         List<String> tried = new ArrayList<>();
-        List<String> queries = plan(utility, question, null, null);
+        List<String> queries = plan(utility, question, null, null, history);
 
         int round = 0;
         boolean enough = false;
@@ -131,14 +145,14 @@ public class AgenticRagService {
             }
 
             // ④ 不够 → 换查询再来一轮
-            queries = plan(utility, question, assess.missing, tried);
+            queries = plan(utility, question, assess.missing, tried, history);
             if (queries.isEmpty()) {
                 break;
             }
         }
 
         List<ChunkHit> contexts = rank(collected.values());
-        String answer = answer(ref, question, contexts, onEvent);
+        String answer = answer(ref, question, contexts, history, onEvent);
         return new AgentResult(answer, contexts, round, tried);
     }
 
@@ -146,10 +160,15 @@ public class AgenticRagService {
 
     public AgentResult classic(String question, String modelRef, String mode, String docId,
                                Consumer<AgentEvent> onEvent) {
+        return classic(question, modelRef, mode, docId, List.of(), onEvent);
+    }
+
+    public AgentResult classic(String question, String modelRef, String mode, String docId,
+                               List<ChatMessage> history, Consumer<AgentEvent> onEvent) {
         ProviderRegistry.Ref ref = providers.resolveChat(modelRef);
         List<ChunkHit> hits = retriever.search(question, mode, docId, null);
         onEvent.accept(AgentEvent.retrieve(1, question, hits.size(), sourceNames(hits)));
-        String answer = answer(ref, question, hits, onEvent);
+        String answer = answer(ref, question, hits, history, onEvent);
         return new AgentResult(answer, hits, 1, List.of(question));
     }
 
@@ -169,8 +188,20 @@ public class AgenticRagService {
         }
     }
 
-    private List<String> plan(ProviderRegistry.Ref ref, String question, String missing, List<String> tried) {
-        StringBuilder user = new StringBuilder("用户问题：").append(question);
+    private List<String> plan(ProviderRegistry.Ref ref, String question, String missing,
+                              List<String> tried, List<ChatMessage> history) {
+        StringBuilder user = new StringBuilder();
+        // 把最近的对话带上：没有它，「那它呢」「上面说的第二点」这类追问
+        // 会被当成独立问题去检索，结果必然跑偏
+        if (history != null && !history.isEmpty()) {
+            user.append("最近的对话：\n");
+            for (ChatMessage m : history) {
+                user.append("assistant".equals(m.role()) ? "助手：" : "用户：")
+                        .append(clip(m.content(), 200)).append('\n');
+            }
+            user.append('\n');
+        }
+        user.append("用户问题：").append(question);
         if (missing != null && !missing.isBlank()) {
             user.append("\n\n上一轮检索后仍缺少：").append(missing);
         }
@@ -229,8 +260,8 @@ public class AgenticRagService {
         return new Assess(true, "评估不可用，默认按资料充分处理", "");
     }
 
-    private String answer(ProviderRegistry.Ref ref, String question,
-                          List<ChunkHit> contexts, Consumer<AgentEvent> onEvent) {
+    private String answer(ProviderRegistry.Ref ref, String question, List<ChunkHit> contexts,
+                          List<ChatMessage> history, Consumer<AgentEvent> onEvent) {
         if (contexts.isEmpty()) {
             String fallback = "资料中没有相关内容。";
             onEvent.accept(AgentEvent.answerToken(fallback));
@@ -246,14 +277,68 @@ public class AgenticRagService {
         }
         user.append("【问题】\n").append(question);
 
+        // ---- 回答缓存 ----
+        // 键里含「上下文哈希」与「历史哈希」：资料改了或对话历史变了，键就变，
+        // 因此永远不存在返回陈旧答案的窗口。这也是清空缓存只影响空间、不影响正确性的原因。
+        List<String> contents = new ArrayList<>(contexts.size());
+        for (ChunkHit h : contexts) {
+            contents.add(h.getContent());
+        }
+        List<String> historyLines = new ArrayList<>();
+        if (history != null) {
+            for (ChatMessage m : history) {
+                historyLines.add(m.role() + ":" + m.content());
+            }
+        }
+        String cacheKey = CacheService.answerKey(question,
+                CacheService.contextHash(contents), CacheService.historyHash(historyLines),
+                ref.providerId(), ref.model(), TEMPERATURE);
+
+        CachedAnswer hit = cache.getAnswer(cacheKey);
+        if (hit != null && hit.getAnswer() != null && !hit.getAnswer().isBlank()) {
+            log.info("回答缓存命中，跳过生成（{} 字）", hit.getAnswer().length());
+            // 缓存命中时一次性推出整段：客户端渲染是瞬时的，
+            // 再逐字模拟反而增加无谓往返
+            onEvent.accept(AgentEvent.answerToken(hit.getAnswer()));
+            return hit.getAnswer();
+        }
+
+        List<ChatMessage> messages = new ArrayList<>();
+        messages.add(ChatMessage.system(ANSWER_SYSTEM));
+        // 历史放在资料之前：事实依据仍来自资料，历史只用来理解指代
+        if (history != null) {
+            messages.addAll(history);
+        }
+        messages.add(ChatMessage.user(user.toString()));
+
         StringBuilder out = new StringBuilder();
-        providers.chatStream(ref,
-                List.of(ChatMessage.system(ANSWER_SYSTEM), ChatMessage.user(user.toString())),
-                0.2, piece -> {
-                    out.append(piece);
-                    onEvent.accept(AgentEvent.answerToken(piece));
-                });
+        providers.chatStream(ref, messages, TEMPERATURE, piece -> {
+            out.append(piece);
+            onEvent.accept(AgentEvent.answerToken(piece));
+        });
+
+        if (out.length() > 0) {
+            String sourcesJson;
+            try {
+                sourcesJson = mapper.writeValueAsString(
+                        contexts.stream().map(this::sourceOf).toList());
+            } catch (Exception e) {
+                sourcesJson = "[]";
+            }
+            cache.putAnswer(cacheKey, question, out.toString(),
+                    ref.providerId(), ref.model(), sourcesJson);
+        }
         return out.toString();
+    }
+
+    private Map<String, Object> sourceOf(ChunkHit h) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("docId", h.getDocId());
+        m.put("docName", h.getDocName());
+        m.put("seq", h.getSeq());
+        m.put("distance", h.getDistance());
+        m.put("score", h.getScore());
+        return m;
     }
 
     // ---------------- 工具方法 ----------------

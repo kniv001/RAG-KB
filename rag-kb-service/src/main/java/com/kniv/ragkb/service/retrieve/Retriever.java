@@ -3,9 +3,8 @@ package com.kniv.ragkb.service.retrieve;
 import com.kniv.ragkb.dao.mapper.ChunkMapper;
 import com.kniv.ragkb.domain.dto.ChunkHit;
 import com.kniv.ragkb.domain.handler.VectorTypeHandler;
-import com.kniv.ragkb.provider.ProviderProperties;
-import com.kniv.ragkb.provider.ProviderRegistry;
 import com.kniv.ragkb.service.config.RagProperties;
+import com.kniv.ragkb.service.index.EmbeddingService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -42,8 +41,7 @@ public class Retriever {
     private static final int RRF_K = 60;
 
     private final ChunkMapper chunkMapper;
-    private final ProviderRegistry providers;
-    private final ProviderProperties providerProps;
+    private final EmbeddingService embedding;
     private final RagProperties props;
 
     /** 检索入口。mode 为空则用默认；docId 为空则全库。 */
@@ -96,20 +94,14 @@ public class Retriever {
         return out;
     }
 
+    /** 查询向量也走缓存：同一个问题重复提问时省掉一次模型往返 */
     private float[] embedOne(String text) {
-        List<float[]> vectors = providers.embed(providerProps.getDefaultEmbed(), List.of(text));
-        if (vectors.isEmpty() || vectors.get(0).length == 0) {
-            throw new IllegalStateException("向量化返回为空，检查 embedding 提供方是否可用");
-        }
-        return vectors.get(0);
+        return embedding.embedOne(text);
     }
 
-    /**
-     * chunks.embed_model 列的存法跟着 Python 版走：形如 {@code local:bge-m3}（冒号分隔），
-     * 而模型引用是 {@code local/bge-m3}（斜杠，因为模型名本身含冒号）。这里做转换。
-     */
+    /** chunks.embed_model 列的存法：形如 {@code local:bge-m3}，由 EmbeddingService 统一给出 */
     private String embedModelRef() {
-        return providerProps.getDefaultEmbed().replace('/', ':');
+        return embedding.modelColumn();
     }
 
     // ---------------- 融合 ----------------
