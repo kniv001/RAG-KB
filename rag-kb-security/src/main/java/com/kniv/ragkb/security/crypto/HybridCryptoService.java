@@ -10,6 +10,7 @@ import javax.crypto.spec.OAEPParameterSpec;
 import javax.crypto.spec.PSource;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
 import java.security.PublicKey;
 import java.security.SecureRandom;
 import java.security.spec.MGF1ParameterSpec;
@@ -91,6 +92,25 @@ public class HybridCryptoService {
     }
 
     /** 用同一把密钥加密响应，<b>换一个全新 IV</b>（GCM 下复用 IV 会直接泄露明文异或关系）。 */
+    /**
+     * 造一个用于流式解密的 Cipher。
+     *
+     * <p>为什么不让调用方直接用 {@code CipherInputStream}：那个类在 AEAD 上有个
+     * 历史坑（JDK-8012631）—— 认证标签校验失败时它可能把异常吞掉、静默截断，
+     * 于是「解出来一半的文件」被当成成功。这里让调用方自己做 update/doFinal 循环，
+     * 标签不对会在 {@code doFinal} 上明确抛出。
+     */
+    public Cipher decryptCipher(byte[] aesKey, String ivBase64) {
+        try {
+            Cipher c = Cipher.getInstance(AES_TRANSFORM);
+            c.init(Cipher.DECRYPT_MODE, new SecretKeySpec(aesKey, AES_ALG),
+                    new GCMParameterSpec(GCM_TAG_BITS, b64(ivBase64)));
+            return c;
+        } catch (GeneralSecurityException e) {
+            throw new CryptoException("无法建立解密器：" + e.getMessage(), e);
+        }
+    }
+
     public Envelope encryptBody(byte[] aesKey, String plaintext) {
         byte[] iv = new byte[GCM_IV_LEN];
         random.nextBytes(iv);

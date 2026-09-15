@@ -5,6 +5,8 @@ import com.kniv.ragkb.dao.mapper.ChunkMapper;
 import com.kniv.ragkb.dao.mapper.DocumentMapper;
 import com.kniv.ragkb.domain.entity.Document;
 import com.kniv.ragkb.domain.entity.IndexTask;
+import com.kniv.ragkb.security.crypto.EncryptedApiFilter;
+import com.kniv.ragkb.security.crypto.HybridCryptoService;
 import com.kniv.ragkb.service.config.StorageProperties;
 import com.kniv.ragkb.service.index.IndexService;
 import com.kniv.ragkb.service.index.IndexTaskService;
@@ -43,6 +45,7 @@ public class DocumentController {
     private final IndexService indexService;
     private final IndexTaskService tasks;
     private final StorageProperties storage;
+    private final HybridCryptoService crypto;
 
     // ---------------- 上传 ----------------
 
@@ -85,6 +88,103 @@ public class DocumentController {
         out.put("id", docId);
         out.put("name", name);
         out.put("bytes", file.getSize());
+        out.put("status", "stored");
+        return R.ok(out);
+    }
+
+    // ---------------- 加密上传 ----------------
+
+    /**
+     * 加密上传：请求体是文件密文本身（{@code application/octet-stream}），
+     * 文件名与文件 IV 藏在加密的元信息里。
+     *
+     * <p><b>为什么另开一个接口而不是改造 multipart</b>：multipart 的分片边界、
+     * 头字段、文件名全是明文，中间设备（本场景下是 Cloudflare —— 它终止 TLS，
+     * 能读到转发的全部内容）可以完整还原出文件与令牌。而那正是这层加密要防的东西。
+     *
+     * <p><b>为什么体不走内存</b>：整份读进来解密，一个 50MB 的文件要占 100MB 堆。
+     * 这里边读边解密边落盘，峰值只有一个 64KB 的缓冲。
+     *
+     * <p>先写临时文件、认证标签校验通过后才改名就位 —— 否则一个标签不对的请求
+     * 会在磁盘上留下半截文件，而它看起来和正常文件一模一样。
+     */
+    @PostMapping(value = "/upload-encrypted", consumes = "application/octet-stream")
+    public R<Map<String, Object>> uploadEncrypted(jakarta.servlet.http.HttpServletRequest req) {
+        byte[] aesKey = EncryptedApiFilter.aesKeyOf(req);
+        com.fasterxml.jackson.databind.JsonNode meta = EncryptedApiFilter.metaOf(req);
+        if (aesKey == null || meta == null) {
+            return R.fail(R.CODE_BAD_REQUEST, "该接口必须走加密上传（application/octet-stream + X-Enc-Meta）");
+        }
+
+        String rawName = meta.path("name").asText("");
+        String name = rawName.isBlank() ? "" : Path.of(rawName).getFileName().toString();
+        String iv = meta.path("iv").asText("");
+        long declared = meta.path("size").asLong(0);
+        if (name.isBlank() || iv.isBlank()) {
+            return R.fail(R.CODE_BAD_REQUEST, "元信息缺少文件名或 IV");
+        }
+
+        String lower = name.toLowerCase();
+        String suffix = lower.contains(".") ? lower.substring(lower.lastIndexOf('.')) : "";
+        if (!ALLOWED.contains(suffix)) {
+            return R.fail(R.CODE_BAD_REQUEST, "不支持的格式 " + suffix + "，允许：" + ALLOWED);
+        }
+        long limit = (long) storage.getMaxUploadMb() * 1024 * 1024;
+        if (declared > limit) {
+            return R.fail(R.CODE_BAD_REQUEST, "超过上限 " + storage.getMaxUploadMb() + " MB");
+        }
+
+        String docId = UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        Path dest = storage.uploads().resolve(docId + suffix);
+        Path temp = storage.uploads().resolve(docId + suffix + ".part");
+
+        long written;
+        try {
+            javax.crypto.Cipher cipher = crypto.decryptCipher(aesKey, iv);
+            written = 0;
+            try (InputStream in = req.getInputStream();
+                 java.io.OutputStream out = Files.newOutputStream(temp)) {
+                byte[] buf = new byte[64 * 1024];
+                int n;
+                while ((n = in.read(buf)) > 0) {
+                    byte[] plain = cipher.update(buf, 0, n);
+                    if (plain != null && plain.length > 0) {
+                        out.write(plain);
+                        written += plain.length;
+                    }
+                    if (written > limit) {
+                        throw new IOException("超过上限 " + storage.getMaxUploadMb() + " MB");
+                    }
+                }
+                byte[] tail = cipher.doFinal();   // 标签不对会在这里抛，文件不会被改名就位
+                if (tail != null && tail.length > 0) {
+                    out.write(tail);
+                    written += tail.length;
+                }
+            }
+            Files.move(temp, dest, StandardCopyOption.REPLACE_EXISTING);
+        } catch (Exception e) {
+            try { Files.deleteIfExists(temp); } catch (IOException ignored) { /* 尽力清理 */ }
+            log.warn("加密上传失败：{}", e.getMessage());
+            return R.fail(R.CODE_BAD_REQUEST, "解密或落盘失败：" + e.getMessage());
+        }
+
+        Document doc = new Document();
+        doc.setId(docId);
+        doc.setName(name);
+        doc.setSuffix(suffix);
+        doc.setBytes(written);
+        doc.setStoredPath(storage.getRoot().toAbsolutePath().normalize()
+                .relativize(dest).toString().replace('\\', '/'));
+        doc.setStatus("stored");
+        doc.setChunkCount(0);
+        doc.setEmbedModel("");
+        documents.insert(doc);
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("id", docId);
+        out.put("name", name);
+        out.put("bytes", written);
         out.put("status", "stored");
         return R.ok(out);
     }

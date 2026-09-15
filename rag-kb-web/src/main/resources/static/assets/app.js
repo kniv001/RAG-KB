@@ -618,20 +618,50 @@ function addAttachment(file) {
   uploadAttachment(a);
 }
 
+const MAX_UPLOAD_MB = 50;
+
+/**
+ * 加密上传。
+ *
+ * 不用 multipart：它的分片边界、头字段、文件名全是明文，Cloudflare 终止 TLS
+ * 后能完整还原出文件与令牌 —— 而那正是这层加密要防的东西。
+ * 改成把文件字节用本次请求的 AES 密钥加密后作为原始体发出，
+ * 文件名与文件 IV 放进加密的元信息里（放请求头等于没加密）。
+ */
 async function uploadAttachment(a) {
-  const fd = new FormData();
-  fd.append('file', a.file);
   try {
-    // multipart 走不了加密（需要分片方案），靠 HTTPS 与 Authorization 头保护。
-    // 这是已知缺口，README 里记着。
-    const res = await fetch('/api/docs/upload', {
+    if (a.size > MAX_UPLOAD_MB * 1024 * 1024) {
+      throw new Error(`超过上限 ${MAX_UPLOAD_MB} MB`);
+    }
+    const bytes = await a.file.arrayBuffer();
+    const { key, wrapped } = await newSession();
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, bytes);
+
+    const meta = await seal(key, {
+      ts: Date.now(),
+      nonce: rnd(),
+      token: accessToken ? `Bearer ${accessToken}` : null,
+      iv: B64.enc(iv),
+      name: a.file.name,
+      size: a.size,
+    });
+
+    const res = await fetch('/api/docs/upload-encrypted', {
       method: 'POST',
-      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
-      body: fd,
+      headers: {
+        'X-Enc-Key': wrapped,
+        'X-Enc-Meta': B64.enc(enc.encode(JSON.stringify(meta))),
+        'Content-Type': 'application/octet-stream',
+      },
+      body: ct,
       credentials: 'same-origin',
     });
-    const j = await res.json();
-    if (!res.ok || j.code !== 0) throw new Error(j.message || `HTTP ${res.status}`);
+
+    const j = await parseResponse(res, key);
+    if (res.status === 401) { onAuthLost(); throw new Error(j?.message || '未登录'); }
+    if (!res.ok || j?.code !== 0) throw new Error(j?.message || `HTTP ${res.status}`);
+
     a.docId = j.data.id;
     a.status = 'indexing';
     renderAttachments();

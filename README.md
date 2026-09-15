@@ -162,21 +162,64 @@ Java 的 `RSA/ECB/OAEPWithSHA-256AndMGF1Padding` **默认用 SHA-1 做 MGF1**，
 
 AES-GCM 的密文布局两边一致（ciphertext‖tag），无需转换。
 
-### 已知缺口
+### 文件上传的加密（已解决）
 
-- **文件上传未加密**：multipart 需要单独的分片加密方案，目前只依赖 TLS + 令牌。
-  内容最大的恰恰是文件，这是下一步要补的重点。
+multipart 的分片边界、头字段、文件名全是明文，Cloudflare 终止 TLS 后能完整还原出
+文件与令牌 —— 而那正是这层加密要防的东西。所以**不改造 multipart，另开了一条路径**：
+
+```
+POST /api/docs/upload-encrypted
+Content-Type: application/octet-stream
+X-Enc-Key    RSA-OAEP 包裹的 AES-256 密钥
+X-Enc-Meta   加密的 {ts, nonce, token, iv, name, size}
+体           文件密文本身（ciphertext‖tag）
+```
+
+**文件名与文件 IV 放在加密的元信息里**，不放请求头 —— 放头里等于没加密。
+
+两个实现要点：
+
+- **体不进内存**。整个读进来解密的话，一个 50MB 文件要占 100MB 堆。
+  过滤器只把密钥与元信息交接给控制器（`ATTR_AES_KEY` / `ATTR_META`），
+  体原样透传，控制器边读边解密边落盘，峰值只有一个 64KB 缓冲。
+- **先写 `.part` 临时文件，认证标签校验通过后才改名就位**。否则一个标签不对的
+  请求会在磁盘上留下半截文件，而它看起来和正常文件一模一样。
+  这里刻意不用 `CipherInputStream` —— 它在 AEAD 上有历史坑（JDK-8012631），
+  标签失败时可能吞掉异常、静默截断。改成自己 update/doFinal 循环，标签不对
+  会在 `doFinal` 上明确抛出。
+
+老的 multipart 接口保留未动，避免破坏可能存在的旧客户端。
+
+### 还剩的缺口
+
 - **框架级错误响应为明文**：404/405/500 由 Spring 的错误分发产生，绕过了响应包装器。
   只含状态码与路径，无业务数据。
+- **上传大小受请求体上限约束**：加密上传是单请求整体传输，没有分片，
+  上限受 Cloudflare 100MB 与原站记录数限制。当前配置 50MB。
 
 ## 回归测试
 
 ```powershell
-node tools\crypto-test.mjs        # 12 项：加密通道、认证、防重放、完整性校验
+node tools\crypto-test.mjs              # 12 项：加密通道、认证、防重放、完整性校验
+node tools\encrypted-upload-test.mjs    # 17 项：加密上传往返（逐字节比对）+ 篡改拒绝
+node tools\frontend-contract-test.mjs   # 30 项：前端依赖的每一处后端契约
+node tools\crypto-browser-path-test.mjs # 11 项：浏览器那条加密路径
+node tools\frontend-e2e-cdp.mjs         # 28 项：真浏览器端到端（需 Edge）
 ```
 
-用 Node 的 `crypto` 模块实现，其 RSA-OAEP(SHA-256) 语义与浏览器 WebCrypto **完全一致**，
-等于提前验证了浏览器端能不能对上。
+前两个用 Node 的 `crypto` 模块实现，其 RSA-OAEP(SHA-256) 语义与浏览器 WebCrypto
+**完全一致**，等于提前验证了浏览器端能不能对上。
+
+`crypto-browser-path-test.mjs` 更进一步：它把 `app.js` 里加密层的**源码原文**按标记
+切出来、在 Node 里执行（Node 20+ 的 `crypto.subtle` 就是浏览器那套 WebCrypto）。
+验的是将要在浏览器里跑的那段代码本身，而不是它的副本 —— 这样才能排掉
+「Node 能通、浏览器不通」这类隐患（OAEP 的 hash、GCM 的标签位置、密钥导出格式，
+任一处不匹配的表现都是整站白屏）。
+
+`frontend-e2e-cdp.mjs` 用 CDP 驱动无头 Edge，走真实加密登录、发问、附件上传，
+并捕获 console 报错与异常栈。**断言一律看计算样式而不是 `element.hidden`** ——
+属性为 true 但 CSS 里写了 `display` 的元素照样显示，第一版就是查了属性，
+把「登录成功但遮罩不消失」放了过去。
 
 ## 与 Python 版的关系
 

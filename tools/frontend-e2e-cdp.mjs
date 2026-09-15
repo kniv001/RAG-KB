@@ -265,7 +265,37 @@ try {
     ok(`「${tab}」页可渲染`, t.includes(expect), t.slice(0, 46).replace(/\s+/g, ' '));
   }
 
-  console.log('\n=== 5. 控制台 ===');
+  console.log('\n=== 5. 附件：加密上传 + 自动建索引 ===');
+  await cdp.eval(`document.querySelector('#closeSettings').click()`);
+  await sleep(300);
+
+  // 用 DataTransfer 造一个文件塞进 input，再触发 change —— 等价于用户选了文件
+  const attName = `e2e-${Date.now().toString(36)}.md`;
+  await cdp.eval(`(() => {
+    const dt = new DataTransfer();
+    dt.items.add(new File(
+      ['# E2E 附件\\n\\n唯一标记 E2E-${attName}\\n\\n中文与 emoji 🎯 用于验证加密往返。'],
+      ${JSON.stringify(attName)}, { type: 'text/markdown' }));
+    const input = document.querySelector('#fileInput');
+    input.files = dt.files;
+    input.dispatchEvent(new Event('change'));
+    return true;
+  })()`);
+
+  let att = null;
+  for (let i = 0; i < 60; i++) {
+    await sleep(1000);
+    att = await cdp.eval(`(() => {
+      const e = document.querySelector('#attachments .att');
+      if (!e) return null;
+      return { cls: e.className, text: e.textContent, visible: getComputedStyle(document.querySelector('#attachments')).display !== 'none' };
+    })()`);
+    if (att && /done|error/.test(att.cls)) break;
+  }
+  ok('附件区出现且可见', !!att && att.visible, att ? att.text.slice(0, 46) : '无附件元素');
+  ok('附件已加密上传并建完索引', !!att && att.cls.includes('done'), att?.text.slice(0, 60));
+
+  console.log('\n=== 6. 控制台 ===');
   // 两类预期内的 401：
   //   /api/auth/refresh —— 首次打开没有 refresh Cookie，boot() 试一次必得 401
   //   /api/auth/login   —— 步骤 2 故意输错密码那一次

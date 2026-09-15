@@ -28,6 +28,17 @@ public class DecryptedRequestWrapper extends HttpServletRequestWrapper {
         this.authorization = authorization;
     }
 
+    /**
+     * 只注入令牌，<b>不动请求体</b> —— 供原始字节体（加密上传）使用。
+     *
+     * <p>那条路径的体是文件密文本身，可能几十 MB。整份读进内存再包一层
+     * 既浪费又会把堆撑爆，所以体原样透传给控制器，由它边解密边落盘。
+     * 需要替换的只有 Authorization 头 —— 令牌仍然是随加密元信息传的。
+     */
+    public static DecryptedRequestWrapper tokenOnly(HttpServletRequest request, String authorization) {
+        return new DecryptedRequestWrapper(request, null, authorization);
+    }
+
     @Override
     public String getHeader(String name) {
         if ("Authorization".equalsIgnoreCase(name) && authorization != null) {
@@ -46,16 +57,19 @@ public class DecryptedRequestWrapper extends HttpServletRequestWrapper {
 
     @Override
     public int getContentLength() {
-        return body.length;
+        return body == null ? super.getContentLength() : body.length;
     }
 
     @Override
     public long getContentLengthLong() {
-        return body.length;
+        return body == null ? super.getContentLengthLong() : body.length;
     }
 
     @Override
-    public ServletInputStream getInputStream() {
+    public ServletInputStream getInputStream() throws IOException {
+        if (body == null) {
+            return super.getInputStream();   // tokenOnly：体原样透传
+        }
         ByteArrayInputStream in = new ByteArrayInputStream(body);
         return new ServletInputStream() {
             @Override
@@ -88,5 +102,10 @@ public class DecryptedRequestWrapper extends HttpServletRequestWrapper {
     @Override
     public BufferedReader getReader() throws IOException {
         return new BufferedReader(new InputStreamReader(getInputStream(), StandardCharsets.UTF_8));
+    }
+
+    /** body 为 null 表示只注入令牌、不替换体 */
+    public boolean hasReplacedBody() {
+        return body != null;
     }
 }

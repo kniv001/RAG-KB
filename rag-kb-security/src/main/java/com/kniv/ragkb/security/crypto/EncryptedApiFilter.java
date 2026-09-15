@@ -55,10 +55,24 @@ public class EncryptedApiFilter extends OncePerRequestFilter {
      */
     public static final String ATTR_AES_KEY = "ragkb.crypto.aesKey";
 
+    /**
+     * 请求属性名：解开后的元信息（{@code {ts,nonce,token,...}}）。
+     *
+     * <p>供原始字节体路径使用 —— 那条路径的文件名与文件 IV 都放在这里，
+     * 因为放在请求头里等于没加密。
+     */
+    public static final String ATTR_META = "ragkb.crypto.meta";
+
     /** 取流式端点交接过来的 AES 密钥；非流式请求返回 null。 */
     public static byte[] aesKeyOf(HttpServletRequest request) {
         Object v = request.getAttribute(ATTR_AES_KEY);
         return v instanceof byte[] k ? k : null;
+    }
+
+    /** 取原始字节体路径交接过来的元信息；其它路径返回 null。 */
+    public static JsonNode metaOf(HttpServletRequest request) {
+        Object v = request.getAttribute(ATTR_META);
+        return v instanceof JsonNode n ? n : null;
     }
 
     @Override
@@ -79,12 +93,18 @@ public class EncryptedApiFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
 
-        // 文件上传不套用体加密：multipart 需要单独的分片方案，见 README「已知缺口」
+        // multipart 仍然放行（体加密需要分片方案）。但既有的 /api/docs/upload
+        // 已不再是唯一入口 —— 加密上传走 application/octet-stream，见下。
+        // 保留这条是为了不破坏可能存在的旧客户端。
         String ct = request.getContentType();
         if (ct != null && ct.toLowerCase().startsWith("multipart/")) {
             chain.doFilter(request, response);
             return;
         }
+
+        // 原始字节体：体是密文本身而不是 JSON 信封（用于加密上传大文件）。
+        // 只有元信息仍走信封 —— 令牌、文件名、文件 IV 都在里面。
+        boolean rawBody = ct != null && ct.toLowerCase().startsWith("application/octet-stream");
 
         String wrappedKey = request.getHeader(Envelope.HEADER_KEY);
         if (wrappedKey == null || wrappedKey.isBlank()) {
@@ -123,6 +143,18 @@ public class EncryptedApiFilter extends OncePerRequestFilter {
 
             // ---- 2) 请求体（可选）----
             byte[] body = new byte[0];
+            if (rawBody) {
+                // 体是文件密文，可能几十 MB。不在这里读 —— 只把密钥与元信息
+                // 交接给控制器，由它边解密边落盘，全程不整份进内存。
+                request.setAttribute(ATTR_AES_KEY, aesKey.clone());
+                request.setAttribute(ATTR_META, meta);
+                HttpServletRequest working = DecryptedRequestWrapper.tokenOnly(request, token);
+                ContentCachingResponseWrapper cached = new ContentCachingResponseWrapper(response);
+                chain.doFilter(working, cached);
+                // 响应照常加密：体虽大，响应只是一小段 JSON
+                writeEncrypted(response, cached, aesKey);
+                return;
+            }
             if (hasBody(request)) {
                 Envelope env;
                 try {
@@ -149,28 +181,35 @@ public class EncryptedApiFilter extends OncePerRequestFilter {
 
             ContentCachingResponseWrapper cached = new ContentCachingResponseWrapper(response);
             chain.doFilter(working, cached);
-
-            byte[] raw = cached.getContentAsByteArray();
-            if (raw.length == 0) {
-                cached.copyBodyToResponse();
-                return;
-            }
-
-            Envelope out = crypto.encryptBody(aesKey, new String(raw, StandardCharsets.UTF_8));
-            byte[] bytes = mapper.writeValueAsBytes(out);
-
-            response.setStatus(cached.getStatus());
-            response.setContentType("application/json;charset=UTF-8");
-            response.setContentLength(bytes.length);
-            response.setHeader(Envelope.HEADER_FLAG, "1");
-            response.setHeader(Envelope.HEADER_IV, out.getIv());
-            response.getOutputStream().write(bytes);
+            writeEncrypted(response, cached, aesKey);
 
         } catch (CryptoException e) {
             reject(response, e.getMessage());
         } finally {
             HybridCryptoService.wipe(aesKey);
         }
+    }
+
+    /**
+     * 把控制器写出的明文响应换成密文。空体直接透传 —— 无内容可加密，
+     * 客户端（如 204）也不该去解一个不存在的信封。
+     */
+    private void writeEncrypted(HttpServletResponse response, ContentCachingResponseWrapper cached,
+                                byte[] aesKey) throws IOException {
+        byte[] raw = cached.getContentAsByteArray();
+        if (raw.length == 0) {
+            cached.copyBodyToResponse();
+            return;
+        }
+        Envelope out = crypto.encryptBody(aesKey, new String(raw, StandardCharsets.UTF_8));
+        byte[] bytes = mapper.writeValueAsBytes(out);
+
+        response.setStatus(cached.getStatus());
+        response.setContentType("application/json;charset=UTF-8");
+        response.setContentLength(bytes.length);
+        response.setHeader(Envelope.HEADER_FLAG, "1");
+        response.setHeader(Envelope.HEADER_IV, out.getIv());
+        response.getOutputStream().write(bytes);
     }
 
     private boolean isStreaming(HttpServletRequest request) {
