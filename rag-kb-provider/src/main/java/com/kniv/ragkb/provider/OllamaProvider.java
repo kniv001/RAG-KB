@@ -100,6 +100,12 @@ public class OllamaProvider extends AbstractProvider {
         body.put("stream", stream);
         ObjectNode options = body.putObject("options");
         options.put("temperature", temperature);
+        // num_ctx 必须显式传：Ollama 默认 65536，KV 缓存会把显存吃光，
+        // 导致向量模型被挤掉、每次交替都重载（实测 4-8 秒 → 传对之后 0.03 秒）
+        options.put("num_ctx", cfg == null ? 8192 : cfg.getNumCtx());
+        if (cfg != null && cfg.getNumPredict() > 0) {
+            options.put("num_predict", cfg.getNumPredict());
+        }
         return body;
     }
 }

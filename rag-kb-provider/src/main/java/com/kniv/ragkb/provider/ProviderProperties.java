@@ -54,6 +54,24 @@ public class ProviderProperties {
 
         private List<String> embedModels = List.of();
 
+        /**
+         * 上下文窗口（token）。<b>必须显式传，绝不能依赖 Ollama 的默认值。</b>
+         *
+         * <p>实测教训（本机 8GB 显卡）：Ollama 默认给 65536 上下文，KV 缓存要吃好几 GB 显存，
+         * 结果「向量模型」被「对话模型」挤掉 —— 每次在两者间切换都触发重载，一次 4-8 秒。
+         * agent 模式每轮都要来回切，累计吃掉整个问答一半以上的时间。
+         *
+         * <p>调到 8192 后两个模型可同时常驻，交替调用从 4-8 秒降到 0.03 秒（快两个数量级）。
+         * 我们的提示词加 6~12 段资料约 5K token，8192 够用。
+         *
+         * <p>刻意做在请求参数里而非环境变量：Windows 上 `ollama app` 不继承调用方环境，
+         * 变量很难送达；而且它是全局的，出问题时看不出来。
+         */
+        private int numCtx = 8192;
+
+        /** 单次回复的最大 token 数，0 表示不限制 */
+        private int numPredict = 0;
+
         public boolean isOpenAi() {
             return "openai".equalsIgnoreCase(kind);
         }

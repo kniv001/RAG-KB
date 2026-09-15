@@ -73,13 +73,49 @@ ragkb:
     refresh-cookie-name: kb_refresh
     refresh-cookie-path: /api/auth     # 限定路径，减少 Cookie 暴露面
 
+  # ---------------- 切分 ----------------
+  # 与 Python 版保持一致：两套系统共用一个库，切分口径不同会导致同一篇文档
+  # 在两边的检索结果对不上。
+  chunk:
+    size: 600            # 目标字符数，中文按字计
+    overlap: 80          # 相邻块重叠，避免答案恰好被切在边界
+    min-size: 80         # 小于此长度的块丢弃
+
+  # ---------------- RAG 管线 ----------------
+  rag:
+    top-k: 6
+    max-distance: 0.60
+    rerank-pool: 30
+    default-mode: hybrid
+    # 模型不在这里配 —— 唯一来源是下方 ragkb.provider.default-chat / default-embed。
+    # 曾经两处都配，改了 A 忘了改 B 就会出现「配置明明改了、跑的却是旧模型」。
+    # Agentic RAG：规划 → 检索 → 评估 →（不足则换查询再来）→ 生成
+    # agent 只是控制流，事实来源始终只有检索到的资料
+    agent:
+      enabled: true
+      max-rounds: 2           # 实测 3 轮会把耗时推到 160s+，而多召回收益很小
+      queries-per-round: 3
+      top-k-per-query: 4
+      max-contexts: 12        # 多轮累积的上限，防止把上下文撑爆
+      # 规划与评估用的模型；留空表示与主模型相同。
+      # 本机刻意留空：主模型已经是 4b（够小、能与向量模型共存），
+      # 再引入第三个模型只会让它被挤出显存、掉到 CPU 上跑，反而更慢。
+      # 在显存充裕的机器上（或改用云端 API）可以填一个更小的模型来提速。
+      utility-model: ${KB_UTILITY_MODEL:}
+
   # ---------------- 模型提供方 ----------------
   # 本地与云端同一套接口，运行时可切。引用格式 providerId/model（用斜杠，
   # 因为模型名本身常含冒号：qwen3:8b）。
   # 加一家新服务只要补一段配置 —— DeepSeek / 通义 / Moonshot / 智谱 /
   # 硅基流动 / OpenAI / vLLM / LM Studio 都是 OpenAI 兼容，不用改代码。
   provider:
-    default-chat: local/qwen3:8b
+    # 为什么用 4b 而不是 8b —— 这是本机显存约束逼出来的结论，不是随意选的：
+    #   GPU 8GB，桌面占用约 3GB，实际可用约 4.9GB。
+    #   · qwen3:4b(3.9GB) + bge-m3(664MB) = 4.6GB → 两者同时常驻，交替调用 0.03 秒
+    #   · qwen3:8b 装不下 → 与向量模型互相驱逐，每次切换重载 4-8 秒；
+    #     更糟的是三者同载时它会被挤到纯 CPU，单次调用从 20 秒劣化到 50 秒
+    # 换更大模型前先确认真实显存够不够，否则会以「模型更强」的名义大幅变慢。
+    default-chat: local/qwen3:4b
     default-embed: local/bge-m3
     timeout-seconds: 300               # 本地大模型推理慢，给足
     stream-idle-seconds: 120
