@@ -84,6 +84,17 @@ public class AgenticRagService {
             3. 用中文回答，简洁准确；涉及要点时用条目列出。
             4. 引用了某段资料的地方，用 [编号] 标注来源。""";
 
+    /**
+     * 规划输出的形状。交给提供方做语法约束，模型便无法产出这个形状之外的任何东西 ——
+     * 连「好的，我来帮你拆解」这种开场白都发不出来。
+     */
+    private static final String PLAN_SCHEMA = """
+            {"type":"object","properties":{"queries":{"type":"array","items":{"type":"string"}}},"required":["queries"]}""";
+
+    /** 评估输出的形状。只强制 enough，因为它是唯一被程序读取的字段。 */
+    private static final String ASSESS_SCHEMA = """
+            {"type":"object","properties":{"enough":{"type":"boolean"},"reason":{"type":"string"},"missing":{"type":"string"}},"required":["enough"]}""";
+
     private static final double TEMPERATURE = 0.2;
 
     private final ProviderRegistry providers;
@@ -188,6 +199,24 @@ public class AgenticRagService {
         }
     }
 
+    /**
+     * 走「只要 JSON」的通路 —— 规划与评估的共用入口。
+     *
+     * <p>这两步的产物是<b>数据</b>不是<b>文本</b>：一个查询数组、一个布尔值。
+     * 让模型为此先写几千 token 的推理，是这条链路上最大的一笔浪费。
+     */
+    private String json(ProviderRegistry.Ref ref, String system, String user,
+                        double temperature, String schema) {
+        if (props.getAgent().isStructuredOutput()) {
+            return providers.chatJson(ref,
+                    List.of(ChatMessage.system(system), ChatMessage.user(user)),
+                    temperature, schema).content();
+        }
+        return providers.chat(ref,
+                List.of(ChatMessage.system(system), ChatMessage.user(user)),
+                temperature).content();
+    }
+
     private List<String> plan(ProviderRegistry.Ref ref, String question, String missing,
                               List<String> tried, List<ChatMessage> history) {
         StringBuilder user = new StringBuilder();
@@ -211,9 +240,7 @@ public class AgenticRagService {
         }
 
         try {
-            String reply = providers.chat(ref,
-                    List.of(ChatMessage.system(PLAN_PROMPT), ChatMessage.user(user.toString())),
-                    0.2).content();
+            String reply = json(ref, PLAN_PROMPT, user.toString(), 0.2, PLAN_SCHEMA);
             JsonNode node = JsonExtract.parseObject(mapper, reply);
             List<String> queries = JsonExtract.stringArray(node, "queries", props.getAgent().getQueriesPerRound());
             if (!queries.isEmpty()) {
@@ -241,9 +268,7 @@ public class AgenticRagService {
                     .append(clip(h.getContent(), 220)).append('\n');
         }
         try {
-            String reply = providers.chat(ref,
-                    List.of(ChatMessage.system(ASSESS_PROMPT), ChatMessage.user(user.toString())),
-                    0.0).content();
+            String reply = json(ref, ASSESS_PROMPT, user.toString(), 0.0, ASSESS_SCHEMA);
             JsonNode node = JsonExtract.parseObject(mapper, reply);
             if (node != null) {
                 return new Assess(

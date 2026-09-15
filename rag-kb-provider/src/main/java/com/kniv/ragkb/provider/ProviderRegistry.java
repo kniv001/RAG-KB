@@ -102,6 +102,14 @@ public class ProviderRegistry {
         return ChatResult.of(content, ref.providerId(), ref.model());
     }
 
+    /** 只要 JSON 的调用，规划与评估用。见 {@link ModelProvider#chatJson}。 */
+    public ChatResult chatJson(Ref ref, List<ChatMessage> messages, double temperature,
+                               String jsonSchema) {
+        ModelProvider p = get(ref.providerId());
+        String content = p.chatJson(ref.model(), messages, temperature, jsonSchema);
+        return ChatResult.of(content, ref.providerId(), ref.model());
+    }
+
     public void chatStream(Ref ref, List<ChatMessage> messages, double temperature,
                            Consumer<String> onToken) {
         get(ref.providerId()).chatStream(ref.model(), messages, temperature, onToken);

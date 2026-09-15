@@ -31,6 +31,43 @@ public class OllamaProvider extends AbstractProvider {
         return resp.path("message").path("content").asText("").strip();
     }
 
+    /**
+     * 结构化输出：{@code think:false} + {@code format} 语法约束。
+     *
+     * <p><b>两个必须同时给，缺一个都白搭</b> —— 这是实测出来的，不是推断：
+     * <ul>
+     *   <li>只关思考：推理不会消失，它会从 {@code thinking} 通道转进 {@code content} 通道，
+     *       于是 「首先，用户的问题是……」 直接把 JSON 冲碎（实测 49.9 秒，输出非法）</li>
+     *   <li>只给约束：模型照样先把几千 token 的推理想完，再输出 JSON（实测 49.5 秒）</li>
+     *   <li>两个都给：采样器无法输出左花括号之外的第一个字符，模型直接从 JSON 开始写
+     *       （实测 0.94 秒，48 个 token）</li>
+     * </ul>
+     *
+     * <p>顺带一提，同在提示词里写 {@code /no_think} 软开关无效 —— Ollama 的 qwen3 模板
+     * 不认它，实测思考量纹丝不动（6471 字）。
+     */
+    @Override
+    public String chatJson(String model, List<ChatMessage> messages, double temperature,
+                           String jsonSchema) {
+        ObjectNode body = chatBody(model, messages, temperature, false);
+        body.put("think", false);
+        body.set("format", schemaNode(jsonSchema));
+        JsonNode resp = postJson("/api/chat", body);
+        return resp.path("message").path("content").asText("").strip();
+    }
+
+    /** schema 为空时退化为纯 {@code "json"} —— 仍是语法约束，只是形状不设限。 */
+    private JsonNode schemaNode(String jsonSchema) {
+        if (jsonSchema == null || jsonSchema.isBlank()) {
+            return mapper.getNodeFactory().textNode("json");
+        }
+        try {
+            return mapper.readTree(jsonSchema);
+        } catch (Exception e) {
+            throw new ProviderException(id, "JSON Schema 不是合法 JSON：" + e.getMessage());
+        }
+    }
+
     @Override
     public void chatStream(String model, List<ChatMessage> messages, double temperature,
                            java.util.function.Consumer<String> onToken) {

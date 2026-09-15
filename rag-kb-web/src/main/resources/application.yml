@@ -100,6 +100,9 @@ ragkb:
     agent:
       enabled: true
       max-rounds: 2           # 实测 3 轮会把耗时推到 160s+，而多召回收益很小
+      # 规划/评估强制结构化输出（关思考 + 语法约束 JSON）—— 实测 plan 51.5s → 0.94s
+      # 关掉可回到「模型先想几千 token 再吐 JSON」的旧行为，仅用于对照
+      structured-output: true
       queries-per-round: 3
       top-k-per-query: 4
       max-contexts: 12        # 多轮累积的上限，防止把上下文撑爆
@@ -131,6 +134,10 @@ ragkb:
         label: 本地 Ollama
         base: http://127.0.0.1:11434
         chat-models:
+          # 只有 qwen3:4b 能在本机 8GB 显存上与 bge-m3 同时常驻；其余几个是
+          # 8b 级别，实测装进来就会把向量模型挤出去（切换重载 2~4 秒）。
+          # 列在这里是给显存更宽裕的机器备选，选之前先确认真的放得下。
+          - qwen3:4b
           - qwen3:8b
           - qwen3.5:9b
           - llama3.1:8b

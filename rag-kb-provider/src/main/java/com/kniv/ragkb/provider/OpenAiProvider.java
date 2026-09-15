@@ -32,6 +32,26 @@ public class OpenAiProvider extends AbstractProvider {
         return resp.path("choices").path(0).path("message").path("content").asText("").strip();
     }
 
+    /**
+     * 结构化输出：{@code response_format=json_object}。
+     *
+     * <p>比 Ollama 那边弱一档 —— 它只保证「是合法 JSON」，不保证字段形状，
+     * 形状仍靠提示词里的输出示例。所以这里不传 jsonSchema：OpenAI 兼容端点
+     * 普遍不接受 schema（只有 OpenAI 自己的 json_schema 模式接受，且各家方言不一），
+     * 传了反而会 400。
+     *
+     * <p>注意：多数 OpenAI 兼容服务要求提示词里出现过 "json" 字样才允许这个参数 ——
+     * 我们的规划/评估提示词都写了「只输出 JSON」，满足。
+     */
+    @Override
+    public String chatJson(String model, List<ChatMessage> messages, double temperature,
+                           String jsonSchema) {
+        ObjectNode body = chatBody(model, messages, temperature, false);
+        body.putObject("response_format").put("type", "json_object");
+        JsonNode resp = postJson("/chat/completions", body);
+        return resp.path("choices").path(0).path("message").path("content").asText("").strip();
+    }
+
     @Override
     public void chatStream(String model, List<ChatMessage> messages, double temperature,
                            java.util.function.Consumer<String> onToken) {

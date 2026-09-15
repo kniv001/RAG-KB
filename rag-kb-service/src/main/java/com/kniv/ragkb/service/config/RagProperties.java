@@ -57,6 +57,25 @@ public class RagProperties {
          */
         private String utilityModel = "";
 
+        /**
+         * 规划与评估是否强制结构化输出（关闭模型思考 + 语法约束 JSON）。
+         *
+         * <p>实测（本机 8GB 显卡，qwen3:4b @ 8192）：
+         * <table>
+         *   <tr><th></th><th>plan</th><th>assess</th></tr>
+         *   <tr><td>关闭</td><td>51.5 秒</td><td>31.4 秒</td></tr>
+         *   <tr><td>开启</td><td>0.94 秒</td><td>1.6 秒</td></tr>
+         * </table>
+         *
+         * <p>根因：模型为吐一个三行 JSON，先生成了 4561 个 token 的推理。
+         * 提示词里写「只输出 JSON」拦不住它 —— 那只是请求，这里是语法层面的强制。
+         *
+         * <p>留开关是因为它是「用一点点思考深度换 30~55 倍速度」的交易。
+         * 若某天发现规划质量确实变差，可以关掉对照；实测四个典型问题上，
+         * 关思考后拆解粒度反而更干净（见 tools/agent-plan-verify.mjs）。
+         */
+        private boolean structuredOutput = true;
+
         /** 每轮规划的查询数上限 */
         private int queriesPerRound = 3;
 
