@@ -75,6 +75,9 @@ public class SecurityConfig {
                                 "/api/auth/logout", "/api/auth/config").permitAll()
                         .requestMatchers("/api/ping", "/api/whoami").permitAll()
                         .requestMatchers("/actuator/health").permitAll()
+                        // 前端静态资源必须匿名可取：它正是发起加密与登录的那一方，
+                        // 拿不到页面就什么都做不了。真正的门在 /api/** 上。
+                        .requestMatchers("/", "/index.html", "/favicon.ico", "/assets/**").permitAll()
                         // 不放过 /error 的话，任何 404 都会被转发到 /error 再判未认证，
                         // 结果是「路径不存在」被伪装成「401 未认证」，极难排查
                         .requestMatchers("/error").permitAll()

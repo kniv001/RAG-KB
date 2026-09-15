@@ -1,0 +1,255 @@
+/**
+ * 前端端到端测试：真的开一个浏览器，真的登录，真的问一句，检查渲染。
+ *
+ * 为什么必须用真浏览器：加密层已经用 Node 的 WebCrypto 验过了（那段是同一套 API），
+ * 但 DOM 渲染、事件绑定、SSE 逐事件解密的**主循环**只能在浏览器里跑才知道。
+ * 而这三处的失败表现都是白屏或静默不更新 —— 光看代码看不出来。
+ *
+ * 用 CDP（Chrome DevTools Protocol）而不是截图：截图在这个环境下不可靠，
+ * 而 CDP 能直接拿到 console 报错与异常栈，那才是排查白屏要的东西。
+ */
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+
+const APP = process.env.KB_BASE || 'http://127.0.0.1:8080';
+const PORT = Number(process.env.CDP_PORT || 9222);
+const EDGE = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
+
+const profile = path.join(os.tmpdir(), 'kb-e2e-' + Date.now());
+let pass = 0, fail = 0;
+const ok = (n, c, e = '') => {
+  if (c) { pass++; console.log(`  ✅ ${n}${e ? ' — ' + e : ''}`); }
+  else { fail++; console.log(`  ❌ ${n}${e ? ' — ' + e : ''}`); }
+};
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ── 启动浏览器 ──
+const browser = spawn(EDGE, [
+  '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
+  `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`, 'about:blank',
+], { stdio: 'ignore' });
+
+async function targets() {
+  for (let i = 0; i < 60; i++) {
+    try {
+      const r = await fetch(`http://127.0.0.1:${PORT}/json/list`);
+      const list = await r.json();
+      const page = list.find((t) => t.type === 'page' && t.webSocketDebuggerUrl);
+      if (page) return page;
+    } catch { /* 还没起来 */ }
+    await sleep(250);
+  }
+  throw new Error('浏览器没起来');
+}
+
+// ── 极简 CDP 客户端 ──
+class CDP {
+  constructor(url) { this.ws = new WebSocket(url); this.id = 0; this.pending = new Map(); this.handlers = []; }
+
+  ready() {
+    return new Promise((res, rej) => {
+      this.ws.addEventListener('open', res);
+      this.ws.addEventListener('error', rej);
+    });
+  }
+
+  attach() {
+    this.ws.addEventListener('message', (ev) => {
+      const m = JSON.parse(ev.data);
+      if (m.id && this.pending.has(m.id)) {
+        const { res, rej } = this.pending.get(m.id);
+        this.pending.delete(m.id);
+        m.error ? rej(new Error(m.error.message)) : res(m.result);
+      } else if (m.method) {
+        for (const h of this.handlers) h(m);
+      }
+    });
+  }
+
+  send(method, params = {}) {
+    const id = ++this.id;
+    return new Promise((res, rej) => {
+      this.pending.set(id, { res, rej });
+      this.ws.send(JSON.stringify({ id, method, params }));
+    });
+  }
+
+  on(fn) { this.handlers.push(fn); }
+
+  async eval(expression) {
+    const r = await this.send('Runtime.evaluate', {
+      expression, awaitPromise: true, returnByValue: true,
+    });
+    if (r.exceptionDetails) {
+      throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
+    }
+    return r.result.value;
+  }
+
+  close() { try { this.ws.close(); } catch { /* 已关 */ } }
+}
+
+const logs = [];
+const errors = [];
+
+try {
+  const page = await targets();
+  const cdp = new CDP(page.webSocketDebuggerUrl);
+  await cdp.ready();
+  cdp.attach();
+
+  cdp.on((m) => {
+    if (m.method === 'Runtime.consoleAPICalled') {
+      const text = (m.params.args || []).map((a) => a.value ?? a.description ?? '').join(' ');
+      logs.push(`[${m.params.type}] ${text}`);
+      if (m.params.type === 'error') errors.push(text);
+    }
+    if (m.method === 'Runtime.exceptionThrown') {
+      const d = m.params.exceptionDetails;
+      errors.push(d.exception?.description || d.text);
+    }
+    if (m.method === 'Log.entryAdded') {
+      const e = m.params.entry;
+      logs.push(`[log:${e.level}] ${e.text}`);
+      if (e.level === 'error') errors.push(`${e.text} @ ${e.url || ''}`);
+    }
+  });
+
+  await cdp.send('Runtime.enable');
+  await cdp.send('Log.enable');
+  await cdp.send('Page.enable');
+
+  console.log('\n=== 1. 打开页面 ===');
+  await cdp.send('Page.navigate', { url: APP + '/' });
+  await sleep(2500);
+
+  const title = await cdp.eval('document.title');
+  ok('页面标题正确', title === '知识库助手', title);
+
+  const sub = await cdp.eval(`document.querySelector('#gateSub')?.textContent`);
+  ok('JS 已执行（boot() 改写了副标题）', sub === '请登录', `副标题="${sub}"`);
+
+  const assets = await cdp.eval(`({
+    css: [...document.styleSheets].length,
+    js: !!document.querySelector('script[type=module]')
+  })`);
+  ok('样式表已加载', assets.css > 0, `${assets.css} 个`);
+  ok('模块脚本已挂载', assets.js);
+
+  console.log('\n=== 2. 执行登录（走真实加密）===');
+  const cred = JSON.parse(fs.readFileSync('D:/vs/rag-kb/data/auth.json.migrated', 'utf8'));
+  await cdp.eval(`(() => {
+    document.querySelector('#username').value = ${JSON.stringify(cred.user)};
+    document.querySelector('#password').value = ${JSON.stringify(cred.password)};
+    document.querySelector('#loginForm').requestSubmit();
+    return true;
+  })()`);
+
+  await sleep(3500);
+  const after = await cdp.eval(`({
+    gateHidden: document.querySelector('#gate').hidden,
+    appHidden: document.querySelector('#app').hidden,
+    who: document.querySelector('#whoami').textContent,
+    convs: document.querySelectorAll('#convList .conv').length,
+    err: document.querySelector('#loginErr').hidden ? '' : document.querySelector('#loginErr').textContent
+  })`);
+  ok('登录成功（登录页已隐藏）', after.gateHidden, `错误信息="${after.err}"`);
+  ok('主界面已显示', !after.appHidden);
+  ok('用户名已渲染', after.who === cred.user, after.who);
+  ok('会话列表已加载', after.convs > 0, `${after.convs} 个会话`);
+
+  console.log('\n=== 3. 发一个问题，验证流式渲染 ===');
+  // 措辞每次不同 → 保证回答缓存未命中。命中时后端一次性推完整段，
+  // 走不到逐 token 流式与思考流那两条路径，测了等于没测（第一版就踩了这个）。
+  const question = `三层缓存分别省掉什么开销？请简要回答。（核对 ${Date.now().toString(36)}）`;
+  await cdp.eval(`(() => {
+    const i = document.querySelector('#input');
+    i.value = ${JSON.stringify(question)};
+    document.querySelector('#composer').requestSubmit();
+    return true;
+  })()`);
+
+  // 等正文出现（模型要思考十几秒，这里给足）
+  let painted = 0;
+  for (let i = 0; i < 60; i++) {
+    await sleep(1000);
+    painted = await cdp.eval(`document.querySelectorAll('#messages .msg.assistant .text').length`);
+    const txt = await cdp.eval(`document.querySelector('#messages .msg.assistant .text')?.textContent || ''`);
+    if (txt.length > 10) break;
+  }
+
+  const rendered = await cdp.eval(`(() => {
+    const a = document.querySelector('#messages .msg.assistant');
+    const think = a?.querySelector('.think');
+    return {
+      userMsgs: document.querySelectorAll('#messages .msg.user').length,
+      asstMsgs: document.querySelectorAll('#messages .msg.assistant').length,
+      answerLen: (a?.querySelector('.text')?.textContent || '').length,
+      // 看可见性而不是存在性：元素一直在 DOM 里，靠 hidden 控制，
+      // 只查存在的话缓存命中时也会「通过」，测不出东西
+      thinkVisible: !!think && !think.hidden,
+      thinkLen: (a?.querySelector('.think .t')?.textContent || '').length,
+      traceItems: a?.querySelectorAll('.trace li').length || 0,
+      sources: a?.querySelectorAll('.src span').length || 0,
+      html: a?.querySelector('.text')?.innerHTML.slice(0, 120) || '',
+      busy: document.querySelector('#sendBtn').disabled,
+    };
+  })()`);
+
+  ok('用户消息已渲染', rendered.userMsgs >= 1);
+  ok('助手消息已渲染', rendered.asstMsgs >= 1);
+  // 只断言「非空」不断言长度：模型判断资料不足时会回一句
+  // 「资料中没有相关内容」，那是合法回答，不是渲染失败。
+  // 真正证明渲染工作的是 HTML 那条。
+  ok('正文非空', rendered.answerLen > 0, `${rendered.answerLen} 字`);
+  ok('正文被渲染成 HTML（markdown 生效）', rendered.html.includes('<'), rendered.html.slice(0, 60).replace(/\n/g, ' '));
+  ok('思考块可见且有内容', rendered.thinkVisible && rendered.thinkLen > 0, `${rendered.thinkLen} 字`);
+  ok('agent 过程时间线有内容', rendered.traceItems > 0, `${rendered.traceItems} 条`);
+  ok('来源标签已渲染', rendered.sources > 0, `${rendered.sources} 个`);
+  ok('发送按钮已恢复可用（流已结束）', rendered.busy === false);
+
+  console.log('\n=== 4. 设置抽屉 ===');
+  await cdp.eval(`document.querySelector('#openSettings').click()`);
+  await sleep(1200);
+  const drawer = await cdp.eval(`({
+    open: !document.querySelector('#settings').hidden,
+    body: (document.querySelector('#setBody')?.textContent || '').length,
+    tabs: document.querySelectorAll('#setTabs button').length
+  })`);
+  ok('抽屉已打开', drawer.open);
+  ok('四个页签', drawer.tabs === 4);
+  ok('缓存页有内容', drawer.body > 20, `${drawer.body} 字`);
+
+  for (const [tab, expect] of [['docs', '文档'], ['model', '提供方'], ['system', '系统']]) {
+    await cdp.eval(`document.querySelector('#setTabs button[data-tab="${tab}"]').click()`);
+    await sleep(900);
+    const t = await cdp.eval(`document.querySelector('#setBody')?.textContent || ''`);
+    ok(`「${tab}」页可渲染`, t.includes(expect), t.slice(0, 46).replace(/\s+/g, ' '));
+  }
+
+  console.log('\n=== 5. 控制台 ===');
+  // 首次打开时没有 refresh Cookie，boot() 会试一次刷新并拿到 401 ——
+  // 那是正常分支（它在 try/catch 里），不该算报错
+  const expected = /\/api\/auth\/refresh/;
+  const noisy = /favicon|DevTools|Autofill/i;
+  const realErrors = errors.filter((e) => !noisy.test(e) && !expected.test(e));
+  const expectedHits = errors.filter((e) => expected.test(e) && !noisy.test(e));
+  if (expectedHits.length) console.log(`  （已忽略 ${expectedHits.length} 条：首次打开时的 refresh 401，属正常分支）`);
+  ok('没有意料之外的 console 报错', realErrors.length === 0);
+  if (realErrors.length) realErrors.slice(0, 6).forEach((e) => console.log(`     ⚠️  ${e.slice(0, 160)}`));
+
+  cdp.close();
+} catch (e) {
+  fail++;
+  console.log(`\n❌ 测试中断：${e.message}`);
+} finally {
+  browser.kill();
+  await sleep(400);
+  try { fs.rmSync(profile, { recursive: true, force: true }); } catch { /* 文件占用，留系统清 */ }
+}
+
+console.log(`\n${'─'.repeat(52)}`);
+console.log(`通过 ${pass} 项，失败 ${fail} 项`);
+process.exit(fail ? 1 : 0);

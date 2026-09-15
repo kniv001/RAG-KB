@@ -35,11 +35,24 @@ public class CryptoProperties {
     /** nonce 在 Redis 里的保留时长（秒），应不小于 timestampToleranceSeconds。 */
     private long nonceTtlSeconds = 600;
 
-    /** 免加密路径：公钥本身必须明文可取，否则无法引导。 */
+    /**
+     * 免加密路径。
+     *
+     * <p>公钥本身必须明文可取，否则无法引导 —— 这是加密的起点。
+     *
+     * <p>静态资源同理：前端页面与脚本正是「发起加密的那一方」，
+     * 它们不可能先加密再请求自己。把它们挡在加密之外是唯一的自洽解法。
+     * 边界要说清楚：这层「防偷看」但不「防使坏」—— 替换 JS 的攻击者
+     * 仍然能拿到明文，完整端到端需要客户端由自己控制（桌面端 / App）。
+     */
     private String[] excludePaths = {
             "/api/crypto/public-key",
             "/api/whoami",
-            "/actuator/**"
+            "/actuator/**",
+            "/",
+            "/index.html",
+            "/favicon.ico",
+            "/assets/**"
     };
 
     /**

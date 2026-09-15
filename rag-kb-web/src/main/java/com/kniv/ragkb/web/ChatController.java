@@ -6,6 +6,7 @@ import com.kniv.ragkb.domain.entity.Conversation;
 import com.kniv.ragkb.domain.entity.Message;
 import com.kniv.ragkb.security.crypto.EncryptedApiFilter;
 import com.kniv.ragkb.security.crypto.HybridCryptoService;
+import com.kniv.ragkb.service.agent.AgentEvent;
 import com.kniv.ragkb.service.chat.ChatService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.constraints.NotBlank;
@@ -62,9 +63,16 @@ public class ChatController {
 
         chatPool.submit(() -> {
             try {
-                chatService.chat(body.getConvId(), body.getQuestion(), body.getModel(),
-                        body.getRetrieval(), body.getStrategy(), body.getDocId(),
+                ChatService.Outcome o = chatService.chat(body.getConvId(), body.getQuestion(),
+                        body.getModel(), body.getRetrieval(), body.getStrategy(), body.getDocId(),
                         event -> sse.send(emitter, aesKey, event.type(), event.data()));
+                // 收尾事件必须发：来源（sources）只在这里能拿到，漏掉的话
+                // 流式回答下面永远不显示引用出处，而这正是 RAG 的可信度所在
+                sse.send(emitter, aesKey, AgentEvent.DONE, Map.of(
+                        "convId", o.convId(),
+                        "rounds", o.rounds(),
+                        "queries", o.queries(),
+                        "sources", describe(o.sources())));
                 emitter.complete();
             } catch (Exception e) {
                 sse.sendErrorQuietly(emitter, aesKey, e);

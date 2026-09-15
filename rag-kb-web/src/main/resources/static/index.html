@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>知识库助手</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>📚</text></svg>">
+<link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+
+<!-- ─────────── 登录 ─────────── -->
+<div id="gate" class="gate">
+  <form id="loginForm" class="card">
+    <h1>知识库助手</h1>
+    <p class="sub" id="gateSub">正在连接…</p>
+    <label>用户名<input id="username" autocomplete="username" required></label>
+    <label>密码<input id="password" type="password" autocomplete="current-password" required></label>
+    <button id="loginBtn" type="submit">登录</button>
+    <p class="err" id="loginErr" hidden></p>
+  </form>
+</div>
+
+<!-- ─────────── 主界面 ─────────── -->
+<div id="app" hidden>
+
+  <!-- 窄屏时展开会话列表用的遮罩 -->
+  <div id="scrim" class="scrim" hidden></div>
+
+  <aside id="sidebar">
+    <div class="side-head">
+      <button id="newChat" class="primary" title="新建对话">＋ 新对话</button>
+      <button id="openSettings" class="icon" title="设置">⚙</button>
+    </div>
+    <div id="convList" class="conv-list"></div>
+    <div class="side-foot">
+      <span id="whoami" class="who"></span>
+      <button id="logout" class="link">退出</button>
+    </div>
+  </aside>
+
+  <main id="main">
+    <header id="topbar">
+      <button id="toggleSide" class="icon only-narrow" title="会话列表">☰</button>
+      <div class="title" id="convTitle">新对话</div>
+      <select id="strategy" title="检索策略">
+        <option value="agent">Agent 检索</option>
+        <option value="classic">经典单轮</option>
+      </select>
+    </header>
+
+    <div id="messages" class="messages"></div>
+
+    <!-- 附件区：选中的文件在这里排队，选完立即上传并建索引 -->
+    <div id="attachments" class="attachments" hidden></div>
+
+    <form id="composer" class="composer">
+      <button type="button" id="attachBtn" class="icon" title="添加附件">📎</button>
+      <input type="file" id="fileInput" multiple hidden
+             accept=".txt,.md,.pdf,.docx,.doc,.csv,.json,.log">
+      <textarea id="input" rows="1" placeholder="问点什么…（Enter 发送，Shift+Enter 换行）"></textarea>
+      <button type="submit" id="sendBtn" title="发送">发送</button>
+    </form>
+  </main>
+</div>
+
+<!-- ─────────── 设置抽屉 ─────────── -->
+<div id="settings" class="drawer" hidden>
+  <div class="drawer-head">
+    <div class="tabs" id="setTabs">
+      <button data-tab="cache" class="on">缓存</button>
+      <button data-tab="docs">文档</button>
+      <button data-tab="model">模型</button>
+      <button data-tab="system">系统</button>
+    </div>
+    <button id="closeSettings" class="icon" title="关闭">✕</button>
+  </div>
+  <div class="drawer-body" id="setBody"></div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<script type="module" src="/assets/app.js"></script>
+</body>
+</html>
