@@ -35,7 +35,7 @@ common ← domain ← dao ← service ← web
 | `rag-kb-common` | 统一响应体 `R<T>`、业务异常、工具、配置属性 |
 | `rag-kb-domain` | 实体 / DTO / VO（只引 `mybatis-plus-annotation`，不引自动配置） |
 | `rag-kb-dao` | Mapper、pgvector 类型映射、建表脚本 |
-| `rag-kb-security` | Spring Security + JWT + Redis 会话 + 加解密过滤器 |
+| `rag-kb-security` | Spring Security + JWT 双令牌 + Redis 会话 + 加解密过滤器 |
 | `rag-kb-provider` | 模型提供方抽象（本地 Ollama / 任意 OpenAI 兼容端点） |
 | `rag-kb-service` | RAG 管线、会话、三层缓存、异步任务 |
 | `rag-kb-web` | 启动类 + Controller（唯一可执行模块） |
@@ -57,6 +57,34 @@ java -jar rag-kb-web\target\rag-kb.jar
 > （镜像 id 设为 `central`，以复用你已有的本地仓库缓存）。
 
 服务只监听 `127.0.0.1:8080`，对外仍走 Cloudflare 隧道，不开任何入站端口。
+
+## 认证：双令牌
+
+| 令牌 | 形态 | 有效期 | 存放 | 可否吊销 |
+|---|---|---|---|---|
+| Access | JWT(HS256) | 30 分钟 | 前端内存 | ❌ 到期自然失效 |
+| Refresh | 32 字节随机串 | 30 天 | Redis + httpOnly Cookie | ✅ 登出/改密即删 |
+
+| 接口 | 作用 |
+|---|---|
+| `POST /api/auth/login` | 校验密码 → 返回 access，下发 refresh Cookie |
+| `POST /api/auth/refresh` | 换新 access，并**轮换** refresh |
+| `POST /api/auth/logout` | 删 Redis 记录 + 清 Cookie |
+| `POST /api/auth/password` | 改密并吊销该用户全部会话 |
+| `GET /api/auth/me` · `GET /api/auth/config` | 当前用户 / 登录页公开参数 |
+
+失败限速 10 次 / 15 分钟；用户名不存在时也跑一次哈希，消除时序侧信道。
+401 响应体带 `expired` 标记，前端据此决定「去刷新」还是「跳登录」。
+
+### 与 Python 版共用 users 表（重要）
+
+两套系统连同一个库，因此密码哈希必须逐字节兼容。Python 版为绕开 bcrypt 的
+72 字节上限，**先做一次 SHA-256 再把原始摘要交给 bcrypt**；Java 的
+`BCryptPasswordEncoder` 是直接哈希口令字符串 —— 输入不同，同一个密码两边算出的哈希对不上。
+
+所以实现了 [`Sha256BcryptEncoder`](rag-kb-security/src/main/java/com/kniv/ragkb/security/Sha256BcryptEncoder.java)
+复刻同一方案，并必须走 `BCrypt.hashpw(byte[], salt)` 重载（原始摘要含非 UTF-8 字节，
+用 String API 会被二次编码破坏）。库里的值形如 `$2b$12$...`，不加 `{bcrypt}` 前缀。
 
 ## 端到端加密
 

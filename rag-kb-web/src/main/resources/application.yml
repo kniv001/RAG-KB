@@ -44,14 +44,7 @@ spring:
       max-file-size: 50MB
       max-request-size: 50MB
 
-  # 【临时】JWT 双令牌模块落地后删除这一段，改由 users 表 + {bcrypt} 校验。
-  # {noop} 前缀表示明文比对 —— 只因为这是本地开发用的临时账号。
-  # 注意必须加引号：YAML 里 { 是流式映射的起始符，不引会被解析成对象。
-  security:
-    user:
-      name: ${KB_ADMIN_USER:dev}
-      password: '{noop}${KB_ADMIN_PASSWORD:dev-only-change-me}'
-      roles: ADMIN
+  # 认证走自定义的 JWT 过滤器 + users 表，不再使用 Spring Boot 的内存用户
 
 # ---------------- 端到端加密 ----------------
 # Cloudflare 会终止 TLS，因此能读到经它转发的明文。开启本层后链路上只见密文。
@@ -65,6 +58,20 @@ ragkb:
     timestamp-tolerance-seconds: 300
     nonce-check: true
     nonce-ttl-seconds: 600
+
+  # ---------------- 双令牌 ----------------
+  # Access 是无状态 JWT：验签即用、零查询，代价是签发后无法撤回 → TTL 给短。
+  # Refresh 是不透明随机串托管在 Redis：可主动吊销，所以登出/改密才真正生效。
+  jwt:
+    secret: ${KB_JWT_SECRET:}          # 留空则首次启动生成并写入 secret-file
+    secret-file: data/keys/jwt-secret.txt
+    issuer: rag-kb
+    access-ttl-seconds: 1800           # 30 分钟
+    refresh-ttl-seconds: 2592000       # 30 天
+    login-max-fails: 10
+    login-lock-seconds: 900
+    refresh-cookie-name: kb_refresh
+    refresh-cookie-path: /api/auth     # 限定路径，减少 Cookie 暴露面
 
 mybatis-plus:
   configuration:

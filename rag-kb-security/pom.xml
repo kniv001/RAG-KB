@@ -15,9 +15,11 @@
     <description>认证鉴权：Spring Security + JWT(RS256/HS256) + Redis 会话 + bcrypt</description>
 
     <dependencies>
+        <!-- 认证需要读 users 表，故依赖 dao。依赖图仍无环：
+             common ← domain ← dao ← security ← service ← web -->
         <dependency>
             <groupId>com.kniv.ragkb</groupId>
-            <artifactId>rag-kb-domain</artifactId>
+            <artifactId>rag-kb-dao</artifactId>
         </dependency>
 
         <dependency>
