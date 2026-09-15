@@ -19,9 +19,12 @@
             <groupId>com.kniv.ragkb</groupId>
             <artifactId>rag-kb-common</artifactId>
         </dependency>
+        <!-- 用完整 starter 而非只带注解的 mybatis-plus-annotation：
+             自定义 TypeHandler 需要 org.apache.ibatis.type.BaseTypeHandler（在 mybatis 核心包），
+             只引注解包拿不到它。 -->
         <dependency>
             <groupId>com.baomidou</groupId>
-            <artifactId>mybatis-plus-annotation</artifactId>
+            <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
         </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>
