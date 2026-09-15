@@ -83,6 +83,16 @@ CREATE INDEX IF NOT EXISTS chunks_model_idx ON chunks (embed_model);
 CREATE INDEX IF NOT EXISTS chunks_embedding_idx
     ON chunks USING hnsw (embedding vector_cosine_ops);
 
+CREATE TABLE IF NOT EXISTS users (
+    id            text PRIMARY KEY,
+    username      text NOT NULL UNIQUE,
+    password_hash text NOT NULL,          -- bcrypt，永不存明文
+    is_active     boolean NOT NULL DEFAULT true,
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    updated_at    timestamptz NOT NULL DEFAULT now(),
+    last_login_at timestamptz
+);
+
 CREATE TABLE IF NOT EXISTS conversations (
     id         text PRIMARY KEY,
     title      text NOT NULL DEFAULT '新对话',

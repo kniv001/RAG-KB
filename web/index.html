@@ -79,8 +79,27 @@
 </style>
 </head>
 <body>
+
+<!-- 登录浮层：未认证时覆盖全屏 -->
+<div id="login-overlay" style="position:fixed;inset:0;background:var(--bg);display:flex;
+     align-items:center;justify-content:center;z-index:99;padding:16px">
+  <div class="card" style="width:100%;max-width:340px;margin:0">
+    <h2 style="font-size:17px;margin:0 0 2px">RAG 知识库</h2>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:16px">请登录后使用</div>
+    <input type="text" id="luser" placeholder="用户名" autocomplete="username"
+           style="margin-bottom:8px">
+    <input type="password" id="lpass" placeholder="密码" autocomplete="current-password">
+    <div class="row" style="margin-top:12px">
+      <button class="act" id="lgo" style="width:100%;padding:10px">登录</button>
+    </div>
+    <div id="lerr" style="font-size:13px;color:#a33;min-height:20px;margin-top:8px"></div>
+    <div id="linfo" style="font-size:11px;color:var(--muted);margin-top:6px"></div>
+  </div>
+</div>
+
 <div class="wrap">
-  <h1>RAG 知识库</h1>
+  <h1>RAG 知识库 <span id="userchip"
+      style="float:right;font-size:12px;font-weight:400;color:var(--muted);line-height:2"></span></h1>
   <div class="sub" id="health">检测中…</div>
 
   <nav>
@@ -177,6 +196,18 @@
   <!-- ============ 设置 ============ -->
   <section id="tab-settings" class="hide">
     <div class="card">
+      <h2>账号</h2>
+      <div class="row">
+        <input type="password" id="pwold" placeholder="当前密码" class="grow" autocomplete="current-password">
+        <input type="password" id="pwnew" placeholder="新密码（至少 8 位）" class="grow" autocomplete="new-password">
+        <button class="act" id="pwgo">修改密码</button>
+      </div>
+      <div id="pwmsg" style="font-size:13px;color:var(--muted);min-height:18px;margin-top:8px"></div>
+      <div style="font-size:12px;color:var(--muted);margin-top:6px">
+        密码以 <b>bcrypt 哈希</b>存于 PostgreSQL，任何地方都不保存明文。改密后<b>所有刷新令牌立即吊销</b>。
+      </div>
+    </div>
+    <div class="card">
       <h2>默认模型</h2>
       <div class="row">
         <label class="grow">对话 <select id="defchat"></select></label>
@@ -201,13 +232,92 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;
 const fmt = b => b < 1024 ? b+' B' : b < 1048576 ? (b/1024).toFixed(1)+' KB' : (b/1048576).toFixed(1)+' MB';
 let SETTINGS = null, CONV = null, DOCS = [];
 
-async function api(path, opts){
-  const r = await fetch(path, opts);
+// ---------- 认证 ----------
+// Access Token 只存内存变量（不放 localStorage —— 那样任何 XSS 都能读走）。
+// Refresh Token 在 httpOnly Cookie 里，JS 读不到，靠 POST /api/auth/refresh 换新 access。
+let ACCESS = null, ACCESS_EXP = 0, CURRENT_USER = null;
+
+async function rawAuth(path, body){
+  const r = await fetch(path, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    credentials: 'same-origin',
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status));
+  return j;
+}
+
+function adopt(j){ ACCESS = j.access_token; ACCESS_EXP = Date.now() + j.expires_in * 1000;
+                   CURRENT_USER = j.user && j.user.username; renderUserChip(); }
+
+async function doRefresh(){
+  try { adopt(await rawAuth('/api/auth/refresh')); return true; }
+  catch { ACCESS = null; return false; }
+}
+
+function showLogin(msg){
+  $('#login-overlay').style.display = 'flex';
+  if (msg) $('#lerr').textContent = msg;
+  setTimeout(() => $('#luser').focus(), 50);
+}
+function hideLogin(){ $('#login-overlay').style.display = 'none'; }
+
+function renderUserChip(){
+  $('#userchip').innerHTML = CURRENT_USER
+    ? `${esc(CURRENT_USER)} · <a href="#" id="logout" style="color:var(--muted)">退出</a>`
+    : '';
+  const lo = $('#logout');
+  if (lo) lo.onclick = async (e) => {
+    e.preventDefault();
+    try { await rawAuth('/api/auth/logout'); } catch {}
+    ACCESS = null; CURRENT_USER = null; renderUserChip(); showLogin('已退出');
+  };
+}
+
+// ---------- 统一的 API 调用：自动带令牌 + 401 自动刷新重试 ----------
+async function api(path, opts = {}){
+  // 快过期就先刷新，省掉一次注定失败的往返
+  if (ACCESS && Date.now() > ACCESS_EXP - 120000) await doRefresh();
+
+  const call = () => {
+    const o = Object.assign({}, opts, {credentials: 'same-origin'});
+    o.headers = Object.assign({}, opts.headers);
+    if (ACCESS) o.headers['Authorization'] = 'Bearer ' + ACCESS;
+    return fetch(path, o);
+  };
+
+  let r = await call();
+  if (r.status === 401) {
+    if (await doRefresh()) {
+      r = await call();                       // 刷新成功，重放一次
+    } else {
+      ACCESS = null; renderUserChip(); showLogin('登录已过期，请重新登录');
+      throw new Error('未登录');
+    }
+  }
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status));
   return j;
 }
 const post = (p, body) => api(p, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+
+async function doLogin(){
+  const u = $('#luser').value.trim(), p = $('#lpass').value;
+  if (!u || !p) { $('#lerr').textContent = '请填写用户名和密码'; return; }
+  $('#lgo').disabled = true; $('#lerr').textContent = '';
+  try {
+    adopt(await rawAuth('/api/auth/login', {username: u, password: p}));
+    $('#lpass').value = '';
+    hideLogin();
+    await boot();
+  } catch(e){
+    $('#lerr').textContent = e.message;
+    $('#lpass').value = '';
+  }
+  $('#lgo').disabled = false;
+}
 
 // ---------- 健康 ----------
 async function health(){
@@ -299,6 +409,18 @@ async function loadSettings(){
     } catch(e){ el.innerHTML = `<span class="no">${esc(e.message)}</span>`; }
   });
 }
+
+$('#pwgo').onclick = async () => {
+  const o = $('#pwold').value, n = $('#pwnew').value;
+  if (!o || !n) { $('#pwmsg').textContent = '请把两个框都填上'; return; }
+  if (n.length < 8) { $('#pwmsg').textContent = '新密码至少 8 位'; return; }
+  $('#pwmsg').textContent = '提交中…';
+  try {
+    const r = await post('/api/auth/password', {old_password: o, new_password: n});
+    $('#pwmsg').textContent = `✔ 已更新，吊销 ${r.revoked_sessions} 个会话。下次 access 过期后需重新登录。`;
+    $('#pwold').value = ''; $('#pwnew').value = '';
+  } catch(e){ $('#pwmsg').textContent = '✘ ' + e.message; }
+};
 
 $('#savedef').onclick = async () => {
   const [cp, cm] = $('#defchat').value.split('|');
@@ -465,11 +587,27 @@ $('#csend').onclick = sendChat;
 $('#cq').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendChat(); });
 
 // ---------- 启动 ----------
-(async () => {
+async function boot(){
   await loadSettings();
   await loadDocs();
   await loadConvs();
   health();
+}
+
+$('#lgo').onclick = doLogin;
+$('#lpass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+$('#luser').addEventListener('keydown', e => { if (e.key === 'Enter') $('#lpass').focus(); });
+
+(async () => {
+  try {
+    const cfg = await api('/api/auth/config');
+    $('#linfo').textContent =
+      `Access ${Math.round(cfg.access_ttl / 60)} 分钟 · Refresh ${Math.round(cfg.refresh_ttl / 86400)} 天` +
+      (cfg.redis ? '' : ' · ⚠ 会话存储不可用');
+  } catch {}
+  // 有有效的 refresh cookie 就直接进主界面，否则显示登录页
+  if (await doRefresh()) { hideLogin(); await boot(); }
+  else showLogin();
 })();
 </script>
 </body>

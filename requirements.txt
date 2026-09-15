@@ -6,3 +6,6 @@ pgvector
 httpx
 pypdf
 python-docx
+redis
+bcrypt
+pyjwt

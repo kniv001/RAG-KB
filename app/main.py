@@ -9,17 +9,18 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app import cache, chat, config, db, embed, pipeline, providers, retrieve, settings, store, tasks
-from app.auth import BasicAuthMiddleware
+from app import (auth, cache, chat, config, db, embed, pipeline, providers,
+                 rstore, retrieve, security, settings, store, tasks, users)
+from app.auth import TokenAuthMiddleware
 
-app = FastAPI(title="RAG KB", version="0.5.0")
-app.add_middleware(BasicAuthMiddleware)
+app = FastAPI(title="RAG KB", version="0.6.0")
+app.add_middleware(TokenAuthMiddleware)
 
 config.UPLOADS.mkdir(parents=True, exist_ok=True)
 
@@ -48,6 +49,7 @@ def _startup() -> None:
         db.init_schema()
         settings.load()
         n = tasks.reap_orphans()
+        users.migrate_legacy()
         print(f"[db] schema ready (reaped {n} orphan task(s))", flush=True)
     except Exception as exc:  # noqa: BLE001
         print(f"[db] startup failed: {type(exc).__name__}: {exc}", flush=True)
@@ -75,6 +77,7 @@ def health() -> dict:
         "service": "rag-kb",
         "version": app.version,
         "db": db.health(),
+        "redis": rstore.health(),
         "embed": embed.check(),
         "defaults": settings.load()["default_chat"],
         "stale": store.stale_documents(),
@@ -89,6 +92,95 @@ class DefaultsBody(BaseModel):
     embed_provider: str | None = None
     embed_model: str | None = None
     chat_temperature: float | None = Field(default=None, ge=0, le=2)
+
+
+@app.get("/api/auth/config")
+def auth_config() -> dict:
+    """登录页需要知道的公开信息（不含任何凭据）。"""
+    return {
+        "ok": True,
+        "access_ttl": security.ACCESS_TTL,
+        "refresh_ttl": security.REFRESH_TTL,
+        "has_user": users.count() > 0,
+        "redis": rstore.health().get("ok", False),
+    }
+
+
+class LoginBody(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class PasswordBody(BaseModel):
+    old_password: str = Field(min_length=1, max_length=256)
+    new_password: str = Field(min_length=8, max_length=256)
+
+
+@app.post("/api/auth/login")
+def api_login(body: LoginBody, request: Request, response: Response) -> dict:
+    try:
+        result = auth.login(body.username, body.password, request.headers.get("user-agent", ""))
+    except auth.AuthError as exc:
+        raise HTTPException(401, str(exc)) from exc
+    except rstore.StoreError as exc:
+        raise HTTPException(503, f"会话存储不可用：{exc}") from exc
+    token = result.pop("refresh_token")
+    auth.set_refresh_cookie(response, token, auth.cookie_secure(request))
+    return {"ok": True, **result}
+
+
+@app.post("/api/auth/refresh")
+def api_refresh(request: Request, response: Response) -> dict:
+    try:
+        result = auth.refresh(
+            request.cookies.get(auth.COOKIE_NAME), request.headers.get("user-agent", "")
+        )
+    except auth.AuthError as exc:
+        auth.clear_refresh_cookie(response)
+        raise HTTPException(401, str(exc)) from exc
+    token = result.pop("refresh_token")
+    auth.set_refresh_cookie(response, token, auth.cookie_secure(request))
+    return {"ok": True, **result}
+
+
+@app.post("/api/auth/logout")
+def api_logout(request: Request, response: Response) -> dict:
+    auth.logout(request.cookies.get(auth.COOKIE_NAME))
+    auth.clear_refresh_cookie(response)
+    return {"ok": True}
+
+
+@app.get("/api/auth/me")
+def api_me(request: Request) -> dict:
+    username = getattr(request.state, "user", None)
+    user = users.get(username) if username else None
+    if not user:
+        raise HTTPException(401, "未登录")
+    return {
+        "ok": True,
+        "username": user["username"],
+        "created_at": user["created_at"].isoformat(timespec="seconds"),
+        "last_login_at": user["last_login_at"].isoformat(timespec="seconds")
+        if user.get("last_login_at")
+        else None,
+        "sessions": rstore.count_user_sessions(username),
+    }
+
+
+@app.post("/api/auth/password")
+def api_change_password(body: PasswordBody, request: Request) -> dict:
+    username = getattr(request.state, "user", None)
+    if not username:
+        raise HTTPException(401, "未登录")
+    try:
+        revoked = auth.change_password(username, body.old_password, body.new_password)
+    except auth.AuthError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {
+        "ok": True,
+        "revoked_sessions": revoked,
+        "note": "密码已更新，所有刷新令牌已吊销。当前 access token 仍有效至自然过期（≤30 分钟）。",
+    }
 
 
 @app.get("/api/whoami")

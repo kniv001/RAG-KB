@@ -159,12 +159,49 @@ bin/ pgsql/ pgdata/ data/      均 gitignore
 | GET | `/api/providers/{id}/probe` | 探测某提供方可用模型 |
 | GET | `/api/health` | 数据库 + 向量模型自检 + 失效文档 |
 
-## 认证
+## 认证：双令牌
 
-全站 HTTP Basic（`app/auth.py`）。凭据：环境变量 `KB_USER`/`KB_PASS` > `data/auth.json`。
+| 令牌 | 形态 | 有效期 | 存放 | 可否主动吊销 |
+|---|---|---|---|---|
+| **Access** | JWT (HS256) | 30 分钟 | 前端**内存变量** | ❌ 到期自然失效 |
+| **Refresh** | 32 字节随机串 | 30 天 | **Redis** + httpOnly Cookie | ✅ 登出/改密即删 |
 
-> 升级路径：域名解析生效后换 **named tunnel + Cloudflare Access**，
-> 把"共享密码"升级为身份验证 + 边缘拦截。
+| 接口 | 作用 |
+|---|---|
+| `POST /api/auth/login` | 校验密码 → 返回 access，下发 refresh Cookie |
+| `POST /api/auth/refresh` | 换新 access，并**轮换** refresh（旧的立即作废） |
+| `POST /api/auth/logout` | 删 Redis 记录 + 清 Cookie |
+| `POST /api/auth/password` | 改密并吊销该用户**全部**会话 |
+| `GET /api/auth/me` | 当前用户与活跃会话数 |
+| `GET /api/auth/config` | 登录页需要的公开参数（免认证） |
+
+失败限速：**10 次 / 15 分钟**（Redis 计数器）。用户名不存在时也走一次哈希计算，避免时序侧信道。
+
+### 密码存储
+
+PostgreSQL `users.password_hash`，**bcrypt**（工作因子 12），任何地方都不存明文。
+旧版的 `data/auth.json` 明文凭据会在首次启动时**自动迁移进库**并改名为 `.migrated`。
+
+> bcrypt 只吃前 72 字节，中文密码很容易超 —— 所以先做一次 SHA-256 再交给 bcrypt，
+> 任意长度都安全且不损失熵。
+
+### 两个关键设计选择
+
+**Refresh 为什么用 httpOnly Cookie 而不是 localStorage** ——
+localStorage 里的令牌任何 XSS 都能读走；httpOnly Cookie JS 读不到。再配 `SameSite=Strict`，
+跨站请求不会带上它，顺带免疫 CSRF。
+`Secure` 标志按 `X-Forwarded-Proto` **自动判定**：经 Cloudflare 是 https 就带，
+本机 `http://127.0.0.1` 调试不带（否则浏览器根本不发送）。
+
+**访问令牌为什么只放内存** —— 刷新页面就重新走一次 `/api/auth/refresh` 换新的，
+用户无感；代价是令牌不落地，XSS 也无从窃取长期凭据。
+
+### 已知取舍
+
+JWT 是无状态的，所以**登出后 access token 在剩余有效期（≤30 分钟）内仍然可用**。
+要彻底即时失效就得每个请求查一次 Redis —— 那就等于放弃 JWT 的意义。
+当前用短 TTL 覆盖这个窗口，属于有意的权衡而非疏漏。
+
 
 ## 进度
 
