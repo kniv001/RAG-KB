@@ -1,4 +1,4 @@
-# REQUIRES ADMIN —— 安装 cloudflared 为 Windows 服务（token 模式，无需 cert.pem）
+﻿# REQUIRES ADMIN —— 安装 cloudflared 为 Windows 服务（token 模式，无需 cert.pem）
 #
 # 为什么用 token 模式：本网络对 login.cloudflareaccess.org 的 IPv4 连接做 RST 封锁
 # （实测 -4 失败 / -6 成功），而 `cloudflared tunnel login` 只会走 IPv4，

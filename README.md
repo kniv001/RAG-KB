@@ -125,9 +125,23 @@ bin/ pgsql/ pgdata/ data/      均 gitignore
 ## 使用
 
 ```powershell
-.\scripts\start.ps1              # 一键拉起 PG + 应用 + 隧道
+.\scripts\start.ps1              # 拉起 PostgreSQL + 应用（隧道由 cloudflared 服务负责）
 .\scripts\pg.ps1 status          # 数据库启停：start|stop|status|restart
 ```
+
+## 开机自启
+
+| 组件 | 方式 |
+|---|---|
+| 隧道 | **Windows 服务** `cloudflared`（Automatic，装一次即可） |
+| PostgreSQL + 应用 | **启动文件夹**：`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\RAG-KB.vbs`，登录后隐藏窗口调用 `scripts\start.ps1` |
+
+> 为什么不用计划任务：`Register-ScheduledTask` 与 `schtasks /create` 在本机都返回
+> **Access is denied**，用户级创建同样被拒。启动文件夹方式**无需管理员**，效果等价
+> （代价是必须登录一次才会触发）。
+>
+> 若哪天想改成真正的系统级自启（开机即起、不需登录），需要管理员权限。
+
 
 ## 主要接口
 

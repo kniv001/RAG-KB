@@ -1,4 +1,4 @@
-# REQUIRES ADMIN. 需要管理员权限运行。
+﻿# REQUIRES ADMIN. 需要管理员权限运行。
 #
 # 目的：判定 cloudflared 连不上 Cloudflare 边缘，责任在「本机代理」还是「校园网」
 #   停用 EternalTunnel(Meta Tunnel) -> 让 cloudflared 走校园网原生出口 -> 看能否建连

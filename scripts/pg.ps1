@@ -1,4 +1,4 @@
-# PostgreSQL 启停控制
+﻿# PostgreSQL 启停控制
 #   .\scripts\pg.ps1 start | stop | status | restart
 #
 # 注意：start 刻意不用 `pg_ctl start`。pg_ctl 启动的 postgres 进程会继承 stdout 句柄，
