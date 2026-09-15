@@ -14,6 +14,7 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.context.RequestAttributeSecurityContextRepository;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -57,7 +58,12 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        // 上下文存请求属性 —— 这是它在异步派发（SSE）中唯一能活下来的地方
+        RequestAttributeSecurityContextRepository contextRepository =
+                new RequestAttributeSecurityContextRepository();
+
         http
+                .securityContext(c -> c.securityContextRepository(contextRepository))
                 // 无状态 API：认证靠 Bearer 头，不靠 Cookie 会话，CSRF 无立足点
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -77,7 +83,7 @@ public class SecurityConfig {
                 // 绕过响应包装器，导致 401 不被加密
                 .exceptionHandling(e -> e.authenticationEntryPoint(
                         (req, res, ex) -> writeUnauthorized(req, res)))
-                .addFilterBefore(new JwtAuthenticationFilter(jwtService),
+                .addFilterBefore(new JwtAuthenticationFilter(jwtService, contextRepository),
                         UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }

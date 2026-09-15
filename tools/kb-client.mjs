@@ -106,11 +106,76 @@ export function makeClient(baseUrl) {
     return { status: r.status, body, encrypted, decrypted, raw: text, headers: r.headers };
   }
 
+  /**
+   * 打开一条流式（SSE）连接。
+   *
+   * 与 call 的区别：响应不走「整体加密」，而是每个事件的 data 各自是一个加密信封
+   * —— 因为过滤器的整体加密需要先缓存完整响应，那会破坏流式。
+   * 返回 aesKey 与 decrypt，供调用方逐事件解密。
+   */
+  async function openStream(method, path, payload, opts = {}) {
+    await fetchPublicKey();
+    const aesKey = crypto.randomBytes(32);
+    const wrapped = crypto.publicEncrypt(
+      { key: publicKey, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' }, aesKey);
+    const meta = encWith(aesKey, {
+      ts: Date.now(),
+      nonce: crypto.randomBytes(12).toString('base64url'),
+      token: opts.token ?? null,
+    });
+    const headers = {
+      'X-Enc-Key': wrapped.toString('base64'),
+      'X-Enc-Meta': Buffer.from(JSON.stringify(meta)).toString('base64'),
+      Accept: 'text/event-stream',
+    };
+    const cookie = cookieHeader();
+    if (cookie) headers['Cookie'] = cookie;
+
+    const init = { method, headers };
+    if (payload !== undefined) {
+      headers['Content-Type'] = 'application/json';
+      init.body = JSON.stringify(encWith(aesKey, payload));
+    }
+    const response = await fetch(`${baseUrl}${path}`, init);
+    absorbCookies(response);
+    return {
+      response,
+      aesKey,
+      /** 事件 data 是加密信封就解开，否则原样返回 */
+      decrypt: (data) => (data && data.d ? JSON.parse(decWith(aesKey, data)) : data),
+    };
+  }
+
   return {
     call,
+    openStream,
     fetchPublicKey,
     keyInfo: () => keyInfo,
     cookies,
     refreshCookie: () => cookies.get('kb_refresh'),
   };
+}
+
+/** 逐事件解析 SSE 流。Spring 的 SseEmitter 写出形如 "event:token\ndata:{...}\n\n"。 */
+export async function readSse(response, onEvent) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf('\n\n')) >= 0) {
+      const block = buf.slice(0, i);
+      buf = buf.slice(i + 2);
+      let name = 'message';
+      const dataLines = [];
+      for (const line of block.split('\n')) {
+        if (line.startsWith('event:')) name = line.slice(6).trim();
+        else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+      }
+      if (dataLines.length) onEvent(name, dataLines.join('\n'));
+    }
+  }
 }

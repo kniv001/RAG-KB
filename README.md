@@ -86,6 +86,43 @@ java -jar rag-kb-web\target\rag-kb.jar
 复刻同一方案，并必须走 `BCrypt.hashpw(byte[], salt)` 重载（原始摘要含非 UTF-8 字节，
 用 String API 会被二次编码破坏）。库里的值形如 `$2b$12$...`，不加 `{bcrypt}` 前缀。
 
+## 模型提供方
+
+本地与云端同一套接口，运行时可切。引用格式 `providerId/model` —— 用斜杠是因为模型名
+本身常含冒号（`qwen3:8b`），用冒号分隔会歧义。
+
+| 接口 | 作用 |
+|---|---|
+| `GET /api/provider/list` | 已配置的提供方 + 默认模型（API Key 只回传是否已设置） |
+| `GET /api/provider/{id}/probe` | 探测可用性并列出真实可用的模型 |
+| `POST /api/provider/chat` | 同步对话 |
+| `POST /api/provider/chat/stream` | **SSE 流式**，逐事件加密 |
+| `POST /api/provider/embed` | 向量化 |
+
+接一家新服务（DeepSeek / 通义 / Moonshot / 智谱 / 硅基流动 / OpenAI / vLLM / LM Studio）
+只需在 `application.yml` 补一段配置，不用改代码。
+
+用 JDK 自带的 `java.net.http.HttpClient`：`BodyHandlers.ofLines()` 原生支持逐行读，
+做 NDJSON（Ollama）与 SSE（OpenAI 兼容）都是零依赖，不必为流式引入响应式栈。
+
+### 流式与加密的冲突（设计要点）
+
+过滤器的响应加密是「把响应整体缓存下来再加密」，而 SSE 的价值恰恰是**边生成边推** ——
+两者直接冲突。所以流式路径（默认 `/**/stream`）**只解密请求，响应由控制器逐事件加密**：
+过滤器把 AES 密钥放进请求属性交接给控制器，控制器在流结束时清零。
+
+> 模式必须写成 `/**/stream` 而不是 `**/stream`：`AntPathMatcher` 按 `/` 切段，
+> 请求 URI 以 `/` 开头会产生一个空段，缺前导斜杠会**静默匹配失败** ——
+> 表现为「流式接口返回 application/json 且只有一个响应体」。
+
+### ASYNC 派发与 SecurityContext
+
+SSE 是异步请求，容器在流结束时会对同一路径再做一次 **ASYNC 派发**。
+`OncePerRequestFilter` 默认跳过异步派发，所以 JWT 过滤器第二趟不执行；
+而 Spring Security 6 起不再自动保存 SecurityContext —— 不显式保存的话，
+异步派发会判定为未认证，表现为「流跑到最后突然 500 / Access Denied」。
+解法：`RequestAttributeSecurityContextRepository` 把上下文存进**请求属性**，它会跨异步派发保留。
+
 ## 端到端加密
 
 ### 为什么做

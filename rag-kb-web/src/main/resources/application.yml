@@ -73,6 +73,37 @@ ragkb:
     refresh-cookie-name: kb_refresh
     refresh-cookie-path: /api/auth     # 限定路径，减少 Cookie 暴露面
 
+  # ---------------- 模型提供方 ----------------
+  # 本地与云端同一套接口，运行时可切。引用格式 providerId/model（用斜杠，
+  # 因为模型名本身常含冒号：qwen3:8b）。
+  # 加一家新服务只要补一段配置 —— DeepSeek / 通义 / Moonshot / 智谱 /
+  # 硅基流动 / OpenAI / vLLM / LM Studio 都是 OpenAI 兼容，不用改代码。
+  provider:
+    default-chat: local/qwen3:8b
+    default-embed: local/bge-m3
+    timeout-seconds: 300               # 本地大模型推理慢，给足
+    stream-idle-seconds: 120
+    providers:
+      local:
+        kind: ollama
+        label: 本地 Ollama
+        base: http://127.0.0.1:11434
+        chat-models:
+          - qwen3:8b
+          - qwen3.5:9b
+          - llama3.1:8b
+        embed-models:
+          - bge-m3
+      deepseek:
+        kind: openai
+        label: DeepSeek API
+        base: https://api.deepseek.com/v1
+        api-key: ${KB_DEEPSEEK_KEY:}
+        chat-models:
+          - deepseek-chat
+          - deepseek-reasoner
+        embed-models: []
+
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true

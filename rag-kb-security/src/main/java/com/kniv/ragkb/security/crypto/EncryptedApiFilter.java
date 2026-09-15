@@ -47,6 +47,20 @@ public class EncryptedApiFilter extends OncePerRequestFilter {
 
     private static final String NONCE_PREFIX = "enc:nonce:";
 
+    /**
+     * 请求属性名：解开后的 AES 密钥。
+     *
+     * <p>仅对 {@link CryptoProperties#getStreamPathPatterns() 流式路径}设置 ——
+     * 那些路径的响应由控制器逐事件加密，需要拿到这把密钥。控制器用完后必须清零。
+     */
+    public static final String ATTR_AES_KEY = "ragkb.crypto.aesKey";
+
+    /** 取流式端点交接过来的 AES 密钥；非流式请求返回 null。 */
+    public static byte[] aesKeyOf(HttpServletRequest request) {
+        Object v = request.getAttribute(ATTR_AES_KEY);
+        return v instanceof byte[] k ? k : null;
+    }
+
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         if (!props.isEnabled()) {
@@ -121,9 +135,18 @@ public class EncryptedApiFilter extends OncePerRequestFilter {
                         .getBytes(StandardCharsets.UTF_8);
             }
 
-            // ---- 3) 放行，并把响应加密 ----
+            // ---- 3) 放行 ----
             HttpServletRequest working =
                     new DecryptedRequestWrapper(request, body, token);
+
+            // 流式端点：不包装响应（否则缓冲会破坏流式），把密钥交接给控制器逐事件加密。
+            // 交接的是副本 —— 过滤器 finally 里会清零自己那份，副本归控制器所有。
+            if (isStreaming(request)) {
+                request.setAttribute(ATTR_AES_KEY, aesKey.clone());
+                chain.doFilter(working, response);
+                return;
+            }
+
             ContentCachingResponseWrapper cached = new ContentCachingResponseWrapper(response);
             chain.doFilter(working, cached);
 
@@ -148,6 +171,16 @@ public class EncryptedApiFilter extends OncePerRequestFilter {
         } finally {
             HybridCryptoService.wipe(aesKey);
         }
+    }
+
+    private boolean isStreaming(HttpServletRequest request) {
+        String uri = request.getRequestURI();
+        for (String p : props.getStreamPathPatterns()) {
+            if (matcher.match(p, uri)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean hasBody(HttpServletRequest request) {

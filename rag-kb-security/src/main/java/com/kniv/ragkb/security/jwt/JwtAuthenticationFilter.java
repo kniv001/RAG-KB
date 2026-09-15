@@ -11,8 +11,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
+import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
@@ -35,6 +37,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private static final String BEARER = "Bearer ";
 
     private final JwtService jwtService;
+    private final SecurityContextRepository contextRepository;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
@@ -48,7 +51,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     var auth = new UsernamePasswordAuthenticationToken(
                             username, null, List.of(new SimpleGrantedAuthority("ROLE_USER")));
                     auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                    SecurityContextHolder.getContext().setAuthentication(auth);
+
+                    SecurityContext context = SecurityContextHolder.createEmptyContext();
+                    context.setAuthentication(auth);
+                    SecurityContextHolder.setContext(context);
+
+                    // 必须显式保存：Spring Security 6 起不再自动把上下文写进仓库。
+                    // 不保存的话，SSE 这类异步请求在 ASYNC 派发时（OncePerRequestFilter
+                    // 默认跳过异步派发，本过滤器第二趟不会执行）会判定为未认证，
+                    // 表现为「流跑到最后突然 500 / Access Denied」。
+                    // 用 RequestAttributeSecurityContextRepository：上下文存请求属性，
+                    // 而请求属性恰恰会跨异步派发保留下来。
+                    contextRepository.saveContext(context, request, response);
                 } catch (ExpiredJwtException e) {
                     request.setAttribute(ATTR_EXPIRED, Boolean.TRUE);
                 } catch (JwtException | IllegalArgumentException e) {
