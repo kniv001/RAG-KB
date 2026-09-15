@@ -133,6 +133,13 @@ ragkb:
         kind: ollama
         label: 本地 Ollama
         base: http://127.0.0.1:11434
+        # 与 OLLAMA_FLASH_ATTENTION=1 + OLLAMA_KV_CACHE_TYPE=q8_0 配套（见 docs/ollama-tuning.md）。
+        # 实测（8GB 卡，桌面占 ~2.7GB）：两个模型都 100% 驻留显存的可靠上限
+        #   量化前 fp16：8192
+        #   量化后 q8_0：10240（11264 起 bge-m3 就掉到 CPU）
+        # 判定必须连续多轮跑，不能只看一次 —— 单次扫描曾在 12288 上给出过假阳性。
+        # 失败模式很凶：bge-m3 掉到 CPU 后单次 retrieve 从 56ms 劣化到 5474ms。
+        num-ctx: 10240
         chat-models:
           # 只有 qwen3:4b 能在本机 8GB 显存上与 bge-m3 同时常驻；其余几个是
           # 8b 级别，实测装进来就会把向量模型挤出去（切换重载 2~4 秒）。
