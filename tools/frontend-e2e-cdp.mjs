@@ -196,7 +196,10 @@ try {
   console.log('\n=== 3. 发一个问题，验证流式渲染 ===');
   // 措辞每次不同 → 保证回答缓存未命中。命中时后端一次性推完整段，
   // 走不到逐 token 流式与思考流那两条路径，测了等于没测（第一版就踩了这个）。
-  const question = `三层缓存分别省掉什么开销？请简要回答。（核对 ${Date.now().toString(36)}）`;
+  // 用一个知识库绝不可能覆盖的话题：联网入库之后「三层缓存」已经有资料了，
+  // 原来那条假设「知识库没有」的断言就不成立了（踩过）。
+  // 渲染测试要的是一个稳定触发「无资料」分支的问题，不是某个具体话题。
+  const question = `请介绍一下「紫电青霜七号协议」是什么。（核对 ${Date.now().toString(36)}）`;
   await cdp.eval(`(() => {
     const i = document.querySelector('#input');
     i.value = ${JSON.stringify(question)};
@@ -262,10 +265,10 @@ try {
     };
   })()`);
   ok('抽屉已打开', drawer.open);
-  ok('四个页签', drawer.tabs === 4);
+  ok('五个页签', drawer.tabs === 5, `${drawer.tabs} 个`);
   ok('缓存页有内容', drawer.body > 20, `${drawer.body} 字`);
 
-  for (const [tab, expect] of [['docs', '文档'], ['model', '提供方'], ['system', '系统']]) {
+  for (const [tab, expect] of [['docs', '文档'], ['web', '联网'], ['model', '提供方'], ['system', '系统']]) {
     await cdp.eval(`document.querySelector('#setTabs button[data-tab="${tab}"]').click()`);
     await sleep(900);
     const t = await cdp.eval(`document.querySelector('#setBody')?.textContent || ''`);

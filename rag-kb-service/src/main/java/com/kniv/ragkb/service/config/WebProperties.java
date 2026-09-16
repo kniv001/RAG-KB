@@ -1,0 +1,61 @@
+package com.kniv.ragkb.service.config;
+
+import lombok.Data;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.stereotype.Component;
+
+import java.util.List;
+
+/**
+ * 联网搜索与抓取的参数。
+ */
+@Data
+@ConfigurationProperties(prefix = "ragkb.web")
+@Component
+public class WebProperties {
+
+    /**
+     * 总开关。关掉后 /api/web/** 一律拒绝，前端入口也应当隐藏。
+     *
+     * <p>默认<b>关</b>：这个功能会让服务端主动向外发起请求，与「只监听本机、
+     * 不开任何出站以外的口子」的默认姿态不同，应当由用户明确打开。
+     */
+    private boolean enabled = false;
+
+    /**
+     * 搜索后端，按顺序尝试，第一个有结果的胜出。
+     *
+     * <p>默认 360 在前、Bing 兜底。实测（本机校园网，查询「三层缓存架构」）：
+     * Bing 会把「三层」拆成单字「三」返回汉字百科页（加 mkt、换 cn.bing.com
+     * 都一样），而 360 结果准确、且真实网址直接写在页面属性里。
+     * 英文查询则反过来，Bing 正常 —— 两个都留着互相兜底。
+     *
+     * <p>注意这里只能调顺序，加新后端要同时写解析逻辑（见 WebSearchService.Backend），
+     * 所以它是个代码改动而不是配置改动。
+     */
+    private List<String> backends = List.of("so360", "bing");
+
+    /** 抓取时伪装的 UA。用默认的 Java UA 很多站点会直接拒绝 */
+    private String userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            + "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+    /** 单次请求超时（秒） */
+    private int timeoutSeconds = 20;
+
+    /** 单个页面最多读多少字节，防止撞上大文件把内存吃光 */
+    private int maxPageBytes = 2_000_000;
+
+    /** 一次搜索返回多少条结果 */
+    private int maxResults = 8;
+
+    /**
+     * 连续抓取之间的间隔（毫秒）。
+     *
+     * <p>批量入库时会连着抓十几个页面。不间隔的话既是给对端添麻烦，
+     * 也容易被判定成爬虫直接封掉。
+     */
+    private int fetchDelayMs = 400;
+
+    /** 单篇正文的字符上限，超过就截断 —— 太长切分与向量化都吃不消 */
+    private int maxTextChars = 60_000;
+}

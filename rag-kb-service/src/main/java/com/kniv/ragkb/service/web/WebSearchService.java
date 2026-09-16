@@ -1,0 +1,341 @@
+package com.kniv.ragkb.service.web;
+
+import com.kniv.ragkb.service.config.WebProperties;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.springframework.stereotype.Service;
+
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+
+/**
+ * 联网搜索与网页正文抓取。
+ *
+ * <p><b>为什么不用搜索 API</b>：不需要密钥。代价是要解析各家搜索页的 HTML，
+ * 对方改版就会坏 —— 所以做成了多后端按顺序尝试。
+ *
+ * <p><b>后端选择是实测定的，不是拍的</b>（本机校园网，查询「三层缓存架构」）：
+ * <table>
+ *   <tr><th>后端</th><th>结果</th></tr>
+ *   <tr><td>Bing</td><td>❌ 把「三层」拆成单字「三」，返回汉字百科页。
+ *       加了 {@code mkt}/{@code setmkt}/{@code cn.bing.com} 全都一样 —— 编码没问题
+ *       （回显的码点确认收到的就是完整查询），是它自己切词坏了。英文查询正常</td></tr>
+ *   <tr><td>搜狗</td><td>✅ 结果最准，但链接是 {@code /link?url=...} 的 JS 跳转，
+ *       解析不出真实网址，入库时拿不到出处，只能放弃</td></tr>
+ *   <tr><td><b>360</b></td><td>✅ 结果准，且真实网址直接写在 {@code data-mdurl} 属性里，
+ *       不用额外请求</td></tr>
+ *   <tr><td>百度</td><td>❌ 返回 1.4KB 反爬页</td></tr>
+ *   <tr><td>DuckDuckGo / Brave / Jina / 维基</td><td>❌ 直接连不上</td></tr>
+ * </table>
+ *
+ * <p><b>抓取任意 URL 是 SSRF 风险</b>，而这里尤其要紧：本机的 Redis 监听在
+ * 0.0.0.0:6379，应用自己在 127.0.0.1:8080。一条搜索结果完全可能指向内网地址。
+ * 所以每次抓取前都做地址检查，见 {@link #assertPublicHost}。
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class WebSearchService {
+
+    private final WebProperties props;
+
+    /** 一条搜索结果 */
+    public record WebHit(String title, String url, String snippet, String backend) {
+    }
+
+    /** 抓下来的一个页面 */
+    public record FetchedPage(String url, String title, String text) {
+    }
+
+    /** 支持的搜索后端。加一个需要同时写解析逻辑，所以配置只能调顺序、不能加新的。 */
+    public enum Backend {
+        SO360("https://www.so.com/s", "q"),
+        BING("https://www.bing.com/search", "q"),
+        SOGOU("https://www.sogou.com/web", "query");
+
+        final String endpoint;
+        final String param;
+
+        Backend(String endpoint, String param) {
+            this.endpoint = endpoint;
+            this.param = param;
+        }
+    }
+
+    // ---------------- 搜索 ----------------
+
+    /**
+     * 按配置顺序尝试各后端，第一个返回结果的胜出。
+     *
+     * <p>而不是「合并所有后端的结果」：不同后端的排序不可比，合并需要另一套
+     * 融合逻辑（检索那边用 RRF 解决的就是同类问题）。这里的场景是「哪个能用用哪个」，
+     * 简单按顺序取第一个能用的就够。
+     */
+    public List<WebHit> search(String query, Integer count) {
+        requireEnabled();
+        if (query == null || query.isBlank()) {
+            return List.of();
+        }
+        int n = count == null || count <= 0 ? props.getMaxResults()
+                : Math.min(count, props.getMaxResults());
+
+        List<String> failures = new ArrayList<>();
+        for (String name : props.getBackends()) {
+            Backend b;
+            try {
+                b = Backend.valueOf(name.trim().toUpperCase());
+            } catch (IllegalArgumentException e) {
+                log.warn("不认识的后端 {}，跳过（支持的：{}）", name,
+                        java.util.Arrays.toString(Backend.values()));
+                continue;
+            }
+            try {
+                List<WebHit> hits = searchOne(b, query, n);
+                if (!hits.isEmpty()) {
+                    log.debug("联网搜索「{}」用 {} 得到 {} 条", query, b, hits.size());
+                    return hits;
+                }
+                failures.add(b + ":无结果");
+            } catch (Exception e) {
+                log.warn("后端 {} 搜索失败：{}", b, e.getMessage());
+                failures.add(b + ":" + e.getMessage());
+            }
+        }
+        // 全挂了要能说清是哪个环节挂的，而不是只回一个空列表
+        throw new IllegalStateException("所有搜索后端都没拿到结果 —— " + String.join("；", failures));
+    }
+
+    private List<WebHit> searchOne(Backend b, String query, int n) throws IOException {
+        String url = b.endpoint + "?" + b.param + "="
+                + URLEncoder.encode(query, StandardCharsets.UTF_8)
+                + ("bing".equalsIgnoreCase(b.name()) ? "&count=" + n * 2 : "");
+        Document doc = fetchDocument(url);
+
+        List<WebHit> hits = switch (b) {
+            case SO360 -> parseSo360(doc, n);
+            case BING -> parseBing(doc, n);
+            case SOGOU -> parseSogou(doc, n);
+        };
+        return hits;
+    }
+
+    private List<WebHit> parseSo360(Document doc, int n) {
+        List<WebHit> out = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (Element li : doc.select("li.res-list")) {
+            Element a = li.selectFirst("h3.res-title a");
+            if (a == null) {
+                continue;
+            }
+            // 真实网址在 data-mdurl 里；href 是 so.com 的跳转链接，别用那个
+            String href = a.attr("data-mdurl");
+            if (href.isBlank()) {
+                href = a.attr("abs:href");
+            }
+            if (href.isBlank() || !seen.add(href)) {
+                continue;
+            }
+            Element p = li.selectFirst(".res-list-summary");
+            out.add(new WebHit(clean(a.text()), href, p == null ? "" : clean(p.text()), "so360"));
+            if (out.size() >= n) {
+                break;
+            }
+        }
+        return out;
+    }
+
+    private List<WebHit> parseBing(Document doc, int n) {
+        List<WebHit> out = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (Element li : doc.select("li.b_algo")) {
+            Element a = li.selectFirst("h2 a[href]");
+            if (a == null) {
+                continue;
+            }
+            String href = a.attr("abs:href");
+            if (href.isBlank() || !seen.add(href)) {
+                continue;
+            }
+            Element p = li.selectFirst(".b_caption p");
+            if (p == null) {
+                p = li.selectFirst("p");
+            }
+            out.add(new WebHit(clean(a.text()), href, p == null ? "" : clean(p.text()), "bing"));
+            if (out.size() >= n) {
+                break;
+            }
+        }
+        return out;
+    }
+
+    /**
+     * 搜狗做兜底。
+     *
+     * <p>它的结果质量最好，但链接是 {@code /link?url=...} 的 JS 跳转 ——
+     * 实测直接请求那个地址不会跳到目标页（HTTP 200 但停在原地），
+     * 所以拿不到真实网址、也就没法入库。只有当前面的后端都挂时才用它，
+     * 且此时结果里的 url 字段对入库不可用。
+     */
+    private List<WebHit> parseSogou(Document doc, int n) {
+        List<WebHit> out = new ArrayList<>();
+        for (Element d : doc.select("div.vrwrap")) {
+            Element a = d.selectFirst("h3 a[href]");
+            if (a == null) {
+                continue;
+            }
+            Element p = d.selectFirst("p");
+            out.add(new WebHit(clean(a.text()), a.attr("abs:href"),
+                    p == null ? "" : clean(p.text()), "sogou"));
+            if (out.size() >= n) {
+                break;
+            }
+        }
+        return out;
+    }
+
+    // ---------------- 抓取 ----------------
+
+    public FetchedPage fetch(String url) {
+        requireEnabled();
+        assertPublicHost(url);
+        try {
+            Document doc = fetchDocument(url);
+
+            // 先摘掉导航、页脚、脚本这些与正文无关的东西。
+            // 不去掉的话正文里会混进大量菜单文字，切分与向量化都被稀释
+            doc.select("script, style, noscript, iframe, svg, form, nav, header, "
+                    + "footer, aside, .nav, .menu, .sidebar, .comment, .advertisement").remove();
+
+            String title = doc.title().isBlank() ? url : clean(doc.title());
+
+            // 优先取语义化的正文容器；没有就退回 body
+            Element main = doc.selectFirst("article");
+            if (main == null) {
+                main = doc.selectFirst("main");
+            }
+            if (main == null) {
+                main = doc.selectFirst("[role=main]");
+            }
+            if (main == null) {
+                main = doc.selectFirst("#content, .content, #main, .article, .post");
+            }
+            if (main == null) {
+                main = doc.body();
+            }
+            String text = main == null ? "" : normalise(main.text());
+
+            if (text.length() > props.getMaxTextChars()) {
+                text = text.substring(0, props.getMaxTextChars());
+            }
+            log.debug("抓取 {} → {} 字", url, text.length());
+            return new FetchedPage(url, title, text);
+        } catch (IOException e) {
+            throw new IllegalStateException("抓取失败：" + e.getMessage(), e);
+        }
+    }
+
+    /** 连续抓取之间歇一下，别把对端当压测目标 */
+    public void pauseBetweenFetches() {
+        int ms = props.getFetchDelayMs();
+        if (ms <= 0) {
+            return;
+        }
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    // ---------------- 内部 ----------------
+
+    private Document fetchDocument(String url) throws IOException {
+        return Jsoup.connect(url)
+                .userAgent(props.getUserAgent())
+                .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+                .timeout(props.getTimeoutSeconds() * 1000)
+                .maxBodySize(props.getMaxPageBytes())
+                .followRedirects(true)
+                .ignoreContentType(false)   // 非 HTML 的直接失败，别把二进制当文本读
+                .get();
+    }
+
+    /**
+     * 只允许抓公网地址。
+     *
+     * <p>不加这道检查的话，一条精心构造的搜索结果就能让服务端去请求
+     * {@code http://127.0.0.1:6379/} 之类的内网地址 —— 而本机的 Redis
+     * 正是监听在 0.0.0.0 上。这是典型的 SSRF。
+     *
+     * <p>注意要逐个检查 DNS 解析出的<b>全部</b>地址：只查第一个的话，
+     * 一个同时解析到公网与内网的域名就能绕过。
+     */
+    private void assertPublicHost(String url) {
+        URI u;
+        try {
+            u = URI.create(url);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("网址格式不合法：" + url);
+        }
+        String scheme = u.getScheme() == null ? "" : u.getScheme().toLowerCase();
+        if (!scheme.equals("http") && !scheme.equals("https")) {
+            throw new IllegalArgumentException("只支持 http/https，收到：" + scheme);
+        }
+        String host = u.getHost();
+        if (host == null || host.isBlank()) {
+            throw new IllegalArgumentException("网址缺少主机名：" + url);
+        }
+        InetAddress[] addrs;
+        try {
+            addrs = InetAddress.getAllByName(host);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("域名解析失败：" + host);
+        }
+        for (InetAddress a : addrs) {
+            if (a.isLoopbackAddress() || a.isAnyLocalAddress() || a.isLinkLocalAddress()
+                    || a.isSiteLocalAddress() || a.isMulticastAddress()
+                    || isUniqueLocalV6(a) || isCgnat(a)) {
+                throw new IllegalArgumentException(
+                        "拒绝抓取内网地址：" + host + " → " + a.getHostAddress());
+            }
+        }
+    }
+
+    private static boolean isUniqueLocalV6(InetAddress a) {
+        byte[] b = a.getAddress();
+        return b.length == 16 && (b[0] & 0xfe) == 0xfc;   // fc00::/7
+    }
+
+    private static boolean isCgnat(InetAddress a) {
+        byte[] b = a.getAddress();
+        // 100.64.0.0/10 —— 运营商级 NAT，本机所在校园网就在这个段里
+        return b.length == 4 && (b[0] & 0xff) == 100 && (b[1] & 0xc0) == 64;
+    }
+
+    /** 搜索结果标题里常夹着高亮标记残留与多余空白 */
+    private static String clean(String s) {
+        return s == null ? "" : s.replaceAll("\\s+", " ").strip();
+    }
+
+    /** 合并多余空白：网页正文里的换行与缩进毫无信息量，只会浪费切分预算 */
+    private static String normalise(String s) {
+        return s.replace(' ', ' ').replaceAll("[ \\t\\x0B\\f\\r]+", " ")
+                .replaceAll("\\n{3,}", "\n\n").strip();
+    }
+
+    private void requireEnabled() {
+        if (!props.isEnabled()) {
+            throw new IllegalStateException("联网功能未开启（ragkb.web.enabled=false）");
+        }
+    }
+}

@@ -30,6 +30,7 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
     @Select("""
             <script>
             SELECT c.id, c.doc_id, c.seq, c.content, d.name AS doc_name,
+                   d.source_kind, d.source_url, d.fetched_at,
                    (c.embedding &lt;=&gt; #{q}::vector) AS distance
             FROM chunks c
             JOIN documents d ON d.id = c.doc_id
@@ -55,6 +56,7 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
     @Select("""
             <script>
             SELECT c.id, c.doc_id, c.seq, c.content, d.name AS doc_name,
+                   d.source_kind, d.source_url, d.fetched_at,
                    (SELECT count(*) FROM unnest(ARRAY[
                        <foreach collection="terms" item="t" separator=",">#{t}</foreach>
                    ]::text[]) AS x WHERE c.content ILIKE '%' || x || '%') AS hits

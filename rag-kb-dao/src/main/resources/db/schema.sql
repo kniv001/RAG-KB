@@ -34,6 +34,15 @@ CREATE TABLE IF NOT EXISTS chunks (
     UNIQUE (doc_id, seq)
 );
 
+-- 来源信息：区分「用户自己传的」与「联网抓回来的」。
+--
+-- 为什么网页内容必须记抓取时间：它会过期。同一条结论，三年前抓的和昨天抓的
+-- 可信度完全不同，而一旦入库、两者在检索结果里长得一模一样。
+-- 回答引用网页来源时要带上时间，否则会把陈旧结论当成现行事实。
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_kind text NOT NULL DEFAULT 'upload';
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_url  text;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS fetched_at  timestamptz;
+
 CREATE INDEX IF NOT EXISTS chunks_doc_idx   ON chunks (doc_id);
 CREATE INDEX IF NOT EXISTS chunks_model_idx ON chunks (embed_model);
 CREATE INDEX IF NOT EXISTS chunks_embedding_idx

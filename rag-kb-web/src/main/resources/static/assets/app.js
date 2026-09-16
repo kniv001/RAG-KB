@@ -832,6 +832,7 @@ async function renderSettings(tab) {
   try {
     if (tab === 'cache') await renderCache(body);
     else if (tab === 'docs') await renderDocs(body);
+    else if (tab === 'web') await renderWeb(body);
     else if (tab === 'model') await renderModel(body);
     else renderSystem(body);
   } catch (e) {
@@ -888,6 +889,137 @@ async function renderDocs(body) {
   body.replaceChildren(
     h('h3', { text: `文档（${d.count || 0}）` }),
     d.count ? tbl : h('p', { class: 'muted', text: '还没有文档。回到对话页点 📎 添加。' }));
+}
+
+// ═══════════════ 联网搜索 ═══════════════
+
+// 每次搜索的结果留在这里，勾选状态跟着它走 —— 重渲染时不会丢
+let webHits = [];
+const webPicked = new Set();
+let webQuery = '';
+
+/**
+ * 联网页。
+ *
+ * 搜索与入库刻意分成两步：搜索只列结果，入库才真的抓取并写进知识库。
+ * 抓进来的每一条以后都会参与检索，事后清理比事前挑掉麻烦得多 ——
+ * 所以先让用户看一眼再决定。
+ */
+async function renderWeb(body) {
+  const st = await api('GET', '/api/web/status');
+  if (!st.enabled) {
+    body.replaceChildren(
+      h('h3', { text: '联网搜索' }),
+      h('p', { class: 'muted', text: '当前是关闭的。' }),
+      h('p', { class: 'muted', text: '打开方式：启动时带上环境变量 KB_WEB_ENABLED=true。' }),
+      h('p', { class: 'muted', text: '默认关闭是有意的 —— 这个功能会让服务端主动向外部发起请求，与「只监听本机」的默认姿态不同，应当由你明确打开。' }));
+    return;
+  }
+
+  const box = h('div');
+  const input = h('input', {
+    type: 'text',
+    placeholder: '想搜什么？搜到之后勾选需要的再入库',
+    value: webQuery,
+    onKeydown: (e) => { if (e.key === 'Enter') doSearch(); },
+  });
+  const go = h('button', { class: 'primary', text: '搜索', onClick: doSearch });
+  const status = h('span', { class: 'muted' });
+
+  const results = h('div', { class: 'web-results' });
+  const actions = h('div', { class: 'row' });
+
+  body.replaceChildren(
+    h('h3', { text: '联网搜索' }),
+    h('p', { class: 'muted', text:
+      `后端：${(st.backends || []).join(' → ')}（按顺序尝试，第一个有结果的胜出）。`
+      + `一次最多 ${st.maxResults} 条。` }),
+    h('div', { class: 'row' }, h('div', { class: 'grow' }, input), go),
+    h('div', { class: 'row' }, status),
+    results,
+    actions);
+
+  async function doSearch() {
+    const q = input.value.trim();
+    if (!q) return;
+    webQuery = q;
+    go.disabled = true;
+    status.textContent = '搜索中…';
+    results.replaceChildren();
+    actions.replaceChildren();
+    try {
+      const d = await api('POST', '/api/web/search', { query: q });
+      webHits = d.results || [];
+      webPicked.clear();
+      status.textContent = webHits.length ? `命中 ${webHits.length} 条` : '没有结果';
+      renderHits();
+    } catch (e) {
+      status.textContent = '搜索失败：' + e.message;
+    } finally {
+      go.disabled = false;
+    }
+  }
+
+  function renderHits() {
+    results.replaceChildren();
+    for (const [i, r] of webHits.entries()) {
+      const cb = h('input', { type: 'checkbox' });
+      cb.checked = webPicked.has(r.url);
+      cb.addEventListener('change', () => {
+        cb.checked ? webPicked.add(r.url) : webPicked.delete(r.url);
+        renderActions();
+      });
+      results.append(h('div', { class: 'web-hit' },
+        h('label', { class: 'web-head' }, cb,
+          h('span', { class: 't', text: r.title || '(无标题)' })),
+        h('div', { class: 'muted', text: r.url }),
+        r.snippet ? h('div', { class: 'snippet', text: r.snippet }) : null));
+    }
+    renderActions();
+  }
+
+  function renderActions() {
+    actions.replaceChildren();
+    if (!webHits.length) return;
+    actions.append(
+      h('span', { class: 'grow muted', text: `已选 ${webPicked.size} / ${webHits.length}` }),
+      h('button', {
+        class: 'primary', text: '抓取并入库',
+        onClick: async (e) => {
+          if (!webPicked.size) { toast('先勾选几条', true); return; }
+          e.target.disabled = true;
+          e.target.textContent = '抓取中…';
+          try {
+            const d = await api('POST', '/api/web/ingest', { urls: [...webPicked] });
+            const ok = d.results.filter((x) => !x.error);
+            const bad = d.results.filter((x) => x.error);
+            toast(`入库 ${ok.length} 篇${bad.length ? `，失败 ${bad.length} 篇` : ''}`,
+                  bad.length > 0 && ok.length === 0);
+            // 失败原因直接摆在页面上：常见的是页面需要 JS 渲染，只回一句
+            // 「入库 0 篇」用户不知道该怎么办
+            results.replaceChildren();
+            for (const r of d.results) {
+              results.append(h('div', { class: 'web-hit' },
+                h('div', { class: 'web-head' },
+                  h('span', { class: 't', text: r.title || r.url }),
+                  h('span', { class: 'pill ' + (r.error ? 'bad' : 'ok'),
+                    text: r.error ? '失败' : '已入库' })),
+                h('div', { class: 'muted', text: r.url }),
+                h('div', { class: 'snippet', text: r.error || `${r.chars} 字，正在建索引` })));
+            }
+            actions.replaceChildren(h('p', { class: 'muted',
+              text: '去「文档」页可以看到它们，索引完成前状态是 stored。' }));
+          } catch (err) {
+            toast(err.message, true);
+            e.target.disabled = false;
+            e.target.textContent = '抓取并入库';
+          }
+        },
+      }));
+  }
+
+  // 从别的页签切回来时不重跑搜索，但把上次的结果画出来
+  if (webHits.length) { renderHits(); status.textContent = `命中 ${webHits.length} 条（上次搜索）`; }
 }
 
 async function renderModel(body) {
