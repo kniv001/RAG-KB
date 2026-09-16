@@ -82,9 +82,26 @@ public class WebSearchService {
      * 简单按顺序取第一个能用的就够。
      */
     public List<WebHit> search(String query, Integer count) {
+        return search(query, count, null);
+    }
+
+    /**
+     * @param site 限定域名（如 {@code blog.csdn.net}）。非空时拼成 {@code site:域名}
+     *             加在查询后面 —— 实测 360 支持这个限定（10 条里 8 条来自指定站）。
+     */
+    public List<WebHit> search(String query, Integer count, String site) {
         requireEnabled();
         if (query == null || query.isBlank()) {
             return List.of();
+        }
+        String effective = query;
+        if (site != null && !site.isBlank()) {
+            // 域名单词化，避免用户从配置里带进奇怪的字符拼坏查询。
+            // 正则里的连字符要写成 \\- —— Java 字符串里 \− 是非法转义（编译期就报）
+            String d = site.trim().replaceAll("[^A-Za-z0-9.\\-]", "");
+            if (!d.isEmpty()) {
+                effective = query + " site:" + d;
+            }
         }
         int n = count == null || count <= 0 ? props.getMaxResults()
                 : Math.min(count, props.getMaxResults());
@@ -100,9 +117,10 @@ public class WebSearchService {
                 continue;
             }
             try {
-                List<WebHit> hits = searchOne(b, query, n);
+                List<WebHit> hits = searchOne(b, effective, n);
                 if (!hits.isEmpty()) {
-                    log.debug("联网搜索「{}」用 {} 得到 {} 条", query, b, hits.size());
+                    log.debug("联网搜索「{}」{}用 {} 得到 {} 条", query,
+                            site == null || site.isBlank() ? "" : "（限 " + site + "）", b, hits.size());
                     return hits;
                 }
                 failures.add(b + ":无结果");

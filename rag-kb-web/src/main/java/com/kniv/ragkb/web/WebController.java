@@ -39,6 +39,15 @@ public class WebController {
         m.put("backends", props.getBackends());
         m.put("maxResults", props.getMaxResults());
         m.put("maxTextChars", props.getMaxTextChars());
+        List<Map<String, Object>> src = new ArrayList<>();
+        for (WebProperties.Source s : props.getSources()) {
+            Map<String, Object> one = new LinkedHashMap<>();
+            one.put("label", s.getLabel());
+            one.put("domain", s.getDomain());
+            one.put("note", s.getNote());
+            src.add(one);
+        }
+        m.put("sources", src);
         return R.ok(m);
     }
 
@@ -50,7 +59,8 @@ public class WebController {
         if (body == null || body.getQuery() == null || body.getQuery().isBlank()) {
             return R.fail(R.CODE_BAD_REQUEST, "缺少查询词");
         }
-        List<WebSearchService.WebHit> hits = search.search(body.getQuery(), body.getCount());
+        List<WebSearchService.WebHit> hits = search.search(
+                body.getQuery(), body.getCount(), body.getSite());
 
         List<Map<String, Object>> rows = new ArrayList<>(hits.size());
         for (WebSearchService.WebHit h : hits) {
@@ -114,6 +124,8 @@ public class WebController {
         private String query;
         /** 想要几条结果；为空用配置默认值 */
         private Integer count;
+        /** 限定来源域名；为空则全网 */
+        private String site;
     }
 
     @Data

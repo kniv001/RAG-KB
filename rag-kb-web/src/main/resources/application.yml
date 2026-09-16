@@ -188,6 +188,24 @@ ragkb:
     fetch-delay-ms: 400            # 连续抓取的间隔，别把对端当压测目标
     max-text-chars: 60000          # 单篇正文上限，太长切分与向量化都吃不消
 
+    # 可选的检索来源。选了某个就在那个站里搜（拼 site: 限定），不选则全网。
+    # 这份清单是**实测可达**的站点，不是拍脑袋列的 —— 同一台机器上
+    # 维基百科 DNS 被污染 + SNI 阻断、百度百科返回 403 反爬页、
+    # 搜狗百科给拦截页、StackOverflow 连不上，所以都没列进来。
+    sources:
+      - { label: 360百科,      domain: baike.so.com }
+      - { label: 中国大百科,   domain: zgbk.com }
+      - { label: CSDN,         domain: blog.csdn.net }
+      - { label: 博客园,       domain: cnblogs.com }
+      - { label: 掘金,         domain: juejin.cn }
+      - { label: 思否,         domain: segmentfault.com }
+      - { label: 知乎,         domain: zhihu.com }
+      - { label: MDN,          domain: developer.mozilla.org }
+      # 维基百科列在这里是为了「可达之后能直接用」，now 抓不动：
+      # 本机所在网络对它做了 DNS 污染（返回 Twitter/Facebook 的段）+
+      # 按 SNI 阻断 TLS（拿真实 IP 直连也握不上手），DoH 也全不通。
+      - { label: 维基百科,     domain: wikipedia.org, note: "本机网络不可达（DNS 污染 + SNI 阻断）" }
+
   # ---------------- 模型提供方 ----------------
   # 本地与云端同一套接口，运行时可切。引用格式 providerId/model（用斜杠，
   # 因为模型名本身常含冒号：qwen3:8b）。

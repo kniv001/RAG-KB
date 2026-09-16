@@ -4,6 +4,7 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -58,4 +59,25 @@ public class WebProperties {
 
     /** 单篇正文的字符上限，超过就截断 —— 太长切分与向量化都吃不消 */
     private int maxTextChars = 60_000;
+
+    /**
+     * 可选的检索来源。选了某个来源，搜索就会带上 {@code site:} 限定，
+     * 只在那个站里找 —— 不选则全网。
+     *
+     * <p>为什么要有这个：全网搜出来的东西质量参差，而不同的问题适合不同的来源。
+     * 查概念该去百科，查实现该去技术社区。限定来源比在结果里挑省事得多。
+     *
+     * <p>默认这份清单是**实测可达**的站点，不是拍脑袋列的。见 {@code note} 字段。
+     */
+    private List<Source> sources = new ArrayList<>();
+
+    @Data
+    public static class Source {
+        /** 界面上显示的名字 */
+        private String label;
+        /** 域名，用于拼 site: 限定 */
+        private String domain;
+        /** 备注（例如当前网络不可达），界面上会一并显示 */
+        private String note;
+    }
 }

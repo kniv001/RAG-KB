@@ -50,6 +50,30 @@ if (hits.length) {
   hits.slice(0, 3).forEach((h) => console.log(`    · ${h.title.slice(0, 40)}  ${h.url.slice(0, 56)}`));
 }
 
+console.log('\n=== 1.5 来源限定（site:）===');
+{
+  const st2 = await call('GET', '/api/web/status');
+  const srcs = st2.body?.data?.sources || [];
+  ok('status 里带出了来源清单', srcs.length > 0, `${srcs.length} 个`);
+  const csdn = srcs.find((s) => s.domain === 'blog.csdn.net');
+  ok('清单里有实测可达的站点', !!csdn, srcs.map((s) => s.label).join('、'));
+
+  // 维基在当前网络不可达，配置里带了 note 说明 —— 界面据此提示用户，
+  // 而不是让用户选完之后只看到一句「没结果」
+  const wiki = srcs.find((s) => s.domain === 'wikipedia.org');
+  ok('不可达的来源带了备注', !!wiki?.note, wiki?.note || '（没有维基条目）');
+
+  if (csdn) {
+    const r = await call('POST', '/api/web/search',
+      { query: '三层缓存', site: csdn.domain, count: 5 });
+    const hits = r.body?.data?.results || [];
+    ok('限定来源能搜到结果', hits.length > 0, `${hits.length} 条`);
+    const inSite = hits.filter((h) => h.url.includes(csdn.domain)).length;
+    ok('结果确实来自被限定的站点', inSite >= Math.max(1, hits.length - 2),
+       `${inSite}/${hits.length} 条来自 ${csdn.domain}`);
+  }
+}
+
 console.log('\n=== 2. SSRF 防护 ===');
 for (const bad of ['http://127.0.0.1:6379/', 'http://localhost:8080/', 'http://10.0.0.1/',
                    'file:///C:/Windows/win.ini', 'http://192.168.1.1/']) {

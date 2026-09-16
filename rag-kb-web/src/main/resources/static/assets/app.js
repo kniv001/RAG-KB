@@ -898,6 +898,7 @@ async function renderDocs(body) {
 let webHits = [];
 const webPicked = new Set();
 let webQuery = '';
+let webSite = '';   // 限定来源域名；空 = 全网
 
 /**
  * 联网页。
@@ -917,13 +918,22 @@ async function renderWeb(body) {
     return;
   }
 
-  const box = h('div');
   const input = h('input', {
     type: 'text',
     placeholder: '想搜什么？搜到之后勾选需要的再入库',
     value: webQuery,
     onKeydown: (e) => { if (e.key === 'Enter') doSearch(); },
   });
+  // 来源限定。带 note 的（例如维基百科当前不可达）标出来，
+  // 免得用户选了之后只看到「没结果」而不知道为什么
+  const sel = h('select', { title: '限定检索来源' },
+    h('option', { value: '', text: '全部站点' }),
+    ...(st.sources || []).map((s) => h('option', {
+      value: s.domain,
+      text: s.note ? `${s.label}（${s.note}）` : s.label,
+    })));
+  sel.value = webSite;
+  sel.addEventListener('change', () => { webSite = sel.value; });
   const go = h('button', { class: 'primary', text: '搜索', onClick: doSearch });
   const status = h('span', { class: 'muted' });
 
@@ -935,7 +945,7 @@ async function renderWeb(body) {
     h('p', { class: 'muted', text:
       `后端：${(st.backends || []).join(' → ')}（按顺序尝试，第一个有结果的胜出）。`
       + `一次最多 ${st.maxResults} 条。` }),
-    h('div', { class: 'row' }, h('div', { class: 'grow' }, input), go),
+    h('div', { class: 'row' }, h('div', { class: 'grow' }, input), sel, go),
     h('div', { class: 'row' }, status),
     results,
     actions);
@@ -949,7 +959,9 @@ async function renderWeb(body) {
     results.replaceChildren();
     actions.replaceChildren();
     try {
-      const d = await api('POST', '/api/web/search', { query: q });
+      const body = { query: q };
+      if (webSite) body.site = webSite;
+      const d = await api('POST', '/api/web/search', body);
       webHits = d.results || [];
       webPicked.clear();
       status.textContent = webHits.length ? `命中 ${webHits.length} 条` : '没有结果';
