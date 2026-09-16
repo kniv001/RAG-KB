@@ -7,10 +7,11 @@
                         dist/fonts/*.woff2                 （只取 woff2；
                                                             另两种格式现代浏览器不会请求）
 
-注：没有取 katex 的 contrib/auto-render。公式改由 marked 扩展在**解析阶段**
-直接交给 KaTeX，那条路径比「先渲染 markdown、再扫 DOM 找公式」更早介入 ——
-后者会先被 markdown 的转义处理破坏（\ 变 \、_ 变强调），实测矩阵公式
-就是这么显示成原始字符的。
+注：没有取 katex 的 contrib/auto-render。
+公式改由 marked 扩展在解析阶段直接交给 KaTeX，而不是「先渲染 markdown、
+再扫 DOM 找公式」—— 后者会先被 markdown 的转义处理破坏：LaTeX 的矩阵换行符
+是连续两个反斜杠，markdown 会把它吃成一个；下划线会被当成强调符，
+方括号会被当成链接。实测矩阵公式就是这么显示成原始字符的。
 
 取自 npm registry 的官方包，未做任何修改。升级时重跑同样的复制即可。
 
@@ -18,11 +19,7 @@
   marked 从 v5 起移除了内置 sanitizer，它输出的是**原始 HTML**（连 <script> 都照发）。
   而这里的 markdown 来自模型，模型又受检索到的文档影响 —— 一份带
   <img src=x onerror=...> 的文档完全可能被模型原样带出来，进而在页面里执行，
-  而页面持有 access token。所以流程必须是：
-      marked 解析 → DOMPurify 清洗 → 插入 DOM → KaTeX 渲染公式
+  而页面持有 access token。
 
-  顺序不能颠倒：KaTeX 的输出要经过清洗（它会生成大量 span，但都是安全的），
-  而清洗后再渲染公式则是因为 KaTeX 需要真实的 DOM 节点。
-
-字体只取 woff2：katex.min.css 里每个字体列了 woff2/woff/ttf 三种源，
-浏览器按顺序取第一个支持的格式，现代浏览器都支持 woff2，另两种永远不会被请求。
+所以流程是：marked 解析（公式在扩展里已被 KaTeX 换成 HTML）→ DOMPurify 清洗
+→ 插入 DOM。清洗必须在插入之前，而公式生成必须在 marked 的转义处理之前。
