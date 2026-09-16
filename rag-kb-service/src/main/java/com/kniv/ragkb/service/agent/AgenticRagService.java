@@ -180,8 +180,28 @@ public class AgenticRagService {
      * <p>三者是互补的：中间那层负责细节，最下面那层是漏召时的兜底。
      * 单独任何一层都不够 —— 光有原文撑不起长对话，光有检索会断片，光有摘要又太糊。
      */
-    public record HistoryContext(List<ChatMessage> turns, String excerpt, String summary) {
-        public static final HistoryContext EMPTY = new HistoryContext(List.of(), null, null);
+    public record HistoryContext(List<ChatMessage> turns, String excerpt, String summary,
+                                 java.util.function.Function<List<String>, String> excerptLookup) {
+        public static final HistoryContext EMPTY =
+                new HistoryContext(List.of(), null, null, null);
+
+        /**
+         * 历史召回**必须在规划之后**才解析，所以这里存的是一个函数而不是字符串。
+         *
+         * <p>为什么：规划器把「那它呢」改写成了自包含的查询（「那它的键为什么要带上
+         * 模型名」），用那个去检索才召得回定义「它」的那一轮。而用用户原话当检索键的话，
+         * 键就是「那它呢」这四个字 —— 笔记改写得再好也匹配不上，因为那一轮的文本里
+         * 根本没有「它」。规划器已经做了这个改写，只是改写发生在历史检索**之后**，
+         * 白白浪费了。
+         */
+        public HistoryContext withExcerpt(String ex) {
+            return new HistoryContext(turns, ex, summary, excerptLookup);
+        }
+
+        /** 用一批查询去召回历史；没有 lookup 时返回 null */
+        public String lookupExcerpt(List<String> queries) {
+            return excerptLookup == null ? null : excerptLookup.apply(queries);
+        }
     }
 
     // ---------------- Agentic 模式 ----------------
@@ -205,6 +225,25 @@ public class AgenticRagService {
         Map<Long, ChunkHit> collected = new LinkedHashMap<>();
         List<String> tried = new ArrayList<>();
         List<String> queries = plan(utility, question, null, null, hist);
+
+        // 规划之后才召回历史 —— 一步的顺序是关键。
+        //
+        // **两个都用，取并集**：
+        //   · 规划后的查询能解析指代（「那它呢」→「缓存键为什么带模型名」），
+        //     用原话当键的话，键就是「那它呢」四个字，而那一轮里根本没有「它」
+        //   · 但改写也会**换掉用户自己用的词**。实测：问「最开始说的那个项目代号
+        //     是什么」，规划器改写后就不再提「项目代号」，于是召不回埋代号的那一轮。
+        //     而用户的原话里恰好带着「项目代号」这个能命中的词。
+        //
+        // 只取其一都会丢掉另一半。并集的代价是多几次向量检索（每次约 50ms），
+        // 换来的是两种问法都召得回。
+        List<String> retrievalQueries = new ArrayList<>(queries.size() + 1);
+        retrievalQueries.add(question);
+        retrievalQueries.addAll(queries);
+        String excerpt = hist.lookupExcerpt(retrievalQueries);
+        if (excerpt != null && !excerpt.isBlank()) {
+            hist = hist.withExcerpt(excerpt);
+        }
 
         int round = 0;
         boolean enough = false;
@@ -256,6 +295,12 @@ public class AgenticRagService {
         ProviderRegistry.Ref ref = providers.resolveChat(modelRef);
         List<ChunkHit> hits = retriever.search(question, mode, docId, null);
         onEvent.accept(AgentEvent.retrieve(1, question, hits.size(), sourceNames(hits)));
+        // 经典模式没有规划这一步，只能拿原问题去召回。
+        // agent 模式则在规划之后用改写过的查询 —— 那才是能解析指代的键。
+        String excerpt = hist.lookupExcerpt(List.of(question));
+        if (excerpt != null && !excerpt.isBlank()) {
+            hist = hist.withExcerpt(excerpt);
+        }
         String answer = answer(ref, question, hits, hist, onEvent);
         return new AgentResult(answer, hits, 1, List.of(question));
     }
@@ -474,8 +519,10 @@ public class AgenticRagService {
             // 模型连「你刚才说的第二点是什么」这类问题都会拒绝回答
             user.append("【更早的对话】（本次对话早前的内容，由检索召回）\n")
                     .append(historyExcerpt)
-                    .append("\n（以上用于理解指代与上下文；问「之前说过什么」时依据它回答，"
-                            + "问知识内容时仍以【参考资料】为准）\n\n");
+                    .append("\n（以上是本次对话早前说过的内容。它的效力排在"
+                            + "【参考资料】之后、你自己的通用知识之前："
+                            + "问题若能用它回答，就依据它回答，并说明这是本次对话之前提到的；"
+                            + "只有当它也回答不了时，才说知识库没有、再给通用知识。）\n\n");
         }
         if (contexts.isEmpty()) {
             // 不在这里给处置指令 —— 该怎么答由 ANSWER_SYSTEM 的三段式统一决定。

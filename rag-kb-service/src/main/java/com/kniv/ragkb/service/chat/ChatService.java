@@ -106,8 +106,12 @@ public class ChatService {
             }
             hist = new AgenticRagService.HistoryContext(
                     toChatMessages(recent),
-                    historyIndex.retrieve(convId, question, exclude).text(),
-                    summaries.summaryOf(convId));
+                    null,   // 召回的片段要等规划之后才解析，见下面的 lookup
+                    summaries.summaryOf(convId),
+                    // 传函数而不是结果：规划器会把「那它呢」改写成自包含的查询，
+                    // 用那个去检索才召得回定义「它」的那一轮。用用户原话当键的话，
+                    // 键就是「那它呢」四个字，那一轮里根本没有「它」。
+                    qs -> historyIndex.retrieve(convId, qs, exclude).text());
         }
 
         // 先把 convId 推给前端：否则第一轮回答完才知道会话 id，追问会断链

@@ -97,24 +97,32 @@ public class HistoryIndexService {
      * @param excludeIds 已作为「最近历史」进入提示词的消息 id —— 它们已经在上下文里了，
      *                   再召回一遍是纯浪费
      */
-    public Excerpt retrieve(String convId, String question, Set<Long> excludeIds) {
+    public Excerpt retrieve(String convId, List<String> queries, Set<Long> excludeIds) {
         RagProperties.History cfg = props.getHistory();
         if (!cfg.isEnabled() || convId == null || convId.isBlank()
-                || question == null || question.isBlank()) {
+                || queries == null || queries.isEmpty()) {
             return Excerpt.EMPTY;
         }
         try {
-            float[] q = embedding.embedOne(question);
-            // 排除下推到 SQL：先取后过滤的话，取回来的很可能全在排除集里
-            // （最近窗口那几条永远是最相似的），过滤完就空了。
             Long[] exclude = excludeIds == null ? new Long[0] : excludeIds.toArray(new Long[0]);
-            List<Message> hits = messages.searchByVector(convId,
-                    VectorTypeHandler.toLiteral(q), embedding.modelColumn(), exclude, cfg.getTopK());
+            String model = embedding.modelColumn();
 
+            // 规划器可能给出多条查询，每条都查一遍再合并。
+            // 而不是把几条拼成一句送去嵌入：拼起来会得到一个"平均语义"，
+            // 对哪一条都不够像。
             List<Long> picked = new ArrayList<>();
-            for (Message m : hits) {
-                if (m.getId() != null) {
-                    picked.add(m.getId());
+            for (String q : queries) {
+                if (q == null || q.isBlank()) {
+                    continue;
+                }
+                float[] vec = embedding.embedOne(q);
+                List<Message> hits = messages.searchByVector(convId,
+                        VectorTypeHandler.toLiteral(vec), model, exclude,
+                        Math.max(1, cfg.getTopK() / Math.max(1, queries.size())) + 1);
+                for (Message m : hits) {
+                    if (m.getId() != null && !picked.contains(m.getId())) {
+                        picked.add(m.getId());
+                    }
                 }
             }
             if (picked.isEmpty()) {
