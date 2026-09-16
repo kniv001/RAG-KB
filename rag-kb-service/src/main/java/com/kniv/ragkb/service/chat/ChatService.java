@@ -44,6 +44,8 @@ public class ChatService {
     private final HistoryIndexService historyIndex;
     private final SummaryService summaries;
     private final RagProperties props;
+    /** GPU 空闲门闸：让后台任务避开用户请求 */
+    private final com.kniv.ragkb.service.config.GpuGate gpuGate;
     private final ObjectMapper mapper;
 
     public record Outcome(String convId, String answer, List<ChunkHit> sources,
@@ -62,6 +64,18 @@ public class ChatService {
             throw new IllegalArgumentException("问题为空");
         }
 
+        // 整个问答过程算「用户在用 GPU」。后台任务（滚动摘要等）会看这个标志，
+        // 有用户在跑就等着 —— 本机只有一个推理槽，后台任务跑多久用户就等多久。
+        gpuGate.beginUserRequest();
+        try {
+            return doChat(convId, question, model, retrieval, strategy, docId, onEvent);
+        } finally {
+            gpuGate.endUserRequest();
+        }
+    }
+
+    private Outcome doChat(String convId, String question, String model, String retrieval,
+                           String strategy, String docId, Consumer<AgentEvent> onEvent) {
         Conversation conv;
         AgenticRagService.HistoryContext hist = AgenticRagService.HistoryContext.EMPTY;
         if (convId == null || convId.isBlank()) {

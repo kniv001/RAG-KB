@@ -65,6 +65,7 @@ public class SummaryService {
     private final ProviderRegistry providers;
     private final RagProperties props;
     private final ObjectMapper mapper;
+    private final com.kniv.ragkb.service.config.GpuGate gpuGate;
 
     private final ExecutorService pool = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "conv-summary");
@@ -120,6 +121,12 @@ public class SummaryService {
             long newUpto = fresh.get(fresh.size() - 1).getId();
             pool.submit(() -> {
                 try {
+                    // 等用户静默再开始。本机只有一个推理槽（OLLAMA_NUM_PARALLEL=1），
+                    // 实测后台任务跑 3091ms 时用户请求要等 3095ms —— 等满。
+                    // 摘要晚做几分钟没有代价，让用户等有代价。
+                    if (!gpuGate.awaitIdle()) {
+                        return;
+                    }
                     String merged = summarize(old, fresh);
                     if (merged != null && !merged.isBlank()) {
                         conversations.updateSummary(convId, merged, newUpto);
