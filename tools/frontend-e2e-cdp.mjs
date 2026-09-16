@@ -265,10 +265,10 @@ try {
     };
   })()`);
   ok('抽屉已打开', drawer.open);
-  ok('五个页签', drawer.tabs === 5, `${drawer.tabs} 个`);
+  ok('六个页签', drawer.tabs === 6, `${drawer.tabs} 个`);
   ok('缓存页有内容', drawer.body > 20, `${drawer.body} 字`);
 
-  for (const [tab, expect] of [['docs', '文档'], ['web', '联网'], ['model', '提供方'], ['system', '系统']]) {
+  for (const [tab, expect] of [['docs', '文档'], ['web', '联网'], ['tree', '主题'], ['model', '提供方'], ['system', '系统']]) {
     await cdp.eval(`document.querySelector('#setTabs button[data-tab="${tab}"]').click()`);
     await sleep(900);
     const t = await cdp.eval(`document.querySelector('#setBody')?.textContent || ''`);

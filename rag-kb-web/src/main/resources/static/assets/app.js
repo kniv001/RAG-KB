@@ -833,6 +833,7 @@ async function renderSettings(tab) {
     if (tab === 'cache') await renderCache(body);
     else if (tab === 'docs') await renderDocs(body);
     else if (tab === 'web') await renderWeb(body);
+    else if (tab === 'tree') await renderTree(body);
     else if (tab === 'model') await renderModel(body);
     else renderSystem(body);
   } catch (e) {
@@ -1020,6 +1021,71 @@ async function renderWeb(body) {
 
   // 从别的页签切回来时不重跑搜索，但把上次的结果画出来
   if (webHits.length) { renderHits(); status.textContent = `命中 ${webHits.length} 条（上次搜索）`; }
+}
+
+// ═══════════════ 主题树 ═══════════════
+
+/**
+ * 主题页：看知识库覆盖了哪些方向，以及重建。
+ *
+ * 这一层的用处不在「检索更准」，而在**资料不足时说得出话** ——
+ * 没有它，检索不到就只能回一句「知识库中没有」；有了它，
+ * 回答能说「没有 X，但覆盖了 Y 和 Z 两个方向」。
+ */
+async function renderTree(body) {
+  const st = await api('GET', '/api/tree/status');
+  const nodes = [];
+
+  const head = h('div', { class: 'row' },
+    h('span', { class: 'grow muted', text:
+      st.built
+        ? `${st.clusters} 个主题，覆盖 ${st.builtChunkCount} 块；当前库里共 ${st.currentChunkCount} 块`
+        : `还没有建主题树；当前库里 ${st.currentChunkCount} 块` }),
+    h('button', {
+      class: 'primary',
+      text: st.built ? '重建' : '建主题树',
+      onClick: async (e) => {
+        e.target.disabled = true;
+        e.target.textContent = '建树中…（聚类很快，慢的是给每个主题起名）';
+        try {
+          const r = await api('POST', '/api/tree/build');
+          toast(`建好了：${r.chunks} 块 → ${r.clusters} 个主题，${(r.elapsedMs / 1000).toFixed(1)}s`);
+          renderSettings('tree');
+        } catch (err) {
+          toast(err.message, true);
+          e.target.disabled = false;
+          e.target.textContent = st.built ? '重建' : '建主题树';
+        }
+      },
+    }));
+  nodes.push(head);
+
+  if (st.stale) {
+    // 树过期是静默的：回答照样能出，只是覆盖范围的描述落后于实际。
+    // 所以必须显式提醒，否则用户不会知道该重建。
+    nodes.push(h('p', { class: 'muted', text:
+      '⚠️ 树已过期（建树时 ' + st.builtChunkCount + ' 块，现在 ' + st.currentChunkCount
+      + ' 块）——「知识库覆盖了哪些方向」的描述会落后于实际，建议重建。' }));
+  }
+
+  if (!st.built) {
+    nodes.push(h('p', { class: 'muted', text:
+      '建树会把全部资料按主题聚成几组并各起一个名字。它不会改变检索结果，'
+      + '而是让回答在你问的东西资料里没有时，能说出库里到底覆盖了哪些方向。' }));
+  } else {
+    for (const t of st.topics || []) {
+      nodes.push(h('div', { class: 'web-hit' },
+        h('div', { class: 'web-head' },
+          h('span', { class: 't', text: t.label }),
+          h('span', { class: 'pill', text: `${t.size} 块` })),
+        h('div', { class: 'snippet', text: t.summary })));
+    }
+    nodes.push(h('p', { class: 'muted', text:
+      '这份概览会随每轮提问一起进提示词（约 ' + (st.topics || []).length
+      + ' 行）。它是固定前缀，实测重复部分的 prefill 只要 44ms，所以常驻的代价很小。' }));
+  }
+
+  body.replaceChildren(h('h3', { text: '主题树' }), ...nodes);
 }
 
 async function renderModel(body) {

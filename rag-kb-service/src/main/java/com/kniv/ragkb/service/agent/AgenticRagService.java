@@ -106,7 +106,10 @@ public class AgenticRagService {
             【丙】知识性问题，但知识库没有相关资料
             不要只回一句「资料中没有相关内容」就结束 —— 那样对用户毫无帮助。
             按这个结构回答：
-              ① 第一句先说明知识库中没有这方面的资料；
+              ① 第一句先说明知识库中没有这方面的资料。
+                 若上面给了【知识库主题概览】，顺便点出库里**确实覆盖**的相关方向
+                 （「没有 X，但有 Y 和 Z 两个方向」）—— 用户据此就知道该换个问法还是
+                 该去补资料，比单说一句「没有」有用得多。
               ② 然后基于你自己的通用知识作答，尽量具体、有条理；
               ③ 明确标注这部分是通用知识、并非来自用户的知识库（例如另起一行写
                  「以下为通用知识，未引用你的知识库」），让用户一眼分得清。
@@ -153,6 +156,11 @@ public class AgenticRagService {
     private final RagProperties props;
     private final ObjectMapper mapper;
     private final CacheService cache;
+    /**
+     * 主题树。agent 直接问它要「知识库覆盖了什么」，不通过参数层层传 ——
+     * 这是库的属性，不是某一次请求的属性。
+     */
+    private final com.kniv.ragkb.service.tree.TreeService tree;
 
     /** 一次问答的产物。queries 记录实际检索过哪些查询，便于事后复盘检索质量。 */
     public record AgentResult(String answer, List<ChunkHit> sources, int rounds, List<String> queries) {
@@ -379,6 +387,15 @@ public class AgenticRagService {
         }
 
         StringBuilder user = new StringBuilder();
+        // 知识库覆盖范围。放在最前是因为它在「资料不足」时最有用 ——
+        // 没有它，检索不到就只能回一句「知识库中没有」，而说不出
+        // 「没有 X，但有 Y 和 Z 两个相关方向」。
+        String overview = tree.overview();
+        if (overview != null && !overview.isBlank()) {
+            user.append("【知识库主题概览】（本知识库覆盖了哪些方向，供你判断该往哪找、"
+                    + "以及资料不足时告知用户库里有什么）\n")
+                    .append(overview).append("\n\n");
+        }
         // 三层历史按可靠性递减排：摘要最粗在最前，召回片段居中，最新原文由 messages 承担。
         // 【参考资料】是事实依据，让它紧挨着【问题】——「lost in the middle」下这个位置最不容易被漏掉
         if (hasSummary) {
@@ -409,8 +426,9 @@ public class AgenticRagService {
         }
         user.append("【问题】\n").append(question);
         // 排查用：模型答「资料中没有」时，先分清是没检索到、还是检索到了它不用
-        log.debug("回答注入：资料 {} 段 / 召回片段 {} 字 / 摘要 {} 字 / 近轮 {} 条",
+        log.debug("回答注入：资料 {} 段 / 主题概览 {} 字 / 召回片段 {} 字 / 摘要 {} 字 / 近轮 {} 条",
                 contexts.size(),
+                overview == null ? 0 : overview.length(),
                 hasExcerpt ? historyExcerpt.length() : 0,
                 hasSummary ? convSummary.length() : 0,
                 history == null ? 0 : history.size());

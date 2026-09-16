@@ -34,6 +34,47 @@ public class RagProperties {
 
     private History history = new History();
 
+    private Tree tree = new Tree();
+
+    /**
+     * 主题树：把全部块聚成若干主题簇，每簇一句概括。
+     *
+     * <p>解决的是「语料一大，扁平的 top-k 就看不出全局」—— 检索不到时只能回
+     * 「知识库中没有」，而说不出「没有 X，但有 Y 和 Z 两个相关方向」。
+     */
+    @Data
+    public static class Tree {
+
+        private boolean enabled = true;
+
+        /** 簇数上限。语料很小时实际簇数由 √(n/2) 决定，这里只是封顶 */
+        private int maxClusters = 12;
+
+        /** 给每个簇挑几条代表片段去概括。太多没必要，概括不需要读全文 */
+        private int samplesPerCluster = 5;
+
+        /**
+         * 检索时把搜索范围收窄到最相关的几个主题簇。
+         *
+         * <p>0 表示不收窄（退回全库检索）。语料小的时候收窄反而有害 ——
+         * 万一聚类把相关的块分到了别的簇，收窄就是把正确答案挡在门外。
+         * 语料大了（几百块以上）才值得开。
+         */
+        private int narrowToClusters = 0;
+
+        /**
+         * 是否把主题概览注入提示词。
+         *
+         * <p>开着的好处：回答能说出知识库覆盖了哪些方向，而不只是「没有」。
+         * 代价是每轮多占一些上下文 —— 但它是**固定前缀**，
+         * 实测前缀复用能把重复部分的 prefill 从 819ms 降到 44ms。
+         */
+        private boolean injectOverview = true;
+
+        /** 概览的字符上限，防止主题太多把上下文挤爆 */
+        private int overviewChars = 700;
+    }
+
     private Summary summary = new Summary();
 
     /**

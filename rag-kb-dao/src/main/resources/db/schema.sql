@@ -93,6 +93,42 @@ CREATE INDEX IF NOT EXISTS messages_conv_idx ON messages (conv_id, id);
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS embedding   vector(1024);
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS embed_model text NOT NULL DEFAULT '';
 
+-- 主题树：把全部块聚成若干主题簇，每簇一段摘要。
+--
+-- 解决什么：扁平的 top-k 只给固定的几块，语料一大就**看不出全局** ——
+-- 检索不到时只能回一句「知识库中没有」，而说不出「没有 X，但有 Y 和 Z 两个
+-- 相关方向」。有了主题层，回答可以先给出知识库的覆盖范围，再落到细节。
+--
+-- 为什么只做两层（根 + 主题簇）不做深树：深树的收益来自「逐层收窄」，
+-- 而那需要每下降一层付一次 KV —— 在 10240 的上下文预算下不划算。
+-- 两层的收益（全局概览 + 粗筛）已经拿到了绝大部分。
+--
+-- chunk_ids 是该簇覆盖的块，检索时可以据此把搜索范围收窄到相关主题 ——
+-- 这是「先粗后细」里「粗」那一步的实际作用。
+CREATE TABLE IF NOT EXISTS tree_nodes (
+    id         text PRIMARY KEY,
+    label      text NOT NULL,
+    summary    text NOT NULL,
+    chunk_ids  bigint[] NOT NULL DEFAULT '{}',
+    -- 簇的质心向量（k-means 算出来的那个均值）。检索时拿问题向量与它比距离，
+    -- 就能判断「这个问题最可能落在哪个主题」，而不必把全簇的块都捞出来算。
+    centroid   vector(1024),
+    doc_ids    text[]   NOT NULL DEFAULT '{}',
+    size       integer  NOT NULL DEFAULT 0,
+    built_at   timestamptz NOT NULL DEFAULT now()
+);
+
+-- 建树时全库有多少块。与当前块数一比就知道树是否过期 ——
+-- 语料一直在长，树不重建就会越来越不准，而它「不准」的表现是静默的
+-- （回答仍然能出，只是覆盖范围描述落后于实际）。
+CREATE TABLE IF NOT EXISTS tree_meta (
+    id            integer PRIMARY KEY DEFAULT 1,
+    chunk_count   integer NOT NULL DEFAULT 0,
+    cluster_count integer NOT NULL DEFAULT 0,
+    built_at      timestamptz,
+    CONSTRAINT tree_meta_single CHECK (id = 1)
+);
+
 CREATE TABLE IF NOT EXISTS index_tasks (
     id         text PRIMARY KEY,
     doc_id     text NOT NULL,

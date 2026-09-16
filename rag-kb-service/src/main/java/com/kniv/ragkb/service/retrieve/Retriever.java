@@ -79,15 +79,32 @@ public class Retriever {
         return chunkMapper.searchByVector(literal, embedModelRef(), docId, limit);
     }
 
+    /**
+     * 关键词召回。
+     *
+     * <p><b>为什么要有命中数门槛</b>：初版的条件是 {@code hits > 0} —— 只要匹配
+     * 一个检索词就算命中。而检索词里有大量中文二元组，其中的常用词几乎出现在
+     * 任何中文段落里。实测问「量子纠缠在量子计算里的作用」，知识库里全是
+     * PostgreSQL 文档，却召回了 11 段 —— 因为它们都含「作用」「计算」。
+     *
+     * <p>更糟的是这些块的 {@code distance} 是 null（它们只在关键词通道出现），
+     * 而融合时的距离守卫写的是「有距离才比」，于是它们一路畅通。
+     * 结果是模型看到「有资料」，就不再声明知识库没有，直接拿通用知识作答 ——
+     * 那正是这套系统唯一的信任边界。
+     *
+     * <p>门槛取「至少匹配 2 个词，且覆盖查询词的 25%」：
+     * 前者挡住「一个常用词命中一切」，后者管住长问题里匹配零星几个词的情况。
+     */
     private List<ChunkHit> keywordSearch(String question, String docId, int limit) {
         List<String> terms = extractTerms(question);
         if (terms.isEmpty()) {
             return List.of();
         }
+        int minHits = Math.max(2, (int) Math.ceil(terms.size() * 0.25));
         List<ChunkHit> rows = chunkMapper.searchByKeyword(terms, embedModelRef(), docId, limit);
         List<ChunkHit> out = new ArrayList<>();
         for (ChunkHit h : rows) {
-            if (h.getHits() != null && h.getHits() > 0) {
+            if (h.getHits() != null && h.getHits() >= minHits) {
                 out.add(h);
             }
         }
@@ -138,6 +155,10 @@ public class Retriever {
         List<ChunkHit> out = new ArrayList<>();
         for (Map.Entry<Long, Double> e : ranked) {
             ChunkHit h = byId.get(e.getKey());
+            // 距离门槛：有距离的按距离卡。
+            // distance 为 null 表示它只从关键词通道来 —— 那种情况的门槛在
+            // keywordSearch 里已经卡过了（命中数），这里不能再放行一遍，
+            // 否则关键词通道就成了绕过距离门槛的后门。
             if (h.getDistance() != null && h.getDistance() > props.getMaxDistance()) {
                 continue;
             }
