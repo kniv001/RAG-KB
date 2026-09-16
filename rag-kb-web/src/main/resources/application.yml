@@ -53,7 +53,11 @@ spring:
 ragkb:
   crypto:
     enabled: ${KB_CRYPTO_ENABLED:true}
-    key-dir: data/keys
+    # 同样必须绝对。用相对路径时它侥幸落在项目目录，但那只是因为
+    # RsaKeyService 的 @PostConstruct 恰好早于 Web 容器启动 ——
+    # 顺序一变就会和 storage.root 一样跑进临时 docbase，而密钥一旦每次重启重生成，
+    # 所有 access token 立刻失效、客户端缓存的公钥也全部作废。
+    key-dir: ${KB_KEY_DIR:D:/vs/rag-kb-java/data/keys}
     rsa-key-size: 3072
     timestamp-tolerance-seconds: 300
     nonce-check: true
@@ -75,7 +79,18 @@ ragkb:
 
   # ---------------- 存储 ----------------
   storage:
-    root: .                  # 相对启动目录；documents.stored_path 存的就是相对它的路径
+    # 必须是绝对路径，绝不能用 "." 之类的相对路径。
+    #
+    # 实测踩过的坑：写 "." 时它没有解析到启动目录，而是解析到了
+    # %TEMP%\tomcat-docbase.<端口>.<随机数>\ —— Spring Boot 起 Web 容器时会把
+    # user.dir 指向那个临时 docbase，而 StorageProperties 的 @PostConstruct
+    # 正好在它之后执行。每次启动都是一个新目录，于是**上一次启动上传的文件
+    # 全部失联**（库里 stored_path 还在，文件却找不到了）。
+    # 机器上堆积了约 80 个这样的目录，每个都带着一份孤立的 uploads。
+    #
+    # 指向 Python 版仓库是刻意的：两套系统共用一个数据库，文件也该共用 ——
+    # 已有的文档就是 Python 版上传的，指过去它们立刻就能重新索引。
+    root: ${KB_STORAGE_ROOT:D:/vs/rag-kb}
     uploads-dir: data/uploads
     max-upload-mb: 50
 

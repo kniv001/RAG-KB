@@ -37,8 +37,16 @@ public class RsaKeyService {
 
     @PostConstruct
     public void init() throws Exception {
-        Path dir = Path.of(props.getKeyDir());
+        // 转绝对路径：相对路径会随 user.dir 走，而 Spring Boot 起 Web 容器时会把
+        // user.dir 指向临时 docbase。落在那里的话每次重启都会重新生成密钥，
+        // 于是所有 access token 立刻失效、客户端缓存的公钥也全部作废。
+        Path dir = Path.of(props.getKeyDir()).toAbsolutePath().normalize();
+        if (!Path.of(props.getKeyDir()).isAbsolute()) {
+            log.warn("crypto.key-dir 是相对路径（{}），已解析为 {}。建议改成绝对路径。",
+                    props.getKeyDir(), dir);
+        }
         Files.createDirectories(dir);
+        log.info("密钥目录：{}", dir);
         Path priv = dir.resolve(PRIVATE_PEM);
         Path pub = dir.resolve(PUBLIC_PEM);
 

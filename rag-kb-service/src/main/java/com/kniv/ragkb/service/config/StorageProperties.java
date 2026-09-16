@@ -39,6 +39,14 @@ public class StorageProperties {
         try {
             Files.createDirectories(uploads());
             log.info("上传目录：{}（单文件上限 {} MB）", uploads(), maxUploadMb);
+            // 相对路径会被解析到 Spring Boot 的临时 docbase（%TEMP%/tomcat-docbase.*），
+            // 而每次启动都是新目录 —— 上一次上传的文件直接失联。
+            // 这个警告就是为了让那种配置在启动日志里一眼可见，而不是等用户发现文件没了。
+            if (!root.isAbsolute()) {
+                log.warn("storage.root 是相对路径（{}），已解析为 {}。"
+                        + "强烈建议改成绝对路径，否则重启后此前的上传会全部失联。",
+                        root, uploads());
+            }
         } catch (IOException e) {
             log.error("创建上传目录失败：{}", e.getMessage());
         }
