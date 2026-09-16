@@ -223,42 +223,72 @@ async function stream(path, body, onEvent, signal) {
   }
 }
 
-// ═══════════════ Markdown（最小实现）═══════════════
+// ═══════════════ Markdown 与公式 ═══════════════
 
+// marked / DOMPurify / KaTeX 都是 UMD，由 index.html 里的 <script> 挂到全局。
+// 用全局而不是 import：它们没有 ESM 构建，而为了它们引进打包器不值得 ——
+// 整个前端就三个文件、没有构建步骤，这是刻意的。
+const { marked, DOMPurify } = window;
+
+marked.setOptions({ gfm: true, breaks: true });
+
+// 外链新开标签并去掉 referrer；图片同理。
+// 这里不拦远程图片（那会让 markdown 不完整），但 referrer 不该带出去。
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  const tag = node.tagName;
+  if (tag === 'A' && /^https?:/i.test(node.getAttribute('href') || '')) {
+    node.setAttribute('target', '_blank');
+    node.setAttribute('rel', 'noopener noreferrer');
+  }
+  if (tag === 'IMG') {
+    node.setAttribute('referrerpolicy', 'no-referrer');
+    node.setAttribute('loading', 'lazy');
+  }
+});
+
+/**
+ * markdown → 安全的 HTML。
+ *
+ * DOMPurify 这一步不是可选的：marked 从 v5 起移除了内置 sanitizer，
+ * 输出的是**原始 HTML**（连 <script> 都照发）。而这里的 markdown 来自模型，
+ * 模型又受检索到的文档影响 —— 一份带 <img onerror=...> 的文档完全可能被
+ * 模型原样带出来并在页面里执行，而页面持有 access token。
+ */
 function md(src) {
-  const blocks = [];
-  // 先摘出代码块，避免其中的内容被后续规则误伤
-  let s = String(src ?? '').replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
-    blocks.push(`<pre><code>${h_esc(code.replace(/\n$/, ''))}</code></pre>`);
-    return ` B${blocks.length - 1} `;
-  });
-
-  s = h_esc(s);
-  s = s.replace(/`([^`\n]+)`/g, '<code>$1</code>');
-  s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
-  s = s.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>');
-  s = s.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>');
-  s = s.replace(/^#\s+(.+)$/gm, '<h1>$1</h1>');
-
-  // 列表：连续以 - / * / 数字. 开头的行
-  s = s.replace(/(?:^[ \t]*(?:[-*]|\d+\.)\s+.+\n?)+/gm, (chunk) => {
-    const items = chunk.trimEnd().split('\n')
-      .map((l) => `<li>${l.replace(/^[ \t]*(?:[-*]|\d+\.)\s+/, '')}</li>`).join('');
-    return `<ul>${items}</ul>`;
-  });
-
-  s = s.split(/\n{2,}/).map((p) => {
-    const t = p.trim();
-    if (!t) return '';
-    return /^<(h\d|ul|pre|blockquote)/.test(t) ? t : `<p>${t.replace(/\n/g, '<br>')}</p>`;
-  }).join('');
-
-  return s.replace(/ B(\d+) /g, (_, i) => blocks[+i]);
+  return DOMPurify.sanitize(marked.parse(String(src ?? '')));
 }
 
-function h_esc(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+/**
+ * 把 markdown 画进元素。
+ *
+ * @param math 是否渲染公式。**只在这一段文字写完之后才传 true** ——
+ *             流式途中的公式是残缺的（$x^2 还没闭合），KaTeX 要么渲染成垃圾、
+ *             要么直接抛错；而且每来一个 token 就把整段重跑一遍 KaTeX 也太贵。
+ */
+function paint(el, src, math = false) {
+  el.innerHTML = md(src);
+  if (math && typeof window.renderMathInElement === 'function') {
+    window.renderMathInElement(el, {
+      delimiters: [
+        { left: '$$', right: '$$', display: true },
+        { left: '\\[', right: '\\]', display: true },
+        { left: '$', right: '$', display: false },
+        { left: '\\(', right: '\\)', display: false },
+      ],
+      // 单个公式写错不该让整段回答挂掉 —— 模型偶尔会漏个右括号
+      throwOnError: false,
+      // 代码块里的 $ 是字面量，不是公式
+      ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code', 'option'],
+    });
+  }
+  return el;
 }
+
+// 把渲染入口挂到全局，仅供自动化测试调用（tools/frontend-e2e-cdp.mjs）。
+// 只暴露这两个纯函数：它们不碰令牌、不碰状态，拿到也无法做任何越权的事。
+// 之所以要暴露而不是让测试自己去调 marked/DOMPurify：那样测的是库，
+// 不是**本应用实际走的这条链路** —— 万一哪天这里漏了 sanitize，测试却照样绿。
+window.__kbRender = { md, paint };
 
 // ═══════════════ 状态 ═══════════════
 
@@ -437,7 +467,7 @@ function messageNode(role, content, sources, opts = {}) {
   if (opts.think) body.append(opts.think);
 
   const text = h('div', { class: 'text' });
-  text.innerHTML = md(content || '');
+  paint(text, content || '', true);
   body.append(text);
   if (opts.cursor) text.classList.add('cursor');
 
@@ -556,7 +586,7 @@ async function send() {
           // 观感上仍是逐字出现，但不会把主线程占满
           if (Date.now() - lastPaint > 60) {
             lastPaint = Date.now();
-            node._text.innerHTML = md(answer);
+            paint(node._text, answer, false);
             scrollDown();
           }
           break;
@@ -569,7 +599,7 @@ async function send() {
       }
     }, state.controller?.signal);
 
-    node._text.innerHTML = md(answer || '（没有收到内容）');
+    paint(node._text, answer || '（没有收到内容）', true);
     node._text.classList.remove('cursor');
     think.querySelector('summary').textContent = `思考过程（${thinkText.length} 字）`;
     if (!traceOl.childElementCount) trace.hidden = true;
@@ -584,7 +614,7 @@ async function send() {
     }
   } catch (e) {
     node._text.classList.remove('cursor');
-    node._text.innerHTML = md(`**出错了**：${e.message}`);
+    paint(node._text, `**出错了**：${e.message}`, false);
     toast(e.message, true);
   } finally {
     state.busy = false;

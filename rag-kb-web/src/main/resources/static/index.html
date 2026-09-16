@@ -7,6 +7,13 @@
 <title>知识库助手</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>📚</text></svg>">
 <link rel="stylesheet" href="/assets/app.css">
+<!-- 公式样式。KaTeX 的 CSS 与字体都在本地，不走 CDN -->
+<link rel="stylesheet" href="/assets/vendor/katex/katex.min.css">
+<!-- 渲染依赖。都是 UMD，挂到全局，所以必须在 app.js（type=module）之前加载 -->
+<script src="/assets/vendor/marked.min.js"></script>
+<script src="/assets/vendor/purify.min.js"></script>
+<script src="/assets/vendor/katex/katex.min.js"></script>
+<script src="/assets/vendor/katex/auto-render.min.js"></script>
 </head>
 <body>
 

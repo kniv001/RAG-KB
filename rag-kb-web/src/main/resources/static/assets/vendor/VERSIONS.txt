@@ -1,0 +1,24 @@
+前端渲染依赖（自托管，不走 CDN —— 访问时不该把你的页面请求暴露给第三方）
+
+  marked      18.0.13   lib/marked.umd.js                  MD → HTML
+  dompurify    3.4.15   dist/purify.min.js                 清洗 HTML（必须，见下）
+  katex        0.18.7   dist/katex.min.js                  公式渲染
+                        dist/katex.min.css
+                        dist/contrib/auto-render.min.js
+                        dist/fonts/*.woff2                 （只取 woff2；
+                                                            另两种格式现代浏览器不会请求）
+
+取自 npm registry 的官方包，未做任何修改。升级时重跑同样的复制即可。
+
+为什么 DOMPurify 是必须的，不是可选的：
+  marked 从 v5 起移除了内置 sanitizer，它输出的是**原始 HTML**（连 <script> 都照发）。
+  而这里的 markdown 来自模型，模型又受检索到的文档影响 —— 一份带
+  <img src=x onerror=...> 的文档完全可能被模型原样带出来，进而在页面里执行，
+  而页面持有 access token。所以流程必须是：
+      marked 解析 → DOMPurify 清洗 → 插入 DOM → KaTeX 渲染公式
+
+  顺序不能颠倒：KaTeX 的输出要经过清洗（它会生成大量 span，但都是安全的），
+  而清洗后再渲染公式则是因为 KaTeX 需要真实的 DOM 节点。
+
+字体只取 woff2：katex.min.css 里每个字体列了 woff2/woff/ttf 三种源，
+浏览器按顺序取第一个支持的格式，现代浏览器都支持 woff2，另两种永远不会被请求。

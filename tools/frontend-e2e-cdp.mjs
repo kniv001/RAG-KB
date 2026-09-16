@@ -272,6 +272,135 @@ try {
     ok(`「${tab}」页可渲染`, t.includes(expect), t.slice(0, 46).replace(/\s+/g, ' '));
   }
 
+  console.log('\n=== 4.5 渲染管线：markdown / 公式 / XSS ===');
+  {
+    const libs = await cdp.eval(`({
+      marked: typeof window.marked,
+      purify: typeof window.DOMPurify,
+      katex: typeof window.katex,
+      autoRender: typeof window.renderMathInElement,
+      hook: typeof window.__kbRender,
+    })`);
+    ok('marked 已加载', libs.marked === 'object' || libs.marked === 'function', libs.marked);
+    // DOMPurify 本身是个可调用的工厂函数，不是普通对象
+    ok('DOMPurify 已加载', libs.purify === 'function' || libs.purify === 'object', libs.purify);
+    ok('KaTeX 已加载', libs.katex === 'object', libs.katex);
+    ok('auto-render 已加载', libs.autoRender === 'function');
+    ok('渲染入口已暴露给测试', libs.hook === 'object');
+
+    // 用**本应用自己的**渲染函数，而不是自己去调 marked/DOMPurify ——
+    // 后者测的是库，万一应用漏了 sanitize 也照样绿
+    const xss = await cdp.eval(`(() => {
+      window.__pwned = false;
+      const payload = '<img src=x onerror="window.__pwned=true">' +
+                      '<script>window.__pwned=true<\\/script>' +
+                      '<a href="javascript:window.__pwned=true">click</a>';
+      const out = window.__kbRender.md(payload);
+      const d = document.createElement('div');
+      d.innerHTML = out;
+      document.body.append(d);
+      return { html: out, pwned: window.__pwned, hasOnerror: /onerror/i.test(out), hasJsHref: /javascript:/i.test(out) };
+    })()`);
+    await sleep(400);
+    const pwned = await cdp.eval('window.__pwned');
+    ok('XSS 载荷被清洗（onerror 被移除）', !xss.hasOnerror, xss.html.slice(0, 70));
+    ok('XSS 载荷被清洗（javascript: 协议被移除）', !xss.hasJsHref);
+    ok('脚本没有执行', pwned === false);
+
+    const markdown = await cdp.eval(`(() => {
+      const src = [
+        '# 标题', '', '普通段落，含 **粗体** 与 \`行内代码\`。', '',
+        '| 列A | 列B |', '| --- | --- |', '| 1 | 2 |', '',
+        '- 项目一', '- 项目二', '',
+        '> 引用', '',
+        '\`\`\`js', 'const x = 1;', '\`\`\`',
+      ].join('\\n');
+      const d = document.createElement('div');
+      d.innerHTML = window.__kbRender.md(src);
+      return {
+        h1: !!d.querySelector('h1'),
+        strong: !!d.querySelector('strong'),
+        code: !!d.querySelector('code'),
+        table: !!d.querySelector('table'),
+        ul: !!d.querySelector('ul'),
+        quote: !!d.querySelector('blockquote'),
+        pre: !!d.querySelector('pre'),
+      };
+    })()`);
+    ok('标题 / 粗体 / 行内代码', markdown.h1 && markdown.strong && markdown.code);
+    ok('表格（GFM）', markdown.table, '之前的最小实现不支持表格');
+    ok('列表 / 引用 / 代码块', markdown.ul && markdown.quote && markdown.pre);
+
+    const math = await cdp.eval(`(() => {
+      const d = document.createElement('div');
+      window.__kbRender.paint(d, '行内公式 $E = mc^2$ 与行间公式：\\n\\n$$\\\\sum_{i=1}^{n} i = \\\\frac{n(n+1)}{2}$$', true);
+      return {
+        katexNodes: d.querySelectorAll('.katex').length,
+        display: d.querySelectorAll('.katex-display').length,
+        // 渲染失败时 KaTeX 会留下 .katex-error
+        errors: d.querySelectorAll('.katex-error').length,
+        text: d.textContent.slice(0, 60),
+      };
+    })()`);
+    ok('行内公式渲染成 KaTeX 节点', math.katexNodes >= 1, `${math.katexNodes} 个`);
+    ok('行间公式渲染为 display 模式', math.display >= 1, `${math.display} 个`);
+    ok('没有渲染错误', math.errors === 0);
+
+    const noMathInCode = await cdp.eval(`(() => {
+      const d = document.createElement('div');
+      window.__kbRender.paint(d, '\`\`\`\\n价格是 $100 不是公式\\n\`\`\`', true);
+      return d.querySelectorAll('.katex').length;
+    })()`);
+    ok('代码块里的 $ 不被当作公式', noMathInCode === 0);
+
+    const badFormula = await cdp.eval(`(() => {
+      const d = document.createElement('div');
+      window.__kbRender.paint(d, '坏公式 $\\\\frac{1}{$ 之后还有正文', true);
+      return d.textContent.length;
+    })()`);
+    ok('公式写错不会让整段挂掉', badFormula > 0, `正文仍有 ${badFormula} 字`);
+  }
+
+  console.log('\n=== 4.6 真实回答里的公式（完整链路）===');
+  {
+    // 前面 4.5 是直接调 paint()，验的是渲染函数本身；
+    // 这一步走完整链路：提问 → 流式接收 → 结束后渲染公式。
+    // 缺了它，就测不出「流式途中 math=false、结束时才 math=true」这段接线有没有断。
+    await cdp.eval(`(() => {
+      const i = document.querySelector('#input');
+      i.value = '余弦相似度的计算公式是什么？请给出公式。';
+      document.querySelector('#composer').requestSubmit();
+      return true;
+    })()`);
+
+    let done = false;
+    for (let i = 0; i < 120; i++) {
+      await sleep(1000);
+      const st = await cdp.eval(`({
+        busy: document.querySelector('#sendBtn').disabled,
+        nodes: document.querySelectorAll('#messages .msg.assistant .katex').length
+      })`);
+      if (!st.busy) { done = true; break; }
+    }
+    ok('第二轮回答已完成', done);
+
+    const real = await cdp.eval(`(() => {
+      const msgs = [...document.querySelectorAll('#messages .msg.assistant')];
+      const last = msgs[msgs.length - 1];
+      const text = last?.querySelector('.text')?.textContent || '';
+      return {
+        katex: last?.querySelectorAll('.katex').length || 0,
+        errors: last?.querySelectorAll('.katex-error').length || 0,
+        hasDollar: /\\$/.test(text),
+        src: text.slice(0, 80).replace(/\\n/g, ' '),
+      };
+    })()`);
+    console.log(`  末条回答：${real.src}`);
+    ok('真实回答里的公式被渲染成 KaTeX', real.katex > 0,
+       real.katex > 0 ? `${real.katex} 个公式节点` : (real.hasDollar ? '回答里有 $ 但没渲染' : '回答里没有公式，换个问题'));
+    ok('公式渲染无错误', real.errors === 0);
+  }
+
   console.log('\n=== 5. 附件：加密上传 + 自动建索引 ===');
   await cdp.eval(`document.querySelector('#closeSettings').click()`);
   await sleep(300);
@@ -303,10 +432,13 @@ try {
   ok('附件已加密上传并建完索引', !!att && att.cls.includes('done'), att?.text.slice(0, 60));
 
   console.log('\n=== 6. 控制台 ===');
-  // 两类预期内的 401：
+  // 预期内的请求噪音：
   //   /api/auth/refresh —— 首次打开没有 refresh Cookie，boot() 试一次必得 401
   //   /api/auth/login   —— 步骤 2 故意输错密码那一次
-  const expected = /\/api\/auth\/(refresh|login)/;
+  //   /x                —— 步骤 4.5 的 XSS 载荷里有 <img src=x>，DOMPurify 正确地
+  //                        只摘掉了危险的 onerror、保留了标签，浏览器便去请求 /x，
+  //                        匿名访问它当然是 401。这是测试载荷的副作用，不是应用问题。
+  const expected = /\/api\/auth\/(refresh|login)|\/x$/;
   const noisy = /favicon|DevTools|Autofill/i;
   const realErrors = errors.filter((e) => !noisy.test(e) && !expected.test(e));
   const expectedHits = errors.filter((e) => expected.test(e) && !noisy.test(e));
