@@ -468,13 +468,20 @@ public class AgenticRagService {
             }
         }
         user.append("【问题】\n").append(question);
-        // 排查用：模型答「资料中没有」时，先分清是没检索到、还是检索到了它不用
-        log.debug("回答注入：资料 {} 段 / 主题概览 {} 字 / 召回片段 {} 字 / 摘要 {} 字 / 近轮 {} 条",
+        // 排查用：模型答「资料中没有」时，先分清是没检索到、还是检索到了它不用。
+        // 同时打出估算的 token 数与预算占比 —— 这是唯一能看出「离悬崖还有多远」的数，
+        // 不记的话只能等它静默丢系统提示词才发现。
+        int usedTokens = over;
+        log.debug("回答注入：资料 {} 段 / 主题概览 {} 字 / 召回片段 {} 字 / 摘要 {} 字 / 近轮 {} 条"
+                        + "　→ 估算 {} token / 预算 {}（{}%）",
                 contexts.size(),
                 overview == null ? 0 : overview.length(),
                 hasExcerpt ? historyExcerpt.length() : 0,
                 hasSummary ? convSummary.length() : 0,
-                history == null ? 0 : history.size());
+                history == null ? 0 : history.size(),
+                usedTokens, budget + reserve + PromptBudget.estimateTokens(ANSWER_SYSTEM),
+                Math.round(100.0 * usedTokens / Math.max(1, budget + reserve
+                        + PromptBudget.estimateTokens(ANSWER_SYSTEM))));
 
         // ---- 回答缓存 ----
         // 键里含「上下文哈希」与「历史哈希」：资料改了或对话历史变了，键就变，
