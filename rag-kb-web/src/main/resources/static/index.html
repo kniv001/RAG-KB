@@ -13,7 +13,9 @@
 <script src="/assets/vendor/marked.min.js"></script>
 <script src="/assets/vendor/purify.min.js"></script>
 <script src="/assets/vendor/katex/katex.min.js"></script>
-<script src="/assets/vendor/katex/auto-render.min.js"></script>
+<!-- 不再需要 auto-render：公式改由 marked 扩展在解析阶段直接交给 KaTeX，
+     那条路径比「先渲染 markdown 再扫 DOM」更早介入，也避开了 markdown 的转义处理 -->
+
 </head>
 <body>
 

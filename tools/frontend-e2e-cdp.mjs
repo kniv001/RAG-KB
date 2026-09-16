@@ -278,14 +278,12 @@ try {
       marked: typeof window.marked,
       purify: typeof window.DOMPurify,
       katex: typeof window.katex,
-      autoRender: typeof window.renderMathInElement,
       hook: typeof window.__kbRender,
     })`);
     ok('marked 已加载', libs.marked === 'object' || libs.marked === 'function', libs.marked);
     // DOMPurify 本身是个可调用的工厂函数，不是普通对象
     ok('DOMPurify 已加载', libs.purify === 'function' || libs.purify === 'object', libs.purify);
     ok('KaTeX 已加载', libs.katex === 'object', libs.katex);
-    ok('auto-render 已加载', libs.autoRender === 'function');
     ok('渲染入口已暴露给测试', libs.hook === 'object');
 
     // 用**本应用自己的**渲染函数，而不是自己去调 marked/DOMPurify ——
@@ -333,7 +331,7 @@ try {
 
     const math = await cdp.eval(`(() => {
       const d = document.createElement('div');
-      window.__kbRender.paint(d, '行内公式 $E = mc^2$ 与行间公式：\\n\\n$$\\\\sum_{i=1}^{n} i = \\\\frac{n(n+1)}{2}$$', true);
+      window.__kbRender.paint(d, '行内公式 $E = mc^2$ 与行间公式：\\n\\n$$\\\\sum_{i=1}^{n} i = \\\\frac{n(n+1)}{2}$$');
       return {
         katexNodes: d.querySelectorAll('.katex').length,
         display: d.querySelectorAll('.katex-display').length,
@@ -348,17 +346,44 @@ try {
 
     const noMathInCode = await cdp.eval(`(() => {
       const d = document.createElement('div');
-      window.__kbRender.paint(d, '\`\`\`\\n价格是 $100 不是公式\\n\`\`\`', true);
+      window.__kbRender.paint(d, '\`\`\`\\n价格是 $100 不是公式\\n\`\`\`');
       return d.querySelectorAll('.katex').length;
     })()`);
     ok('代码块里的 $ 不被当作公式', noMathInCode === 0);
 
     const badFormula = await cdp.eval(`(() => {
       const d = document.createElement('div');
-      window.__kbRender.paint(d, '坏公式 $\\\\frac{1}{$ 之后还有正文', true);
+      window.__kbRender.paint(d, '坏公式 $\\\\frac{1}{$ 之后还有正文');
       return d.textContent.length;
     })()`);
     ok('公式写错不会让整段挂掉', badFormula > 0, `正文仍有 ${badFormula} 字`);
+
+    // ── 这一条是为一个真实 bug 补的 ──
+    // 用户报「公式显示成原始字符」，根因是 markdown 的转义处理把 LaTeX 里的
+    // \\（矩阵换行符）吃成了一个 \，下划线也会被当成强调符。
+    // 所以必须验「带 \\ 与 _ 的公式」——只验 E=mc² 那种简单公式是测不出来的。
+    const pmatrix = await cdp.eval(`(() => {
+      const tex = '$$\\\\begin{pmatrix} a & b \\\\\\\\ c & d \\\\end{pmatrix} \\\\quad x_{11} = (-1)^{1+1} M_{11}$$';
+      const d = document.createElement('div');
+      document.body.append(d);          // innerText 需要真实布局，脱离文档的节点会退化成 textContent
+      window.__kbRender.paint(d, tex);
+      const text = d.innerText;
+      d.remove();
+      return {
+        katex: d.querySelectorAll('.katex').length,
+        errors: d.querySelectorAll('.katex-error').length,
+        // 没渲染的话，LaTeX 源码会以可见文本出现。
+        // 注意必须用 innerText 而不是 textContent —— KaTeX 会在 <annotation>
+        // 里存一份源码供复制粘贴与无障碍用，那份在 CSS 里是隐藏的，
+        // 但 textContent 照样读得到（第一版就是这么误报的）
+        rawLeak: /begin\\{pmatrix\\}|\\\\quad|a_\\{11\\}/.test(text),
+        text: text.replace(/\\s+/g, ' ').slice(0, 50),
+      };
+    })()`);
+    ok('带 \\\\ 换行与 _ 下标的公式能渲染', pmatrix.katex >= 1,
+       pmatrix.katex ? `${pmatrix.katex} 个节点` : '没渲染出来');
+    ok('  且渲染无错误', pmatrix.errors === 0);
+    ok('  且 LaTeX 源码没有以可见文本漏进正文', !pmatrix.rawLeak, pmatrix.text);
   }
 
   console.log('\n=== 4.6 真实回答里的公式（完整链路）===');

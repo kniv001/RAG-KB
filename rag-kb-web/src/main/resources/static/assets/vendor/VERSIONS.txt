@@ -4,9 +4,13 @@
   dompurify    3.4.15   dist/purify.min.js                 清洗 HTML（必须，见下）
   katex        0.18.7   dist/katex.min.js                  公式渲染
                         dist/katex.min.css
-                        dist/contrib/auto-render.min.js
                         dist/fonts/*.woff2                 （只取 woff2；
                                                             另两种格式现代浏览器不会请求）
+
+注：没有取 katex 的 contrib/auto-render。公式改由 marked 扩展在**解析阶段**
+直接交给 KaTeX，那条路径比「先渲染 markdown、再扫 DOM 找公式」更早介入 ——
+后者会先被 markdown 的转义处理破坏（\ 变 \、_ 变强调），实测矩阵公式
+就是这么显示成原始字符的。
 
 取自 npm registry 的官方包，未做任何修改。升级时重跑同样的复制即可。
 

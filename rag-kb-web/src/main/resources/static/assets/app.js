@@ -235,6 +235,87 @@ const { marked, DOMPurify } = window;
 
 marked.setOptions({ gfm: true, breaks: true });
 
+// ── 公式必须在 markdown 解析**之前**接管 ──
+//
+// 为什么不能「先 markdown 再拿渲染好的 HTML 去喂 KaTeX」：
+// markdown 的转义处理会把 LaTeX 里的 \\ 吃成一个 \（矩阵换行符就是这么坏的），
+// 下划线 _ 会被当成强调符、* 会被当成列表项、[ ] 会被当成链接。
+// 实测一条 pmatrix 公式经 marked 之后行分隔符全没了，用户看到的就是原始字符。
+//
+// marked 的扩展是在这些处理之前介入的，所以在 tokenizer 里把公式整段截走，
+// 直接交给 KaTeX 生成 HTML —— KaTeX 的输出随后一并通过 DOMPurify 清洗。
+function renderMath(tex, display) {
+  try {
+    return window.katex.renderToString(tex, {
+      displayMode: display,
+      throwOnError: false,      // 单个公式写错不该让整段回答挂掉
+      output: 'htmlAndMathml',  // 带上 MathML，屏幕阅读器与复制粘贴都能用
+    });
+  } catch (e) {
+    // 极少数情况下 renderToString 自己抛（比如参数类型不对）——退化成原样文本，
+    // 至少用户还能看到自己写了什么，而不是一片空白
+    const safe = String(tex).replace(/[&<>"]/g, (c) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    return `<code class="katex-error">${safe}</code>`;
+  }
+}
+
+const mathBlock = {
+  name: 'mathBlock',
+  level: 'block',
+  start(src) {
+    const i = src.indexOf('$$');
+    return i < 0 ? undefined : i;
+  },
+  tokenizer(src) {
+    // 块级：$$ ... $$（要求独占一行或成对出现）。流式途中还没闭合时不会匹配，
+    // 于是先按普通文本显示，等闭合了再渲染 —— 这比渲染出半截公式要好。
+    const m = /^\$\$([\s\S]+?)\$\$/.exec(src);
+    if (m) return { type: 'mathBlock', raw: m[0], text: m[1].trim() };
+    // 也认 \[ ... \]
+    const b = /^\\\[([\s\S]+?)\\\]/.exec(src);
+    if (b) return { type: 'mathBlock', raw: b[0], text: b[1].trim() };
+    return undefined;
+  },
+  renderer(t) {
+    return renderMath(t.text, true);
+  },
+};
+
+const mathInline = {
+  name: 'mathInline',
+  level: 'inline',
+  start(src) {
+    const i = src.indexOf('$');
+    const j = src.indexOf('\\(');
+    if (i < 0) return j < 0 ? undefined : j;
+    if (j < 0) return i;
+    return Math.min(i, j);
+  },
+  tokenizer(src) {
+    const p = /^\\\(([\s\S]+?)\\\)/.exec(src);
+    if (p) return { type: 'mathInline', raw: p[0], text: p[1] };
+
+    const m = /^\$([^\n$]+?)\$/.exec(src);
+    if (!m) return undefined;
+    // 收紧边界，避免把「价格 $100 到 $200」这类当成公式。
+    // 三条规则都是社区通行的做法（pandoc / markdown-it-katex 同样这么判）：
+    //   ① 内容不能以空白开头或结尾
+    //   ② 右界之后不能紧跟数字（$...$200 那种）
+    //   ③ 内容里至少要有一个「像数学」的字符
+    const body = m[1];
+    if (/^\s|\s$/.test(body)) return undefined;
+    if (/^\d/.test(src[m[0].length] || '')) return undefined;
+    if (!/[\\^_{}=+\-*/()\[\]|]/.test(body)) return undefined;
+    return { type: 'mathInline', raw: m[0], text: body };
+  },
+  renderer(t) {
+    return renderMath(t.text, false);
+  },
+};
+
+marked.use({ extensions: [mathBlock, mathInline] });
+
 // 外链新开标签并去掉 referrer；图片同理。
 // 这里不拦远程图片（那会让 markdown 不完整），但 referrer 不该带出去。
 DOMPurify.addHook('afterSanitizeAttributes', (node) => {
@@ -256,34 +337,16 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
  * 输出的是**原始 HTML**（连 <script> 都照发）。而这里的 markdown 来自模型，
  * 模型又受检索到的文档影响 —— 一份带 <img onerror=...> 的文档完全可能被
  * 模型原样带出来并在页面里执行，而页面持有 access token。
+ *
+ * 公式在这里已经由 KaTeX 变成了 HTML，一并过一遍清洗。
  */
 function md(src) {
   return DOMPurify.sanitize(marked.parse(String(src ?? '')));
 }
 
-/**
- * 把 markdown 画进元素。
- *
- * @param math 是否渲染公式。**只在这一段文字写完之后才传 true** ——
- *             流式途中的公式是残缺的（$x^2 还没闭合），KaTeX 要么渲染成垃圾、
- *             要么直接抛错；而且每来一个 token 就把整段重跑一遍 KaTeX 也太贵。
- */
-function paint(el, src, math = false) {
+/** 把 markdown 画进元素。公式在解析阶段就渲染好了，这里不需要再做什么。 */
+function paint(el, src) {
   el.innerHTML = md(src);
-  if (math && typeof window.renderMathInElement === 'function') {
-    window.renderMathInElement(el, {
-      delimiters: [
-        { left: '$$', right: '$$', display: true },
-        { left: '\\[', right: '\\]', display: true },
-        { left: '$', right: '$', display: false },
-        { left: '\\(', right: '\\)', display: false },
-      ],
-      // 单个公式写错不该让整段回答挂掉 —— 模型偶尔会漏个右括号
-      throwOnError: false,
-      // 代码块里的 $ 是字面量，不是公式
-      ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code', 'option'],
-    });
-  }
   return el;
 }
 
@@ -470,7 +533,7 @@ function messageNode(role, content, sources, opts = {}) {
   if (opts.think) body.append(opts.think);
 
   const text = h('div', { class: 'text' });
-  paint(text, content || '', true);
+  paint(text, content || '');
   body.append(text);
   if (opts.cursor) text.classList.add('cursor');
 
@@ -589,7 +652,7 @@ async function send() {
           // 观感上仍是逐字出现，但不会把主线程占满
           if (Date.now() - lastPaint > 60) {
             lastPaint = Date.now();
-            paint(node._text, answer, false);
+            paint(node._text, answer);
             scrollDown();
           }
           break;
@@ -602,7 +665,7 @@ async function send() {
       }
     }, state.controller?.signal);
 
-    paint(node._text, answer || '（没有收到内容）', true);
+    paint(node._text, answer || '（没有收到内容）');
     node._text.classList.remove('cursor');
     think.querySelector('summary').textContent = `思考过程（${thinkText.length} 字）`;
     if (!traceOl.childElementCount) trace.hidden = true;
@@ -617,7 +680,7 @@ async function send() {
     }
   } catch (e) {
     node._text.classList.remove('cursor');
-    paint(node._text, `**出错了**：${e.message}`, false);
+    paint(node._text, `**出错了**：${e.message}`);
     toast(e.message, true);
   } finally {
     state.busy = false;
