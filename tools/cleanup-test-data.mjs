@@ -10,7 +10,60 @@
  *   node tools/cleanup-test-data.mjs --apply    # 真删
  */
 import fs from 'node:fs';
+import path from 'node:path';
 import { makeClient } from './kb-client.mjs';
+
+/**
+ * 从测试脚本里**自动提取**它们发出过的问题。
+ *
+ * 为什么不再手写模式表：那份表会随脚本演进而过期。实际上已经过期过一次 ——
+ * 早期测试的问题带「（核对 xxxx）」随机后缀，模式表就照着那个写；
+ * 后来改成「先清回答缓存、用自然问法」，后缀没了，模式表却还在匹配后缀，
+ * 于是一整批新产生的测试会话全都漏掉了，混进了保留列表。
+ *
+ * 提取规则刻意收紧：只认引号里完整的一行、且看着像个问句的字符串。
+ * 宁可漏，不可误删 —— 用户自己打的字不该被脚本吃掉。
+ */
+function questionsFromTools() {
+  const out = new Set();
+  const dir = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
+  let files = [];
+  try { files = fs.readdirSync(dir); } catch { return out; }
+  for (const f of files) {
+    if (!f.endsWith('.mjs') || f === 'cleanup-test-data.mjs' || f === 'kb-client.mjs') continue;
+    const src = fs.readFileSync(path.join(dir, f), 'utf8');
+    for (const m of src.matchAll(/['"`]([^'"`\n]{6,80})['"`]/g)) {
+      const s = m[1].trim();
+      // 滤掉模板字符串里被引号切断的碎片，例如 `${n > 1 ?` `-> ${bad.status} ${...`
+      if (s.includes('${') || s.includes('\\n')) continue;
+      // 只要**含**问号即可，不要求以问号结尾 ——
+      // 「你是谁？用一句话说。」结尾是句号，用 $ 锚定会把它漏掉（踩过）
+      if (!/[？?]/.test(s)) continue;
+      out.add(s);
+    }
+  }
+  return out;
+}
+
+const TOOL_QUESTIONS = questionsFromTools();
+
+// 临时用 ask-once.mjs 问过的那些不在任何脚本源码里，脚本扫描扫不到，
+// 所以那个工具会把问过的问题追加到这个文件，这里一并并入。
+try {
+  for (const line of fs.readFileSync('data/asked-questions.txt', 'utf8').split('\n')) {
+    const s = line.trim();
+    if (s.length >= 6) TOOL_QUESTIONS.add(s);
+  }
+} catch { /* 没有这个文件说明还没用过那个工具 */ }
+
+/** 会话标题在库里被截断到 30 字，所以按前缀比 */
+function cameFromTools(title) {
+  if (!title || title.length < 8) return false;
+  for (const q of TOOL_QUESTIONS) {
+    if (q === title || (q.length > title.length && q.startsWith(title))) return true;
+  }
+  return false;
+}
 
 const APPLY = process.argv.includes('--apply');
 /**
@@ -51,6 +104,12 @@ const CONV_TEST = [
 
 const hit = (patterns, s) => patterns.some((p) => p.test(s));
 
+if (process.argv.includes('--show-questions')) {
+  console.log(`从测试脚本里提取到 ${TOOL_QUESTIONS.size} 条问题：`);
+  for (const q of [...TOOL_QUESTIONS].sort()) console.log('  ' + q);
+  process.exit(0);
+}
+
 console.log(APPLY ? '模式：执行删除\n' : '模式：预览（加 --apply 才真删）\n');
 
 // ── 文档 ──
@@ -65,8 +124,9 @@ for (const d of keepDocs) console.log(`  ✓ 保留 ${d.name}  ${d.bytes} B  ←
 // ── 会话 ──
 const convs = (await c.call('GET', '/api/chat/conversations?limit=200', undefined, { token: TOKEN }))
   .body.data.conversations || [];
-const delConvs = ALL_CONVS ? convs : convs.filter((x) => hit(CONV_TEST, x.title || ''));
-const keepConvs = ALL_CONVS ? [] : convs.filter((x) => !hit(CONV_TEST, x.title || ''));
+const isTestConv = (x) => hit(CONV_TEST, x.title || '') || cameFromTools(x.title || '');
+const delConvs = ALL_CONVS ? convs : convs.filter(isTestConv);
+const keepConvs = ALL_CONVS ? [] : convs.filter((x) => !isTestConv(x));
 if (ALL_CONVS) {
   console.log('\n⚠️  --all-conversations：所有会话都会被删除，包括无法判定来源的那些。');
   for (const x of convs) console.log(`      ${x.id}  ${(x.title || '').slice(0, 34)}`);

@@ -18,6 +18,12 @@ const c = makeClient(BASE);
 const login = await c.call('POST', '/api/auth/login', { username: cred.user, password: cred.password });
 const TOKEN = `Bearer ${login.body.data.accessToken}`;
 
+// 记一笔「这个工具问过什么」。清理脚本会读这份记录 ——
+// 否则用本工具临时问的问题在库里认不出来，会被当成用户自己的会话保留下来。
+try {
+  fs.appendFileSync('data/asked-questions.txt', question.replace(/\n/g, ' ') + '\n');
+} catch { /* 记不上不影响提问 */ }
+
 const body = { question, strategy, model: 'local/qwen3:4b' };
 if (convId) body.convId = convId;
 
