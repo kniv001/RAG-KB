@@ -5,10 +5,14 @@
  * 一样，摘要与 MGF1 都用 SHA-256 —— 正好验证 Java 侧显式构造的 OAEPParameterSpec 是否对齐。
  */
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 
 const BASE = process.env.KB_BASE || 'http://127.0.0.1:8080';
-const USER = process.env.KB_ADMIN_USER || 'dev';
-const PASS = process.env.KB_ADMIN_PASSWORD || 'dev-only-change-me';
+// 凭据与其它工具用同一份，别再各自硬编码 —— 之前这里写的是早期开发的占位账号
+// dev/dev-only-change-me，双令牌改造之后它登不上，于是两条用例一直红着。
+const CRED = JSON.parse(fs.readFileSync('D:/vs/rag-kb/data/auth.json.migrated', 'utf8'));
+const USER = process.env.KB_ADMIN_USER || CRED.user;
+const PASS = process.env.KB_ADMIN_PASSWORD || CRED.password;
 
 let pass = 0, fail = 0;
 const check = (label, cond, extra = '') => {
@@ -42,6 +46,30 @@ function decBody(aesKey, env) {
   return Buffer.concat([d.update(data), d.final()]).toString('utf8');
 }
 
+// ---------- 登录取令牌 ----------
+// 双令牌之后认证走 Bearer，Basic 时代的老写法在这里已经登不上了。
+// 登录本身也要走加密通道 —— 明文送密码等于这层加密白做。
+let TOKEN = null;
+{
+  const aesKey = crypto.randomBytes(32);
+  const wrapped = crypto.publicEncrypt(
+    { key: pubKey, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' }, aesKey);
+  const meta = encBody(aesKey, { ts: Date.now(), nonce: crypto.randomBytes(12).toString('base64url'), token: null });
+  const resp = await fetch(`${BASE}/api/auth/login`, {
+    method: 'POST',
+    headers: {
+      'X-Enc-Key': wrapped.toString('base64'),
+      'X-Enc-Meta': Buffer.from(JSON.stringify(meta)).toString('base64'),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(encBody(aesKey, { username: USER, password: PASS })),
+  });
+  const raw = JSON.parse(await resp.text());
+  const body = resp.headers.get('X-Encrypted') === '1' && raw?.d ? JSON.parse(decBody(aesKey, raw)) : raw;
+  TOKEN = body?.data?.accessToken ? `Bearer ${body.data.accessToken}` : null;
+  console.log(`登录 -> ${resp.status}  ${TOKEN ? '已取得令牌' : '未取得令牌：' + (body?.message || '')}`);
+}
+
 async function call(method, path, payload, opts = {}) {
   const aesKey = crypto.randomBytes(32);
   const wrapped = crypto.publicEncrypt(
@@ -50,8 +78,7 @@ async function call(method, path, payload, opts = {}) {
   const metaObj = {
     ts: opts.ts ?? Date.now(),
     nonce: opts.nonce ?? crypto.randomBytes(12).toString('base64url'),
-    token: opts.noToken ? null
-      : 'Basic ' + Buffer.from(`${USER}:${PASS}`).toString('base64'),
+    token: opts.noToken ? null : TOKEN,
   };
   const headers = {
     'X-Enc-Key': wrapped.toString('base64'),
