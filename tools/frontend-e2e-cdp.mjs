@@ -204,14 +204,19 @@ try {
     return true;
   })()`);
 
-  // 等正文出现（模型要思考十几秒，这里给足）
-  let painted = 0;
-  for (let i = 0; i < 60; i++) {
+  // 等**流真正结束**再断言，不能只看「正文有字了」。
+  // 新回答方式下答案可能七百多字，早断言会读到流中途的状态 ——
+  // 发送按钮还禁用着，来源事件也还没到（第一版就是这么误报的）。
+  let finished = false;
+  for (let i = 0; i < 120; i++) {
     await sleep(1000);
-    painted = await cdp.eval(`document.querySelectorAll('#messages .msg.assistant .text').length`);
-    const txt = await cdp.eval(`document.querySelector('#messages .msg.assistant .text')?.textContent || ''`);
-    if (txt.length > 10) break;
+    const st = await cdp.eval(`({
+      busy: document.querySelector('#sendBtn').disabled,
+      len: (document.querySelector('#messages .msg.assistant .text')?.textContent || '').length
+    })`);
+    if (!st.busy && st.len > 0) { finished = true; break; }
   }
+  ok('流式回答已完成（发送按钮恢复）', finished);
 
   const rendered = await cdp.eval(`(() => {
     const a = document.querySelector('#messages .msg.assistant');
@@ -226,6 +231,7 @@ try {
       thinkLen: (a?.querySelector('.think .t')?.textContent || '').length,
       traceItems: a?.querySelectorAll('.trace li').length || 0,
       sources: a?.querySelectorAll('.src span').length || 0,
+      text: a?.querySelector('.text')?.textContent || '',
       html: a?.querySelector('.text')?.innerHTML.slice(0, 120) || '',
       busy: document.querySelector('#sendBtn').disabled,
     };
@@ -233,15 +239,16 @@ try {
 
   ok('用户消息已渲染', rendered.userMsgs >= 1);
   ok('助手消息已渲染', rendered.asstMsgs >= 1);
-  // 只断言「非空」不断言长度：模型判断资料不足时会回一句
-  // 「资料中没有相关内容」，那是合法回答，不是渲染失败。
-  // 真正证明渲染工作的是 HTML 那条。
   ok('正文非空', rendered.answerLen > 0, `${rendered.answerLen} 字`);
   ok('正文被渲染成 HTML（markdown 生效）', rendered.html.includes('<'), rendered.html.slice(0, 60).replace(/\n/g, ' '));
   ok('思考块可见且有内容', rendered.thinkVisible && rendered.thinkLen > 0, `${rendered.thinkLen} 字`);
   ok('agent 过程时间线有内容', rendered.traceItems > 0, `${rendered.traceItems} 条`);
-  ok('来源标签已渲染', rendered.sources > 0, `${rendered.sources} 个`);
-  ok('发送按钮已恢复可用（流已结束）', rendered.busy === false);
+  // 本用例问的是知识库没覆盖的话题，所以按新的三段式应当得到
+  // 「先声明没有 + 通用知识回答 + 标注来源边界」，而不是一句拒答
+  ok('没覆盖时给出通用知识回答并标注边界',
+     /(知识库|资料)[^。\n]{0,12}(没有|未|无)/.test(rendered.text) && /(通用知识|未引用)/.test(rendered.text),
+     rendered.text.slice(0, 46).replace(/\n/g, ' '));
+  ok('流已结束（发送按钮可用）', rendered.busy === false);
 
   console.log('\n=== 4. 设置抽屉 ===');
   await cdp.eval(`document.querySelector('#openSettings').click()`);

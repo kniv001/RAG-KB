@@ -148,6 +148,19 @@ public class RagProperties {
          */
         private boolean streamThinking = true;
 
+        /**
+         * 检索不到任何资料时，是否仍让模型作答。
+         *
+         * <p>默认 <b>true</b>：知识库没覆盖的问题，先说明知识库没有、再用通用知识回答，
+         * 并明确标注哪部分不是来自用户资料（见 {@code ANSWER_SYSTEM} 的情况【二】）。
+         *
+         * <p>关掉则退回快速兜底 —— 不调模型，直接返回一句「资料中没有相关内容」。
+         * 秒回，但那句话对用户毫无帮助，而且永远是同一句。
+         * 保留这个开关是因为它为每个「知识库答不上来」的问题省掉一次完整生成
+         * （本机含思考约 10~25 秒）。
+         */
+        private boolean answerWithoutContext = true;
+
         /** 每轮规划的查询数上限 */
         private int queriesPerRound = 3;
 
