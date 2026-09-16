@@ -9,6 +9,7 @@ import com.kniv.ragkb.domain.entity.Message;
 import com.kniv.ragkb.provider.model.ChatMessage;
 import com.kniv.ragkb.service.agent.AgentEvent;
 import com.kniv.ragkb.service.agent.AgenticRagService;
+import com.kniv.ragkb.service.config.RagProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -42,6 +43,7 @@ public class ChatService {
     private final AgenticRagService rag;
     private final HistoryIndexService historyIndex;
     private final SummaryService summaries;
+    private final RagProperties props;
     private final ObjectMapper mapper;
 
     public record Outcome(String convId, String answer, List<ChunkHit> sources,
@@ -72,9 +74,24 @@ public class ChatService {
             List<Message> recent = recentMessages(convId);
             // 超出最近窗口的旧轮次：不再是整段丢弃。
             // 分两层取回，可靠性递减 —— 向量召回给细节（会漏），滚动摘要给全局（很粗）
+            //
+            // 只排除「无论预算怎么裁都会留在提示词里」的那几条，也就是最新的几轮。
+            // 原先排除的是整个窗口（16 条），于是被预算裁掉的那些既不在提示词里、
+            // 又被召回排除在外，等于直接丢了 —— 而实测第 7 轮裁掉的正是最近 2 轮，
+            // 恰恰是「那它呢」这类追问最需要的。
+            //
+            // 代价：正常情况（没触发裁剪）下召回可能捞到窗口内偏旧的那几条，与提示词
+            // 重复。装进提示词前会按内容去一次重，见 AgenticRagService 里的 dedupe。
+            int guaranteed = Math.max(2, props.getAgent().getTrimKeepTurns() * 2);
+            Set<Long> exclude = new HashSet<>();
+            for (int i = Math.max(0, recent.size() - guaranteed); i < recent.size(); i++) {
+                if (recent.get(i).getId() != null) {
+                    exclude.add(recent.get(i).getId());
+                }
+            }
             hist = new AgenticRagService.HistoryContext(
                     toChatMessages(recent),
-                    historyIndex.retrieve(convId, question, idsOf(recent)).text(),
+                    historyIndex.retrieve(convId, question, exclude).text(),
                     summaries.summaryOf(convId));
         }
 

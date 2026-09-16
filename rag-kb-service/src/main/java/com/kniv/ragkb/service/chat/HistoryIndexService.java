@@ -105,21 +105,16 @@ public class HistoryIndexService {
         }
         try {
             float[] q = embedding.embedOne(question);
-            // 多取一些候选，因为下面还要按 excludeIds 过滤掉一部分
+            // 排除下推到 SQL：先取后过滤的话，取回来的很可能全在排除集里
+            // （最近窗口那几条永远是最相似的），过滤完就空了。
+            Long[] exclude = excludeIds == null ? new Long[0] : excludeIds.toArray(new Long[0]);
             List<Message> hits = messages.searchByVector(convId,
-                    VectorTypeHandler.toLiteral(q), embedding.modelColumn(), cfg.getTopK() * 3);
+                    VectorTypeHandler.toLiteral(q), embedding.modelColumn(), exclude, cfg.getTopK());
 
             List<Long> picked = new ArrayList<>();
             for (Message m : hits) {
-                if (m.getId() == null) {
-                    continue;
-                }
-                if (excludeIds != null && excludeIds.contains(m.getId())) {
-                    continue;   // 已在最近历史窗口里
-                }
-                picked.add(m.getId());
-                if (picked.size() >= cfg.getTopK()) {
-                    break;
+                if (m.getId() != null) {
+                    picked.add(m.getId());
                 }
             }
             if (picked.isEmpty()) {

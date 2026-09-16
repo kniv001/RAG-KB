@@ -17,7 +17,9 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 
 /**
@@ -413,22 +415,44 @@ public class AgenticRagService {
                 + PromptBudget.estimateTokens(historyExcerpt) + PromptBudget.estimateTokens(convSummary)
                 + PromptBudget.estimateTokens(overview) + PromptBudget.estimateTokens(question);
         if (over > budget) {
-            // 裁的顺序就是「最不重要先走」：摘要 → 召回片段 → 最旧的历史 → 资料。
-            // 资料放最后动，它是事实依据，丢了回答就没有根。
+            // 裁的顺序（最不重要的先走）：摘要 → 最旧的历史 → 召回片段 → 资料。
+            //
+            // **召回片段排在靠后是刻意的**：它的全部意义就是补偿被裁掉的历史
+            // （见 HistoryContext 的说明），把它第一个丢掉等于这个功能白做。
+            // 第一版就是那么写的（摘要 → 召回片段 → 历史 → 资料），
+            // 结果每次触发裁剪，召回片段都成了 0 字 —— 实测踩过。
+            //
+            // 资料放最后，它是事实依据，丢了回答就没有根。
             convSummary = null;
             hasSummary = false;
-            historyExcerpt = null;
-            hasExcerpt = false;
+
+            // takeLast 而不是 take：history 是最旧在前的，要留的是末尾那几条
             int histKeep = Math.min(histTexts.size(), props.getAgent().getTrimKeepTurns() * 2);
-            history = PromptBudget.take(history, histKeep);
-            int usedByOthers = PromptBudget.estimateTokens(PromptBudget.take(histTexts, histKeep))
-                    + PromptBudget.estimateTokens(overview) + PromptBudget.estimateTokens(question);
+            history = PromptBudget.takeLast(history, histKeep);
+
+            int histTokens = PromptBudget.estimateTokens(PromptBudget.takeLast(histTexts, histKeep));
+            int fixed = histTokens + PromptBudget.estimateTokens(overview)
+                    + PromptBudget.estimateTokens(question);
+            // 先假设保留片段，看看还剩多少给资料；实在放不下才丢片段
+            if (fixed + PromptBudget.estimateTokens(historyExcerpt) > budget * 3 / 4) {
+                historyExcerpt = null;
+                hasExcerpt = false;
+            }
+            int usedByOthers = fixed
+                    + (hasExcerpt ? PromptBudget.estimateTokens(historyExcerpt) : 0);
             int ctxBudget = Math.max(512, budget - usedByOthers);
             int keep = Math.max(1, PromptBudget.keepWithin(ctxTexts, ctxBudget));
             contexts = PromptBudget.take(contexts, keep);
-            log.info("提示词超预算（估 {} > {} token），已裁剪：资料 {}→{} 段，历史 {}→{} 条",
-                    over, budget, ctxTexts.size(), contexts.size(), histTexts.size(), histKeep);
+            log.info("提示词超预算（估 {} > {} token），已裁剪：资料 {}→{} 段，历史 {}→{} 条，召回片段 {}",
+                    over, budget, ctxTexts.size(), contexts.size(), histTexts.size(), histKeep,
+                    hasExcerpt ? "保留" : "丢弃");
         }
+
+        // 召回时排除了「一定留在窗口里的那几条」，但哪些真会留下要等预算裁完才知道，
+        // 所以可能重复。这里按内容去重：重复的内容既浪费预算，又会让模型
+        // 以为同一件事被强调了两遍。
+        historyExcerpt = dedupeExcerpt(historyExcerpt, history);
+        hasExcerpt = historyExcerpt != null && !historyExcerpt.isBlank();
 
         StringBuilder user = new StringBuilder();
         // 知识库覆盖范围。放在最前是因为它在「资料不足」时最有用 ——
@@ -603,6 +627,49 @@ public class AgenticRagService {
         }
         String t = s.replace('\n', ' ').strip();
         return t.length() <= max ? t : t.substring(0, max) + "…";
+    }
+
+    /**
+     * 去掉召回片段里与「已留在提示词中的历史」重复的行。
+     *
+     * <p>{@link com.kniv.ragkb.service.chat.HistoryIndexService} 侧只排除了
+     * 「无论预算怎么裁都会留下」的那几条，所以偏旧的那部分仍可能被召回 ——
+     * 那是刻意的（预算裁剪时它们就是靠这一步捞回来的），代价是正常情况下会重复。
+     * 这里按内容比对去掉。
+     *
+     * <p>比对用整段文本而不是前缀：召回片段里每条都是完整消息（超预算时整条不取，
+     * 而不是截一半），所以精确比对是可行的。
+     */
+    private static String dedupeExcerpt(String excerpt, List<ChatMessage> history) {
+        if (excerpt == null || excerpt.isBlank() || history == null || history.isEmpty()) {
+            return excerpt;
+        }
+        Set<String> kept = new HashSet<>();
+        for (ChatMessage m : history) {
+            kept.add(normaliseForCompare(m.content()));
+        }
+        StringBuilder out = new StringBuilder();
+        for (String line : excerpt.split("\n")) {
+            String body = line.replaceFirst("^(用户|助手)：", "");
+            if (kept.contains(normaliseForCompare(body))) {
+                continue;
+            }
+            out.append(line).append('\n');
+        }
+        String s = out.toString().strip();
+        log.debug("去重：召回 {} 字 / 历史 {} 条 → 保留 {} 字",
+                excerpt.length(), history.size(), s.length());
+        if (s.isEmpty() && !excerpt.isBlank()) {
+            String first = excerpt.split("\n")[0];
+            log.debug("  ↑ 被全部去掉。召回首行=「{}」",
+                    first.substring(0, Math.min(50, first.length())));
+        }
+        return s.isEmpty() ? null : s;
+    }
+
+    /** 比对用：抹掉空白差异，避免因换行/空格不同而漏判 */
+    private static String normaliseForCompare(String s) {
+        return s == null ? "" : s.replaceAll("\\s+", " ").strip();
     }
 
     private static String truncate(String s) {

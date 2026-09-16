@@ -63,6 +63,13 @@ public interface MessageMapper extends BaseMapper<Message> {
      * <p>{@code embed_model} 过滤不能省：不同向量模型的输出不在同一空间，
      * 混着查会静默返回垃圾结果，而且从结果上完全看不出来。
      *
+     * <p><b>排除为什么下推到 SQL 而不是取回来再过滤</b>：先取「最近的 N 条」再过滤的话，
+     * 那 N 条很可能**全在排除集里**（比如最近窗口的那几条），过滤完就成了空 ——
+     * 表现是「明明库里有、却一条也召不回」。下推之后数据库是在**未被排除的**里面
+     * 取最近的 N 条，这才是想要的语义。实测踩过：裁剪历史时召回的片段一直是 0 字。
+     *
+     * <p>空数组时 {@code = ANY('{}')} 恒为假，取反恒为真，等于不排除 —— 正好。
+     *
      * <p><b>{@code <=>} 必须写成字面量，不能写成 {@code &lt;=&gt;}。</b>
      * XML 实体只在 {@code <script>} 块里才被解码 —— ChunkMapper 的同类查询有
      * {@code <script>}（因为它要用 {@code <if>}），所以那边写转义是对的；
@@ -75,12 +82,14 @@ public interface MessageMapper extends BaseMapper<Message> {
             WHERE conv_id = #{convId}
               AND embedding IS NOT NULL
               AND embed_model = #{model}
+              AND NOT (id = ANY(#{exclude}::bigint[]))
             ORDER BY embedding <=> #{q}::vector
             LIMIT #{limit}
             """)
     List<Message> searchByVector(@Param("convId") String convId,
                                  @Param("q") String vectorLiteral,
                                  @Param("model") String embedModel,
+                                 @Param("exclude") Long[] excludeIds,
                                  @Param("limit") int limit);
 
     /**

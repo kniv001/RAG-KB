@@ -76,6 +76,28 @@ public final class PromptBudget {
         return parts.size();
     }
 
+    /**
+     * 取**后** n 条。
+     *
+     * <p>为什么单独有一个：会话历史是**时间正序**（最旧在前）传给这里的，
+     * 而「保留最近几轮」要的是末尾那几条。第一版直接用了 {@link #take}，
+     * 于是保留了最旧的、丢掉了最新的 —— 正好和意图相反，
+     * 而「那它呢」这类追问靠的恰恰是最近几轮。这种错不会有任何报错，
+     * 只会让人觉得「模型怎么突然不记得刚才说的话了」。
+     */
+    public static <T> List<T> takeLast(List<T> list, int n) {
+        if (list == null || list.isEmpty()) {
+            return List.of();
+        }
+        if (n >= list.size()) {
+            return list;
+        }
+        if (n <= 0) {
+            return List.of();
+        }
+        return new ArrayList<>(list.subList(list.size() - n, list.size()));
+    }
+
     /** 取前 n 条；n 会被夹到合法范围 */
     public static <T> List<T> take(List<T> list, int n) {
         if (list == null || list.isEmpty()) {
