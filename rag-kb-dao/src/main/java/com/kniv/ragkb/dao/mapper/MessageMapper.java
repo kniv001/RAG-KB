@@ -76,7 +76,7 @@ public interface MessageMapper extends BaseMapper<Message> {
      * 照抄到没有 script 的注解上，转义符会原样发给数据库，直接语法错。
      */
     @Select("""
-            SELECT id, conv_id, role, content,
+            SELECT id, conv_id, role, content, index_text, index_topic,
                    (embedding <=> #{q}::vector) AS distance
             FROM messages
             WHERE conv_id = #{convId}
@@ -101,7 +101,7 @@ public interface MessageMapper extends BaseMapper<Message> {
      */
     @Select("""
             <script>
-            SELECT id, conv_id, role, content FROM messages
+            SELECT id, conv_id, role, content, index_text, index_topic FROM messages
             WHERE conv_id = #{convId} AND id IN (
                 SELECT unnest(#{ids}::bigint[])
                 UNION SELECT unnest(#{ids}::bigint[]) - 1
@@ -114,6 +114,56 @@ public interface MessageMapper extends BaseMapper<Message> {
 
     @Select("SELECT count(*) FROM messages WHERE conv_id = #{convId} AND embedding IS NOT NULL")
     int countIndexed(@Param("convId") String convId);
+
+    // ---------------- 轮次笔记 ----------------
+
+    /**
+     * 取需要改写的轮次：窗口之外、还没有笔记的助手消息。
+     *
+     * <p>只挑 role='assistant'：笔记的内容主体是回答，提问由
+     * {@link #questionBefore} 单独取。窗口内的不动 —— 那些原文本来就在
+     * 提示词里，改写它们是重复劳动。
+     *
+     * <p>{@code index_text IS NULL} 同时起到「未处理」标记的作用：
+     * 改写失败或判定不可用时写空串（见 {@link #markNoteSkipped}），
+     * 于是不会每轮都重试同一条。
+     */
+    @Select("""
+            SELECT id, conv_id, role, content FROM messages
+            WHERE conv_id = #{convId} AND role = 'assistant'
+              AND index_text IS NULL AND content <> ''
+              AND id <= #{uptoId}
+            ORDER BY id LIMIT #{limit}
+            """)
+    List<Message> turnsWithoutNote(@Param("convId") String convId,
+                                   @Param("uptoId") long uptoId,
+                                   @Param("limit") int limit);
+
+    /** 这一轮的提问：该助手消息之前最近的一条用户消息 */
+    @Select("""
+            SELECT id, conv_id, role, content FROM messages
+            WHERE conv_id = #{convId} AND role = 'user' AND id < #{beforeId}
+            ORDER BY id DESC LIMIT 1
+            """)
+    Message questionBefore(@Param("convId") String convId, @Param("beforeId") long beforeId);
+
+    /** 写入笔记，并**用笔记重算向量** —— 检索键从此是笔记，不再是原文 */
+    @Update("""
+            UPDATE messages SET index_text = #{text}, index_topic = #{topic},
+                   embedding = #{vec}::vector, embed_model = #{model}
+            WHERE id = #{id}
+            """)
+    int setNote(@Param("id") long id, @Param("text") String text, @Param("topic") String topic,
+                @Param("vec") String vectorLiteral, @Param("model") String embedModel);
+
+    /**
+     * 标记「这条不用改写」，避免每轮重试。
+     *
+     * <p>写空串而不是保留 NULL：查询条件是 {@code index_text IS NULL}，
+     * 空串不等于 NULL，于是它会被跳过。
+     */
+    @Update("UPDATE messages SET index_text = '' WHERE id = #{id}")
+    int markNoteSkipped(@Param("id") long id);
 
     // ---------------- 滚动摘要 ----------------
 

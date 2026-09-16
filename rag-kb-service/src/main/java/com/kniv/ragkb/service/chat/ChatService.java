@@ -43,6 +43,7 @@ public class ChatService {
     private final AgenticRagService rag;
     private final HistoryIndexService historyIndex;
     private final SummaryService summaries;
+    private final TurnDocService turnDocs;
     private final RagProperties props;
     /** GPU 空闲门闸：让后台任务避开用户请求 */
     private final com.kniv.ragkb.service.config.GpuGate gpuGate;
@@ -133,6 +134,7 @@ public class ChatService {
         // 它们是锦上添花，不能把一次成功的问答变成失败。
         historyIndex.indexPending(conv.getId());   // 补向量，供后续轮次召回
         summaries.maybeUpdate(conv.getId());       // 攒够一批才真的调模型（异步）
+        turnDocs.maybeUpdate(conv.getId());        // 改写窗口外的轮次为自包含笔记（异步）
 
         return new Outcome(conv.getId(), result.answer(), result.sources(),
                 result.rounds(), result.queries());

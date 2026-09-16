@@ -60,5 +60,15 @@ public class Message {
     /** 生成该向量时用的模型标识，形如 local:bge-m3。不同模型的向量不在同一空间，混查会静默返回垃圾 */
     private String embedModel;
 
+    /**
+     * 轮次笔记：把这一轮改写成自包含的一段话，**索引的是它**而不是原文。
+     *
+     * <p>为空表示还没改写（用原文索引）。见 schema.sql 里这段的说明。
+     */
+    private String indexText;
+
+    /** 轮次笔记的主题名，几个字，用于召回时给模型一个抓手 */
+    private String indexTopic;
+
     private OffsetDateTime createdAt;
 }

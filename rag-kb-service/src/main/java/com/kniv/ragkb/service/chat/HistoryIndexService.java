@@ -131,8 +131,13 @@ public class HistoryIndexService {
                 if (m.getContent() == null || m.getContent().isBlank()) {
                     continue;
                 }
-                String line = ("assistant".equals(m.getRole()) ? "助手：" : "用户：")
-                        + m.getContent().replace('\n', ' ').strip();
+                // 有笔记就用笔记：它是改写成自包含的版本 —— 没有指代、没有
+                // 「根据参考资料[1]」这类包装，比原文更适合给模型读。
+                // 笔记只存在于窗口之外的轮次，所以不会和提示词里的原文重复。
+                String body = m.getIndexText() != null && !m.getIndexText().isBlank()
+                        ? m.getIndexText()
+                        : ("assistant".equals(m.getRole()) ? "助手：" : "用户：") + m.getContent();
+                String line = body.replace('\n', ' ').strip();
                 if (sb.length() + line.length() > cfg.getExcerptChars()) {
                     break;   // 预算用尽就停，不硬塞
                 }

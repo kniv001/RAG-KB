@@ -93,6 +93,19 @@ CREATE INDEX IF NOT EXISTS messages_conv_idx ON messages (conv_id, id);
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS embedding   vector(1024);
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS embed_model text NOT NULL DEFAULT '';
 
+-- 轮次笔记：把一轮对话改写成自包含的一段话，索引**它**而不是原文。
+--
+-- 为什么需要：单条 message 不是好的检索单元。
+--   · 单独索引用户那句 —— 常常很短、带指代（「那它呢」），当检索键很差
+--   · 单独索引助手那句 —— 脱离问题可能没头没尾（「它的失效策略有三点…」）
+--   · 助手回答里还夹着「根据参考资料[1]」「以下为通用知识」这类包装，
+--     检索时稀释向量、阅读时是噪音
+--
+-- 改写成「问：<去指代> 答：<结论>」之后才是自包含、可独立检索的单元。
+-- 原文保留在 content 列不动 —— 它是会话记录，改了就没有可追溯性。
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS index_text  text;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS index_topic text;
+
 -- 主题树：把全部块聚成若干主题簇，每簇一段摘要。
 --
 -- 解决什么：扁平的 top-k 只给固定的几块，语料一大就**看不出全局** ——

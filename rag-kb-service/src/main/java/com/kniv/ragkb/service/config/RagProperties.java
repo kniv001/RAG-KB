@@ -36,6 +36,32 @@ public class RagProperties {
 
     private Tree tree = new Tree();
 
+    private TurnDoc turnDoc = new TurnDoc();
+
+    /**
+     * 轮次笔记：把一轮对话改写成自包含的一段话，索引的是它而不是原文。
+     *
+     * <p>解决的是「单条 message 不是好的检索单元」—— 用户那句常带指代、
+     * 助手那句常脱离问题、两边都夹着包装话术。改写之后才是能独立检索的单元。
+     */
+    @Data
+    public static class TurnDoc {
+
+        private boolean enabled = true;
+
+        /**
+         * 只改写窗口之外的轮次。
+         *
+         * <p>必须与 {@code ChatService.HISTORY_LIMIT} 和 {@code Summary.windowMessages}
+         * 取同一个值：这样一条消息要么"在窗口里（原文）"、要么"在窗口外（笔记）"，
+         * 不会两头都出现、让模型看到同一件事的两种说法。
+         */
+        private int windowMessages = 16;
+
+        /** 一次后台任务改写几轮。攒批是为了少进几次模型 —— 每次进模型都要占推理槽 */
+        private int batchMessages = 4;
+    }
+
     /**
      * 主题树：把全部块聚成若干主题簇，每簇一句概括。
      *
