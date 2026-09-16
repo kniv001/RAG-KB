@@ -34,6 +34,36 @@ public class RagProperties {
 
     private History history = new History();
 
+    private Summary summary = new Summary();
+
+    /**
+     * 会话滚动摘要 —— 历史索引漏召时的兜底。
+     *
+     * <p>它与历史索引是互补而非替代：索引给细节但会漏，摘要给全局但很粗。
+     * 漏召时至少还剩一份覆盖全部的背景，不至于彻底断片。
+     */
+    @Data
+    public static class Summary {
+
+        private boolean enabled = true;
+
+        /**
+         * 最近多少条消息算「窗口内」，不进摘要。
+         *
+         * <p>取 16 与 {@code ChatService.HISTORY_LIMIT} 一致 —— 窗口里的原文
+         * 本来就要给模型看，提前摘进摘要里是重复的。
+         */
+        private int windowMessages = 16;
+
+        /**
+         * 攒够多少条「掉出窗口」的消息才更新一次摘要。
+         *
+         * <p>每轮都算的话，一轮一次模型调用，长对话里全花在这上面。
+         * 取 6（三轮）是成本与新鲜度的折中。
+         */
+        private int batchMessages = 6;
+    }
+
     /**
      * 会话历史索引 —— 超出最近窗口的旧轮次不再整段丢弃，而是向量化后按需召回。
      *

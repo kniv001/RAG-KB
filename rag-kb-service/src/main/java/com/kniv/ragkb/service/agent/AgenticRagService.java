@@ -125,30 +125,35 @@ public class AgenticRagService {
     public record AgentResult(String answer, List<ChunkHit> sources, int rounds, List<String> queries) {
     }
 
+    /**
+     * 进提示词的三层历史材料。分三层是因为它们的<b>可靠性递减</b>：
+     *
+     * <ol>
+     *   <li>{@code turns} 最近若干轮的<b>原文</b> —— 最可靠，全文，无检索参与</li>
+     *   <li>{@code excerpt} 更早轮次里<b>向量召回</b>出来的片段 —— 精确但会漏</li>
+     *   <li>{@code summary} 覆盖全部历史的<b>滚动摘要</b> —— 很粗但不会完全丢</li>
+     * </ol>
+     *
+     * <p>三者是互补的：中间那层负责细节，最下面那层是漏召时的兜底。
+     * 单独任何一层都不够 —— 光有原文撑不起长对话，光有检索会断片，光有摘要又太糊。
+     */
+    public record HistoryContext(List<ChatMessage> turns, String excerpt, String summary) {
+        public static final HistoryContext EMPTY = new HistoryContext(List.of(), null, null);
+    }
+
     // ---------------- Agentic 模式 ----------------
 
     public AgentResult agentic(String question, String modelRef, String mode, String docId,
                                Consumer<AgentEvent> onEvent) {
-        return agentic(question, modelRef, mode, docId, List.of(), onEvent);
+        return agentic(question, modelRef, mode, docId, HistoryContext.EMPTY, onEvent);
     }
 
     /**
-     * @param history 最近若干轮对话（时间正序）。规划与回答都会用到 ——
-     *                没有它，「那它呢」这类追问无法解析指代，检索会跑偏。
+     * @param hist 三层历史材料，见 {@link HistoryContext}。规划与回答都会用到 ——
+     *             没有它，「那它呢」这类追问无法解析指代，检索会跑偏。
      */
     public AgentResult agentic(String question, String modelRef, String mode, String docId,
-                               List<ChatMessage> history, Consumer<AgentEvent> onEvent) {
-        return agentic(question, modelRef, mode, docId, history, null, onEvent);
-    }
-
-    /**
-     * @param historyExcerpt 超出最近窗口的旧轮次，由向量检索召回（见 HistoryIndexService）。
-     *                       它是<b>增量</b>：窗口内的近轮次仍是原文全文，这里只在窗口之外补充。
-     *                       规划与回答都带上 —— 「那它呢」的指代对象完全可能落在旧轮次里。
-     */
-    public AgentResult agentic(String question, String modelRef, String mode, String docId,
-                               List<ChatMessage> history, String historyExcerpt,
-                               Consumer<AgentEvent> onEvent) {
+                               HistoryContext hist, Consumer<AgentEvent> onEvent) {
         RagProperties.Agent cfg = props.getAgent();
         ProviderRegistry.Ref ref = providers.resolveChat(modelRef);
         // 规划与评估走小模型（若已配置）：这两步只需输出 JSON，却占了大部分耗时
@@ -156,7 +161,7 @@ public class AgenticRagService {
 
         Map<Long, ChunkHit> collected = new LinkedHashMap<>();
         List<String> tried = new ArrayList<>();
-        List<String> queries = plan(utility, question, null, null, history, historyExcerpt);
+        List<String> queries = plan(utility, question, null, null, hist);
 
         int round = 0;
         boolean enough = false;
@@ -185,14 +190,14 @@ public class AgenticRagService {
             }
 
             // ④ 不够 → 换查询再来一轮
-            queries = plan(utility, question, assess.missing, tried, history, historyExcerpt);
+            queries = plan(utility, question, assess.missing, tried, hist);
             if (queries.isEmpty()) {
                 break;
             }
         }
 
         List<ChunkHit> contexts = rank(collected.values());
-        String answer = answer(ref, question, contexts, history, historyExcerpt, onEvent);
+        String answer = answer(ref, question, contexts, hist, onEvent);
         return new AgentResult(answer, contexts, round, tried);
     }
 
@@ -200,21 +205,15 @@ public class AgenticRagService {
 
     public AgentResult classic(String question, String modelRef, String mode, String docId,
                                Consumer<AgentEvent> onEvent) {
-        return classic(question, modelRef, mode, docId, List.of(), onEvent);
+        return classic(question, modelRef, mode, docId, HistoryContext.EMPTY, onEvent);
     }
 
     public AgentResult classic(String question, String modelRef, String mode, String docId,
-                               List<ChatMessage> history, Consumer<AgentEvent> onEvent) {
-        return classic(question, modelRef, mode, docId, history, null, onEvent);
-    }
-
-    public AgentResult classic(String question, String modelRef, String mode, String docId,
-                               List<ChatMessage> history, String historyExcerpt,
-                               Consumer<AgentEvent> onEvent) {
+                               HistoryContext hist, Consumer<AgentEvent> onEvent) {
         ProviderRegistry.Ref ref = providers.resolveChat(modelRef);
         List<ChunkHit> hits = retriever.search(question, mode, docId, null);
         onEvent.accept(AgentEvent.retrieve(1, question, hits.size(), sourceNames(hits)));
-        String answer = answer(ref, question, hits, history, historyExcerpt, onEvent);
+        String answer = answer(ref, question, hits, hist, onEvent);
         return new AgentResult(answer, hits, 1, List.of(question));
     }
 
@@ -253,13 +252,16 @@ public class AgenticRagService {
     }
 
     private List<String> plan(ProviderRegistry.Ref ref, String question, String missing,
-                              List<String> tried, List<ChatMessage> history,
-                              String historyExcerpt) {
+                              List<String> tried, HistoryContext hist) {
         StringBuilder user = new StringBuilder();
-        // 把更早的对话带上（向量召回的）：指代对象完全可能落在最近窗口之外，
-        // 「那它呢」里的「它」在旧轮次里定义时，只有窗口是解不出来的
-        if (historyExcerpt != null && !historyExcerpt.isBlank()) {
-            user.append("更早的对话（由检索召回）：\n").append(historyExcerpt).append("\n\n");
+        List<ChatMessage> history = hist.turns();
+        // 三层按可靠性递减排列：摘要在最前（最粗），原文在最后（最准）。
+        // 指代对象完全可能落在最近窗口之外 —— 靠下面的召回与摘要才能解出来。
+        if (hist.summary() != null && !hist.summary().isBlank()) {
+            user.append("对话背景（全部历史的摘要）：\n").append(hist.summary()).append("\n\n");
+        }
+        if (hist.excerpt() != null && !hist.excerpt().isBlank()) {
+            user.append("更早的对话（由检索召回）：\n").append(hist.excerpt()).append("\n\n");
         }
         // 把最近的对话带上：没有它，「那它呢」「上面说的第二点」这类追问
         // 会被当成独立问题去检索，结果必然跑偏
@@ -327,10 +329,13 @@ public class AgenticRagService {
     }
 
     private String answer(ProviderRegistry.Ref ref, String question, List<ChunkHit> contexts,
-                          List<ChatMessage> history, String historyExcerpt,
-                          Consumer<AgentEvent> onEvent) {
+                          HistoryContext hist, Consumer<AgentEvent> onEvent) {
+        List<ChatMessage> history = hist.turns();
+        String historyExcerpt = hist.excerpt();
+        String convSummary = hist.summary();
         boolean hasExcerpt = historyExcerpt != null && !historyExcerpt.isBlank();
-        if (contexts.isEmpty() && !hasExcerpt) {
+        boolean hasSummary = convSummary != null && !convSummary.isBlank();
+        if (contexts.isEmpty() && !hasExcerpt && !hasSummary) {
             // 资料和历史都没有，调模型纯属浪费一次十几秒的推理
             String fallback = "资料中没有相关内容。";
             onEvent.accept(AgentEvent.answerToken(fallback));
@@ -338,8 +343,12 @@ public class AgenticRagService {
         }
 
         StringBuilder user = new StringBuilder();
-        // 更早的对话放在最前：它是背景，而【参考资料】是事实依据，
-        // 让事实依据紧挨着【问题】——「lost in the middle」下这个位置最不容易被漏掉
+        // 三层历史按可靠性递减排：摘要最粗在最前，召回片段居中，最新原文由 messages 承担。
+        // 【参考资料】是事实依据，让它紧挨着【问题】——「lost in the middle」下这个位置最不容易被漏掉
+        if (hasSummary) {
+            user.append("【对话背景】（全部历史的摘要，用于理解上下文与指代；粒度粗，细节以【更早的对话】与【参考资料】为准）\n")
+                    .append(convSummary).append("\n\n");
+        }
         if (hasExcerpt) {
             // 标签要写清楚它「能用来干什么」：只写「不作为事实来源」的话，
             // 模型连「你刚才说的第二点是什么」这类问题都会拒绝回答
@@ -354,7 +363,7 @@ public class AgenticRagService {
             // 所以显式给出界限，让模型知道该依据哪一边。
             user.append("【参考资料】\n")
                     .append("（本次未检索到与问题相关的资料。若问题问的是「之前说过什么」"
-                            + "或需要解析指代，请依据上面的【更早的对话】回答；"
+                            + "或需要解析指代，请依据上面的【对话背景】与【更早的对话】回答；"
                             + "若问的是知识内容，回答「资料中没有相关内容」。）\n\n");
         } else {
             user.append("【参考资料】\n");
@@ -367,8 +376,11 @@ public class AgenticRagService {
         }
         user.append("【问题】\n").append(question);
         // 排查用：模型答「资料中没有」时，先分清是没检索到、还是检索到了它不用
-        log.debug("回答注入：资料 {} 段 / 历史片段 {} 字", contexts.size(),
-                hasExcerpt ? historyExcerpt.length() : 0);
+        log.debug("回答注入：资料 {} 段 / 召回片段 {} 字 / 摘要 {} 字 / 近轮 {} 条",
+                contexts.size(),
+                hasExcerpt ? historyExcerpt.length() : 0,
+                hasSummary ? convSummary.length() : 0,
+                history == null ? 0 : history.size());
 
         // ---- 回答缓存 ----
         // 键里含「上下文哈希」与「历史哈希」：资料改了或对话历史变了，键就变，
@@ -387,6 +399,10 @@ public class AgenticRagService {
             // 召回的旧轮次必须进键：召回结果变了，答案就可能变，
             // 不进键的话会命中一条基于不同上下文算出来的陈旧答案
             historyLines.add("excerpt:" + historyExcerpt);
+        }
+        if (hasSummary) {
+            // 摘要同理 —— 它在后台异步更新，不进键的话摘要变了答案却还命中旧的
+            historyLines.add("summary:" + convSummary);
         }
         String cacheKey = CacheService.answerKey(question,
                 CacheService.contextHash(contents), CacheService.historyHash(historyLines),

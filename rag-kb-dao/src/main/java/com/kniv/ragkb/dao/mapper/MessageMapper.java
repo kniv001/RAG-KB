@@ -105,4 +105,36 @@ public interface MessageMapper extends BaseMapper<Message> {
 
     @Select("SELECT count(*) FROM messages WHERE conv_id = #{convId} AND embedding IS NOT NULL")
     int countIndexed(@Param("convId") String convId);
+
+    // ---------------- 滚动摘要 ----------------
+
+    @Select("SELECT COALESCE(max(id), 0) FROM messages WHERE conv_id = #{convId}")
+    long maxId(@Param("convId") String convId);
+
+    /**
+     * 取倒数第 {@code offset} 条消息的 id —— 也就是「最近窗口之外最新的那一条」。
+     *
+     * <p>不能用 {@code maxId - offset} 代替：消息 id 是全局序列，别的会话会插进来，
+     * 单个会话里根本不连续。只有按 conv_id 排序取偏移量才是准的。
+     *
+     * @return 消息数不足 offset 时返回 null（说明还没有东西掉出窗口）
+     */
+    @Select("SELECT id FROM messages WHERE conv_id = #{convId} ORDER BY id DESC OFFSET #{offset} LIMIT 1")
+    Long idAtOffset(@Param("convId") String convId, @Param("offset") int offset);
+
+    /**
+     * 取一段 id 区间内的消息，供增量摘要把「新掉出窗口」的那几条并进去。
+     *
+     * <p>两端的比较都是 {@code >} 与 {@code <=}：{@code afterId} 是摘要已经覆盖到的位置，
+     * 用开区间才不会把同一条消息重复并进去。
+     */
+    @Select("""
+            SELECT id, conv_id, role, content FROM messages
+            WHERE conv_id = #{convId} AND id > #{afterId} AND id <= #{uptoId}
+            ORDER BY id LIMIT #{limit}
+            """)
+    List<Message> listBetween(@Param("convId") String convId,
+                              @Param("afterId") long afterId,
+                              @Param("uptoId") long uptoId,
+                              @Param("limit") int limit);
 }

@@ -41,6 +41,7 @@ public class ChatService {
     private final MessageMapper messages;
     private final AgenticRagService rag;
     private final HistoryIndexService historyIndex;
+    private final SummaryService summaries;
     private final ObjectMapper mapper;
 
     public record Outcome(String convId, String answer, List<ChunkHit> sources,
@@ -60,27 +61,28 @@ public class ChatService {
         }
 
         Conversation conv;
-        List<ChatMessage> history;
-        String excerpt = null;
+        AgenticRagService.HistoryContext hist = AgenticRagService.HistoryContext.EMPTY;
         if (convId == null || convId.isBlank()) {
             conv = create(question, model);
-            history = List.of();
         } else {
             conv = conversations.selectById(convId);
             if (conv == null) {
                 throw new IllegalArgumentException("会话不存在：" + convId);
             }
             List<Message> recent = recentMessages(convId);
-            history = toChatMessages(recent);
-            // 超出最近窗口的旧轮次：不再是整段丢弃，而是向量召回。
-            // 排除窗口内那些 —— 它们已经在提示词里了，再召回一遍是纯浪费。
-            excerpt = historyIndex.retrieve(convId, question, idsOf(recent)).text();
+            // 超出最近窗口的旧轮次：不再是整段丢弃。
+            // 分两层取回，可靠性递减 —— 向量召回给细节（会漏），滚动摘要给全局（很粗）
+            hist = new AgenticRagService.HistoryContext(
+                    toChatMessages(recent),
+                    historyIndex.retrieve(convId, question, idsOf(recent)).text(),
+                    summaries.summaryOf(convId));
         }
 
         // 先把 convId 推给前端：否则第一轮回答完才知道会话 id，追问会断链
         if (onEvent != null) {
             onEvent.accept(AgentEvent.of(AgentEvent.META,
-                    "convId", conv.getId(), "historyTurns", history.size() / 2));
+                    "convId", conv.getId(), "historyTurns", hist.turns().size() / 2,
+                    "hasSummary", hist.summary() != null));
         }
 
         // 消费掉事件（若调用方只想要最终结果，传 no-op）
@@ -88,17 +90,18 @@ public class ChatService {
 
         AgenticRagService.AgentResult result =
                 "classic".equalsIgnoreCase(strategy)
-                        ? rag.classic(question, model, retrieval, docId, history, excerpt, sink)
-                        : rag.agentic(question, model, retrieval, docId, history, excerpt, sink);
+                        ? rag.classic(question, model, retrieval, docId, hist, sink)
+                        : rag.agentic(question, model, retrieval, docId, hist, sink);
 
         append(conv.getId(), "user", question, null, null, null);
         append(conv.getId(), "assistant", result.answer(),
                 toSourcesJson(result.sources()), conv.getProvider(), conv.getModel());
         conversations.touch(conv.getId(), conv.getProvider(), conv.getModel());
 
-        // 把刚写入的两条补上向量，供后续轮次召回。放在回答之后，用户已经拿到结果了；
-        // 内部吞掉异常 —— 索引只是锦上添花，不能让它把一次成功的问答变成失败
-        historyIndex.indexPending(conv.getId());
+        // 两件收尾的事，都在回答之后做、都吞掉自己的异常 ——
+        // 它们是锦上添花，不能把一次成功的问答变成失败。
+        historyIndex.indexPending(conv.getId());   // 补向量，供后续轮次召回
+        summaries.maybeUpdate(conv.getId());       // 攒够一批才真的调模型（异步）
 
         return new Outcome(conv.getId(), result.answer(), result.sources(),
                 result.rounds(), result.queries());

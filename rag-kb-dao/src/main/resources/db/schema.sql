@@ -48,6 +48,18 @@ CREATE TABLE IF NOT EXISTS conversations (
     updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- 会话滚动摘要：历史索引漏召时的兜底。
+--
+-- 为什么需要它：向量检索只给 top-k，召不回就丢了，而且**没有第二次机会**。
+-- 指代与省略尤其致命 —— 用户问「那它呢」，检索很可能匹配不上定义「它」的那一轮，
+-- 因为那轮的文本里根本没有「它」这个词。摘要覆盖全部历史，粗糙但不会完全丢。
+--
+-- summary_upto 记录摘要覆盖到哪条消息（messages.id）。它是增量的关键：
+-- 每次只把「新掉出最近窗口」的那几条并入已有摘要，而不是重读整个会话 ——
+-- 否则长对话每轮都要重算一遍，成本随轮数线性增长。
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS summary      text;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS summary_upto bigint NOT NULL DEFAULT 0;
+
 CREATE TABLE IF NOT EXISTS messages (
     id         bigserial PRIMARY KEY,
     conv_id    text NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,

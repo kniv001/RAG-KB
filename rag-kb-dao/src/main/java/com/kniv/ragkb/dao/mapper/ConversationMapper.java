@@ -31,4 +31,18 @@ public interface ConversationMapper extends BaseMapper<Conversation> {
     int touch(@Param("id") String id,
               @Param("provider") String provider,
               @Param("model") String model);
+
+    /**
+     * 写入滚动摘要与它覆盖到的消息 id。
+     *
+     * <p>刻意<b>不动 updated_at</b>：摘要是后台补算的，不该把会话顶到列表最前面 ——
+     * 那会让「最近活跃」排序变成「最近被摘要过」，用户会看到顺序自己乱跳。
+     */
+    @Update("""
+            UPDATE conversations SET summary = #{summary}, summary_upto = #{upto}
+            WHERE id = #{id}
+            """)
+    int updateSummary(@Param("id") String id,
+                      @Param("summary") String summary,
+                      @Param("upto") long upto);
 }
