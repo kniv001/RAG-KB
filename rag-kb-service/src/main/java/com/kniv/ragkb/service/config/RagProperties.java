@@ -202,6 +202,29 @@ public class RagProperties {
          */
         private boolean answerWithoutContext = true;
 
+        /**
+         * 模型窗口大小。必须与 {@code ragkb.provider.providers.local.num-ctx} 一致 ——
+         * 前者决定模型能装多少，后者决定我们打算往里塞多少，对不上就会触发
+         * 下面那条悬崖。两处都配是刻意的冗余：写死一处的话，改了那边这边不知道。
+         */
+        private int promptWindowTokens = 10240;
+
+        /**
+         * 为生成预留的 token 数（思考 + 正文）。
+         *
+         * <p>实测 qwen3:4b 的思考在 1700~5500 字之间（约 1000~3400 token），
+         * 正文 300~800 token。取 4096 是留了余量。
+         */
+        private int generationReserveTokens = 4096;
+
+        /**
+         * 超预算裁剪时，最近历史保留几轮。
+         *
+         * <p>不留不行：没有最近几轮，「那它呢」这类追问解析不了指代；
+         * 留太多又会把预算吃光。4 轮是折中，更早的轮次本来就有历史索引兜底。
+         */
+        private int trimKeepTurns = 4;
+
         /** 每轮规划的查询数上限 */
         private int queriesPerRound = 3;
 

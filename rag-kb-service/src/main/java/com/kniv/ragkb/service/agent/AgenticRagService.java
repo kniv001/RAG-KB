@@ -386,11 +386,54 @@ public class AgenticRagService {
             return fallback;
         }
 
+        // ── 提示词预算 ──
+        // 超限不是渐进退化而是悬崖：实测 num_ctx=10240 时 9920 token 正常，
+        // 再多一点 Ollama 就把整个上下文重置到 5122 token，**丢掉开头** ——
+        // 也就是系统提示词。后果是回答不再受任何约束（三段式、引用标注、
+        // 「不得编造」全没了），而模型照常返回一个看起来正常的回答，不报错。
+        //
+        // 所以在这里按优先级裁：先丢摘要，再丢召回片段，再丢最旧的历史，
+        // 最后才对资料动手 —— 资料是事实依据，丢了回答就没有根。
+        String overview = tree.overview();
+
+        int reserve = props.getAgent().getGenerationReserveTokens();
+        int budget = Math.max(1024,
+                props.getAgent().getPromptWindowTokens() - reserve - PromptBudget.estimateTokens(ANSWER_SYSTEM));
+        List<String> ctxTexts = new ArrayList<>(contexts.size());
+        for (ChunkHit h : contexts) {
+            ctxTexts.add(h.getContent());
+        }
+        List<String> histTexts = new ArrayList<>();
+        if (history != null) {
+            for (ChatMessage m : history) {
+                histTexts.add(m.content());
+            }
+        }
+        int over = PromptBudget.estimateTokens(ctxTexts) + PromptBudget.estimateTokens(histTexts)
+                + PromptBudget.estimateTokens(historyExcerpt) + PromptBudget.estimateTokens(convSummary)
+                + PromptBudget.estimateTokens(overview) + PromptBudget.estimateTokens(question);
+        if (over > budget) {
+            // 裁的顺序就是「最不重要先走」：摘要 → 召回片段 → 最旧的历史 → 资料。
+            // 资料放最后动，它是事实依据，丢了回答就没有根。
+            convSummary = null;
+            hasSummary = false;
+            historyExcerpt = null;
+            hasExcerpt = false;
+            int histKeep = Math.min(histTexts.size(), props.getAgent().getTrimKeepTurns() * 2);
+            history = PromptBudget.take(history, histKeep);
+            int usedByOthers = PromptBudget.estimateTokens(PromptBudget.take(histTexts, histKeep))
+                    + PromptBudget.estimateTokens(overview) + PromptBudget.estimateTokens(question);
+            int ctxBudget = Math.max(512, budget - usedByOthers);
+            int keep = Math.max(1, PromptBudget.keepWithin(ctxTexts, ctxBudget));
+            contexts = PromptBudget.take(contexts, keep);
+            log.info("提示词超预算（估 {} > {} token），已裁剪：资料 {}→{} 段，历史 {}→{} 条",
+                    over, budget, ctxTexts.size(), contexts.size(), histTexts.size(), histKeep);
+        }
+
         StringBuilder user = new StringBuilder();
         // 知识库覆盖范围。放在最前是因为它在「资料不足」时最有用 ——
         // 没有它，检索不到就只能回一句「知识库中没有」，而说不出
         // 「没有 X，但有 Y 和 Z 两个相关方向」。
-        String overview = tree.overview();
         if (overview != null && !overview.isBlank()) {
             user.append("【知识库主题概览】（本知识库覆盖了哪些方向，供你判断该往哪找、"
                     + "以及资料不足时告知用户库里有什么）\n")
