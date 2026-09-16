@@ -19,7 +19,10 @@ function h(tag, props = {}, ...kids) {
     if (k === 'class') n.className = v;
     else if (k === 'text') n.textContent = v;
     else if (k === 'html') n.innerHTML = v;
-    else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
+    // 必须 toLowerCase：事件名大小写敏感，'onClick'.slice(2) 得到的是 'Click'，
+    // 注册上去永远不触发。踩过 —— 会话列表点不开、设置里几个按钮全是哑的，
+    // 而显式写 addEventListener('click', ...) 的地方却正常，所以测试一直没发现。
+    else if (k.startsWith('on')) n.addEventListener(k.slice(2).toLowerCase(), v);
     else if (v !== null && v !== undefined && v !== false) n.setAttribute(k, v);
   }
   for (const kid of kids.flat()) {

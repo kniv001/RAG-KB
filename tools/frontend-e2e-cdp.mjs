@@ -401,6 +401,51 @@ try {
     ok('公式渲染无错误', real.errors === 0);
   }
 
+  console.log('\n=== 4.7 点击事件（h() 里那些 onClick 绑的）===');
+  {
+    // 这一节是为一个 bug 补的：h() 里写成 addEventListener(k.slice(2))，
+    // 'onClick'.slice(2) 得到 'Click'（大写 C），而事件名大小写敏感 ——
+    // 于是凡是用 h(..., { onClick }) 绑的地方全是哑的。之前测的新建对话、
+    // 设置、页签恰好都是显式写 addEventListener('click', ...)，所以一直没发现。
+    const before = await cdp.eval(`({
+      rows: document.querySelectorAll('#convList .conv').length,
+      title: document.querySelector('#convTitle').textContent
+    })`);
+    ok('会话列表有条目', before.rows >= 1, `${before.rows} 个`);
+
+    // 点另一条会话的标题（子元素）——顺带验证事件能冒泡到行上的监听器
+    const target = await cdp.eval(`(() => {
+      const rows = [...document.querySelectorAll('#convList .conv')];
+      const t = rows.find((r) => !r.classList.contains('on')) || rows[0];
+      const title = t.querySelector('.t').textContent;
+      t.querySelector('.t').click();
+      return title;
+    })()`);
+    await sleep(1600);
+    const after = await cdp.eval(`({
+      title: document.querySelector('#convTitle').textContent,
+      msgs: document.querySelectorAll('#messages .msg').length,
+      highlighted: !!document.querySelector('#convList .conv.on')
+    })`);
+    const same = after.title.includes(target.slice(0, 8)) || target.includes(after.title.slice(0, 8));
+    ok('点击会话能切过去', same, `目标「${target.slice(0, 14)}」→ 现标题「${after.title.slice(0, 14)}」`);
+    ok('  该会话的消息渲染出来了', after.msgs > 0, `${after.msgs} 条`);
+    ok('  列表高亮跟着切', after.highlighted);
+
+    // 设置里同样用 onClick 绑的按钮
+    await cdp.eval(`document.querySelector('#openSettings').click()`);
+    await sleep(600);
+    await cdp.eval(`document.querySelector('#setTabs button[data-tab="system"]').click()`);
+    await sleep(500);
+    await cdp.eval(`[...document.querySelectorAll('#setBody button')].find(b => b.textContent.includes('健康检查'))?.click()`);
+    await sleep(2500);
+    const health = await cdp.eval(`document.querySelector('#healthOut')?.textContent || ''`);
+    ok('设置里的「健康检查」按钮生效（同样走 onClick）',
+       /database|service|version/i.test(health), health.slice(0, 50).replace(/\n/g, ' '));
+    await cdp.eval(`document.querySelector('#closeSettings').click()`);
+    await sleep(300);
+  }
+
   console.log('\n=== 5. 附件：加密上传 + 自动建索引 ===');
   await cdp.eval(`document.querySelector('#closeSettings').click()`);
   await sleep(300);
