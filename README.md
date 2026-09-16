@@ -1,7 +1,9 @@
 # RAG 知识库 · Java 版
 
-个人 RAG 知识库的 Java 重写。与 `D:\vs\rag-kb`（Python 版）**并行运行、互不干扰**，
-两套连同一个 PostgreSQL / Redis，切换只需改 cloudflared 的转发端口。
+[English](README.en.md) | **简体中文**
+
+个人 RAG 知识库的 Java 重写。与 [`D:\vs\rag-kb`（Python 版）](https://github.com/kniv001/RAG-KB/tree/python)
+**并行运行、互不干扰**，两套连同一个 PostgreSQL / Redis，切换只需改 cloudflared 的转发端口。
 
 **当前阶段**：功能完整可用。浏览器界面、Agentic RAG、联网搜索、主题树都在跑，
 外网经 Cloudflare 隧道访问。
