@@ -13,6 +13,17 @@ import fs from 'node:fs';
 import { makeClient } from './kb-client.mjs';
 
 const APPLY = process.argv.includes('--apply');
+/**
+ * 连「分不清是谁产生的」会话也一起删。
+ *
+ * 默认不做，因为这些会话里有几个我无法证明来源 —— 比如
+ * 「校园网为什么拒绝 IPv6 入站？依据是什么？」，它是 ask-test.mjs /
+ * timing-probe.mjs 的默认测试问题，但那个话题本身也是用户提出来的，
+ * 脚本产生的和用户自己问的，在库里长得一模一样。
+ *
+ * 这类判断不该由脚本替用户做，所以做成显式开关。
+ */
+const ALL_CONVS = process.argv.includes('--all-conversations');
 const BASE = process.env.KB_BASE || 'http://127.0.0.1:8080';
 const cred = JSON.parse(fs.readFileSync('D:/vs/rag-kb/data/auth.json.migrated', 'utf8'));
 const c = makeClient(BASE);
@@ -54,8 +65,12 @@ for (const d of keepDocs) console.log(`  ✓ 保留 ${d.name}  ${d.bytes} B  ←
 // ── 会话 ──
 const convs = (await c.call('GET', '/api/chat/conversations?limit=200', undefined, { token: TOKEN }))
   .body.data.conversations || [];
-const delConvs = convs.filter((x) => hit(CONV_TEST, x.title || ''));
-const keepConvs = convs.filter((x) => !hit(CONV_TEST, x.title || ''));
+const delConvs = ALL_CONVS ? convs : convs.filter((x) => hit(CONV_TEST, x.title || ''));
+const keepConvs = ALL_CONVS ? [] : convs.filter((x) => !hit(CONV_TEST, x.title || ''));
+if (ALL_CONVS) {
+  console.log('\n⚠️  --all-conversations：所有会话都会被删除，包括无法判定来源的那些。');
+  for (const x of convs) console.log(`      ${x.id}  ${(x.title || '').slice(0, 34)}`);
+}
 
 console.log(`\n会话：共 ${convs.length}，删 ${delConvs.length}，留 ${keepConvs.length}`);
 for (const x of keepConvs.slice(0, 12)) {
