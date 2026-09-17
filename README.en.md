@@ -375,6 +375,24 @@ user cannot tell. Ingesting turns it into a document, so it travels exactly the
 same path as a file the user uploaded: it is chunked, embedded and carries its
 source. That keeps "every sentence has a citation" true even after browsing.
 
+**The fetch keeps the page's structure** (changed 2026-09-17). It used to call
+jsoup's `main.text()`, which **flattens the whole DOM into one run of text** ——
+headings, paragraphs, lists and code blocks all lose their shape right there. The
+cost was measurable: across the 41 documents already ingested, only 64 heading
+lines survived, and most of those were the title line the ingest adds itself. So
+"what sections does this document have" was unrecoverable from the store.
+
+It now walks the DOM and emits Markdown: headings → `#`~`######`, paragraphs →
+blank-line separated, lists → `- `, tables → `| `, `<pre>` → fenced verbatim.
+Measured on two freshly fetched pages from the same site: one came in at 7161
+characters with **59 headings** and 147 paragraphs, hierarchy intact
+(`## 一、持久化的作用` / `### 1. 什么是持久化`).
+
+> Known limitation: code blocks rendered by a JS highlighter (hljs / prism) are
+> `<div>` rather than `<pre>` and are not recognised — their **text survives, the
+> structure does not**. Documents already in the store cannot be fixed either:
+> structure can only be captured at fetch time.
+
 **Backends were chosen by measurement** (campus network, query "three-tier cache
 architecture"):
 

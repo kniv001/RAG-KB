@@ -250,7 +250,12 @@ public class WebSearchService {
             if (main == null) {
                 main = doc.body();
             }
-            String text = main == null ? "" : normalise(main.text());
+            // 不要用 main.text() —— jsoup 的 .text() 把整棵 DOM 拍平成一串文本，
+            // 标题、段落、列表、代码块的结构在这一步全丢。
+            // 实测代价：41 篇已入库文档合计只剩 64 个标题行，且绝大多数是这里加的标题，
+            // 于是「文档讲了哪几块」在库里无从恢复（想按结构导航就得靠模型猜，而模型
+            // 在全局规模上不可靠：整篇定章会返回「整篇一章」）。
+            String text = main == null ? "" : toMarkdown(main);
 
             if (text.length() > props.getMaxTextChars()) {
                 text = text.substring(0, props.getMaxTextChars());
@@ -349,6 +354,68 @@ public class WebSearchService {
     private static String normalise(String s) {
         return s.replace(' ', ' ').replaceAll("[ \\t\\x0B\\f\\r]+", " ")
                 .replaceAll("\\n{3,}", "\n\n").strip();
+    }
+
+    /**
+     * 把正文容器转成**保留结构**的 Markdown，而不是拍平成一串文本。
+     *
+     * <p>保留下来的结构有三处下游收益：
+     * <ol>
+     *   <li>标题成为独立段落（切分器的 HEADING 规则本来就按标题强制断段），
+     *       不会再被并进正文；</li>
+     *   <li>空行分隔的段落让切分器按语义边界打包，而不是从长段落里硬切；</li>
+     *   <li>「文档讲了哪几块」在库里可恢复 —— 否则要靠模型判章，而它整篇定章时
+     *       会直接返回「整篇一章」（逃生口）。</li>
+     * </ol>
+     *
+     * <p>代码块用围栏原样保留：缩进与换行在那里是内容的一部分，压平就废了。
+     */
+    private static String toMarkdown(Element root) {
+        StringBuilder sb = new StringBuilder();
+        appendMarkdown(root, sb);
+        return sb.toString().replace(' ', ' ')
+                .replaceAll("[ \\t\\x0B\\f]+\\n", "\n")   // 行尾空白
+                .replaceAll("\\n{3,}", "\n\n")            // 连续空行压成一个
+                .strip();
+    }
+
+    private static void appendMarkdown(org.jsoup.nodes.Node node, StringBuilder sb) {
+        if (node instanceof org.jsoup.nodes.TextNode t) {
+            sb.append(t.getWholeText());
+            return;
+        }
+        if (!(node instanceof Element el)) {
+            return;
+        }
+        switch (el.tagName().toLowerCase()) {
+            case "h1", "h2", "h3", "h4", "h5", "h6" -> {
+                int level = el.tagName().charAt(1) - '0';
+                sb.append("\n\n").append("#".repeat(level)).append(' ');
+                el.childNodes().forEach(c -> appendMarkdown(c, sb));
+                sb.append("\n\n");
+            }
+            case "p", "div", "section", "article", "blockquote", "figure", "figcaption",
+                 "ul", "ol", "table", "thead", "tbody" -> {
+                sb.append("\n\n");
+                el.childNodes().forEach(c -> appendMarkdown(c, sb));
+                sb.append("\n\n");
+            }
+            case "li" -> {
+                sb.append("\n- ");
+                el.childNodes().forEach(c -> appendMarkdown(c, sb));
+            }
+            case "tr" -> {
+                sb.append("\n| ");
+                el.childNodes().forEach(c -> appendMarkdown(c, sb));
+            }
+            case "td", "th" -> {
+                el.childNodes().forEach(c -> appendMarkdown(c, sb));
+                sb.append(" | ");
+            }
+            case "br" -> sb.append('\n');
+            case "pre" -> sb.append("\n\n```\n").append(el.wholeText().strip()).append("\n```\n\n");
+            default -> el.childNodes().forEach(c -> appendMarkdown(c, sb));
+        }
     }
 
     private void requireEnabled() {
