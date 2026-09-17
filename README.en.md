@@ -276,6 +276,32 @@ strict because it is the system's **only trust boundary** — the user must be a
 to tell at a glance which sentences come from their own material and which are
 the model's general knowledge.
 
+## Chunking
+
+600-character target / 80-character overlap, but **boundaries are aligned to
+sentences**, not to character positions.
+
+Oversized paragraphs are split into sentences and packed; adjacent chunks overlap
+by **whole sentences**. Only a single sentence longer than the target (code
+blocks, unpunctuated runs) falls back to character splitting.
+
+Why we bother: the share of chunks that **start mid-sentence dropped from 75% to
+13%** (six documents compared; four went to 0%). A chunk that starts mid-sentence
+has dangling references and incomplete meaning —— it is noise for retrieval and a
+direct cause of extraction failures. The same passage, aligned to sentence
+boundaries, extracted cleanly three times out of three with identical counts
+(22/22/22); the character-cut version came up empty once in three.
+
+**A newline is not automatically a boundary**: this corpus was fetched from the
+web, and 75% of its lines are hard-wrapped (one sentence folded across several
+lines). The rule is "a line break is a boundary when either side has no CJK" ——
+code and output lines contain no CJK (75% of lines sampled), so they are natural
+units; Chinese prose keeps its wrapping and is not split.
+
+> This boundary rule **differs from the Python edition** (still character-cut).
+> The two share one database, so mismatched chunking makes the same document
+> retrieve differently on each side.
+
 ## How the context budget is spent
 
 This is the most carefully tuned part of the project; every number below was
@@ -429,8 +455,10 @@ three times). They now use fictional topics and say why in a comment.
 ## Relationship to the Python edition
 
 **The public endpoint now points at the Java edition**
-(`https://rag-kb-awa.xyz`, via cloudflared → `127.0.0.1:8080`), switched over on
-2026-09-16.
+(via cloudflared → `127.0.0.1:8080`), switched over on 2026-09-16.
+The address itself is deliberately kept out of the repo —— this repo is public,
+and publishing the entry point just hands it to scanners (while it was public,
+the logs rolled with `/.git/config`, `/wp-includes/...` style probes).
 
 The two share one PostgreSQL / Redis, so switching back is just a change of the
 cloudflared forwarding port. The Python edition still runs on `127.0.0.1:8000` as
@@ -449,10 +477,27 @@ a reference and fallback.
 - **Upload size is bounded by the request-body limit**: encrypted upload is a
   single whole-body transfer with no chunking, so it is limited by Cloudflare's
   100 MB and the origin's record size. Currently configured at 50 MB.
-- **Local context is capped at 10240 tokens**: on an 8 GB GPU that is the limit
-  at which `qwen3:4b` and `bge-m3` can both stay resident. It is independent of
-  which model is chosen — what runs out is KV-cache VRAM. Long conversations are
-  handled by the history index and summaries, not by stretching the window.
+- **Local context: configured at 10240, but measurably higher**. Re-measured on
+  2026-09-17 (criterion: generation at full speed **and** embedding calls at
+  30~100 ms rather than thousands):
+
+  | num_ctx | generation tok/s (three runs) |
+  |---|---|
+  | 24576 | 91.8 / 104.8 / 103.8 |
+  | 28672 | 91.5 / 102.5 / 102.0 |
+  | 32768 | 95.7 → **10.4 / 10.2** |
+
+  With both models resident, 24576~28672 is usable; only 32768 collapses. The
+  collapse is not layers falling back to CPU (`ollama ps` still reports 100%
+  resident) but a VRAM capacity wall. **That wall moves with the desktop's VRAM
+  footprint** —— an earlier scan concluded "32768 drops to 9 tok/s" on a run where
+  the desktop happened to hold 0.35 GB more, so re-measure after changing machine
+  or desktop load (`tools/joint-ceiling-v2-probe.py`).
+
+  The configuration stays conservative at 10240: the payoff of a larger window is
+  "a few more passages per turn", and the marginal value of extra passages has
+  never been measured (`max-contexts: 12`). Long conversations are still handled
+  by the history index and summaries, not by stretching the window.
 - **Within-conversation recall depends on pronoun resolution**: the planner
   resolves pronouns from the last 16 messages plus the rolling summary, so a
   referent that is both far back and uncovered by the summary can still be missed.
