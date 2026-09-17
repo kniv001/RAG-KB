@@ -43,7 +43,13 @@ if ($ok) {
     Write-Host "`n  应用就绪" -ForegroundColor Green
     $cred = Get-Content "$repo\data\auth.json" -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
     if ($cred) { Write-Host ("  登录: {0} / {1}" -f $cred.user, $cred.password) }
-    Write-Host "`n  https://rag-kb-awa.xyz" -ForegroundColor Green
+    # 访问地址不写死在这里 —— 仓库是公开的。取当前隧道地址打印，没有就只提示本地。
+    $host_ = "$repo\data\tunnel-hostname.txt"
+    if (Test-Path $host_) {
+        Write-Host "`n  https://$((Get-Content $host_ -Raw).Trim())" -ForegroundColor Green
+    } else {
+        Write-Host "`n  （外网地址见 cloudflared 控制台；本机 http://127.0.0.1:8000）" -ForegroundColor DarkGray
+    }
 } else {
     Write-Host "`n  应用未就绪 —— 看 data\app.err.log" -ForegroundColor Red
 }

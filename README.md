@@ -211,7 +211,8 @@ JWT 是无状态的，所以**登出后 access token 在剩余有效期（≤30 
 - [x] **Step 4** RAG 管线：切分 → 向量化 → 三模式检索 → 生成；多轮对话落库
 - [x] **Step 5** 混合模型：本地 Ollama 与 OpenAI 兼容 API 运行时可切
 - [x] **Step 6** 索引异步化（规避 CF 100s 超时）+ 三层缓存
-- [ ] **Step 7** 固定域名：named tunnel + Cloudflare Access（域名 `rag-kb-awa.xyz` 委派已下发，待 CF 显示 Active）
+- [ ] **Step 7** 固定域名：named tunnel + Cloudflare Access（自有域名已委派，待 CF 显示 Active）
+      —— 域名不写进仓库：本仓库公开，写出来等于把入口交给扫描器
 - [ ] **Step 8** 对话流式输出（SSE）：进一步规避 100s 超时，并改善本地模型的等待体验
 
 ## 已知事项（踩过的坑）
