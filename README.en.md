@@ -283,6 +283,39 @@ strict because it is the system's **only trust boundary** — the user must be a
 to tell at a glance which sentences come from their own material and which are
 the model's general knowledge.
 
+## Ingesting documents
+
+Two entry points, and **text extraction takes a different route in each**:
+
+| Entry point | Accepts | Extraction |
+|---|---|---|
+| Upload | `.txt` `.md` `.markdown` `.pdf` `.docx` `.csv` `.json` `.html` `.htm` | Dispatched by extension: PDF→PDFBox, DOCX→POI, CSV→rows joined as "header \| value", JSON kept as-is, **HTML→tag stripping**, unknown extensions treated as plain text (no error — a `.log` or `.conf` should not be rejected). PDFBox and POI are heavyweight, so **they are only loaded when a file of that format actually shows up** |
+| Web fetch | any page | **Walks the DOM and emits Markdown** (`WebSearchService.toMarkdown`): h1–h6 → `#`…`######`, lists → `- `, tables → `\| `, fenced code blocks preserved |
+
+**Why fetching now emits Markdown** (landed 2026-09-17): it used to flatten the DOM with
+`main.text()`, which threw the heading hierarchy away on the spot — across 41 ingested
+documents only **64 heading lines** could be counted, and most of those were the title the
+ingest itself adds. The cost was not cosmetic: the three later attempts to **recover
+structure from the corpus** (model chapters / model merging / k-means merging) all failed,
+because **the structure was already gone at extraction time** — the right move is to take it
+for free while extracting, not to reconstruct it afterwards.
+
+Result: the same blog post re-fetched came in at **7161 characters with 59 headings**. This
+only applies to newly fetched documents; older ones stay flattened.
+
+> **Known asymmetry**: uploaded `.html` still goes through tag stripping (`<[^>]+>` → space),
+> losing structure the same way — inconsistent with the fetch path. To close it, swap
+> `DocumentParser.fromHtml` for a DOM walk as well.
+
+**Indexing pipeline**: parse → chunk (next section) → embed → store, with caching at every
+step — parsing is cached by **file content hash** (re-uploading or rebuilding skips it), and
+vectors by **text + model hash** (so a full reindex is nearly instant). Both cache keys include
+every parameter that affects the result, so stale data cannot come back.
+
+**Ingesting does not rebuild the topic tree** — after the corpus changes, trigger it manually
+(`POST /api/tree/build`, or run `tools/tree-rebuild.mjs`), otherwise the overview still reports
+the cluster and chunk counts of the old corpus.
+
 ## Chunking
 
 600-character target / 80-character overlap, but **boundaries are aligned to
