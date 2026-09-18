@@ -123,7 +123,8 @@ def sentences(text):
 
 def ask(system, user, schema, num_ctx):
     t0 = time.time()
-    r = post("/api/chat", {"model": CHAT, "stream": False, "think": False, "format": schema,
+    r = post("/api/chat", {"model": CHAT, "stream": False,
+                           "think": os.environ.get("KB_THINK") == "1", "format": schema,
                            "options": {"temperature": 0.1, "num_ctx": num_ctx},
                            "messages": [{"role": "system", "content": system},
                                         {"role": "user", "content": user}]})

@@ -131,7 +131,7 @@ def main():
         pass
     want = int(sys.argv[1]) if len(sys.argv) > 1 else 12
 
-    rows = psql_rows("SELECT content FROM chunks ORDER BY random() LIMIT " + str(want))
+    rows = psql_rows("SELECT content FROM chunks ORDER BY md5(id::text) LIMIT " + str(want))
     chunks = [r for r in rows if len(r) > 200]
     print(f"取样 {len(chunks)} 块\n")
 
@@ -141,7 +141,8 @@ def main():
         ss = sentences(c)
         if len(ss) < 4:
             continue
-        d = post("/api/chat", {"model": CHAT, "stream": False, "think": False, "format": SCHEMA,
+        d = post("/api/chat", {"model": CHAT, "stream": False,
+                               "think": os.environ.get("KB_THINK") == "1", "format": SCHEMA,
                                "options": {"temperature": 0.1, "num_ctx": 16384},
                                "messages": [{"role": "system", "content": PROMPT},
                                             {"role": "user",

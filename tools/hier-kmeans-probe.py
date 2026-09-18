@@ -139,7 +139,8 @@ def sentences(text):
 
 
 def ask(system, user, schema):
-    r = post("/api/chat", {"model": CHAT, "stream": False, "think": False, "format": schema,
+    r = post("/api/chat", {"model": CHAT, "stream": False,
+                           "think": os.environ.get("KB_THINK") == "1", "format": schema,
                            "options": {"temperature": 0.1, "num_ctx": 16384},
                            "messages": [{"role": "system", "content": system},
                                         {"role": "user", "content": user}]})
@@ -355,8 +356,10 @@ def main():
     starts = [sum(runs2[i][1] for i in range(0, a)) for a, _ in chaps] + [len(segs)]
     for i in range(1, len(chaps)):
         j = starts[i]
-        before = segs[j - 1][-46:].replace("\n", " ") if j > 0 else ""
-        after = segs[j][:46].replace("\n", " ") if j < len(segs) else ""
+        # starts[] 是按「项」累加的，segs 是按「段」—— 两把尺子不同，可能越界。
+        # 这一段只是给人读的打印，不该让两小时的跑批崩在它上面（踩过一次）
+        before = segs[j - 1][-46:].replace("\n", " ") if 0 < j <= len(segs) else "(越界)"
+        after = segs[j][:46].replace("\n", " ") if 0 <= j < len(segs) else "(越界)"
         print(f"  {i}|{i+1}  …{before}")
         print(f"        {after}…")
 

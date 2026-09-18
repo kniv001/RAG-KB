@@ -81,7 +81,9 @@ def psql_rows(sql):
 
 
 def post(model, system, user, schema, num_ctx, timeout=150, tries=3):
-    body = {"model": model, "stream": False, "think": False, "format": schema,
+    # KB_THINK=1 时只给**制造者**开思考；裁判 llama3.1:8b 没有思考模式，传 true 会报错
+    body = {"model": model, "stream": False,
+            "think": os.environ.get("KB_THINK") == "1" and model == MAKER, "format": schema,
             "options": {"temperature": 0.1, "num_ctx": num_ctx},
             "messages": [{"role": "system", "content": system},
                          {"role": "user", "content": user}]}
@@ -125,7 +127,7 @@ def main():
     rng = random.Random(20260917)
 
     # ---------- 第一阶段：用 qwen3:4b 收集边 ----------
-    rows = psql_rows("SELECT content FROM chunks ORDER BY random() LIMIT " + str(want))
+    rows = psql_rows("SELECT content FROM chunks ORDER BY md5(id::text) LIMIT " + str(want))
     chunks = [r for r in rows if 300 < len(r) < 2000]
     print(f"取样 {len(chunks)} 块　制造者 {MAKER}\n—— ① 收集边（一句一问）——", flush=True)
     cases = []

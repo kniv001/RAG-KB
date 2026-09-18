@@ -14,6 +14,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -44,21 +45,38 @@ import java.util.concurrent.Executors;
 @RequiredArgsConstructor
 public class SummaryService {
 
+    /**
+     * 摘要的**形状**是实测定的：一行一条，不是一段连贯文字。
+     *
+     * <p>2026-09-18 的「记忆当检索」实验（拿决策台账当记忆库、11 问 × 5 组）量到：
+     * **一行一条的索引本身就承载了大半** —— 只给 22 行索引（2019 token，全量方案的 11%）
+     * 就答对了 10/11，而召回正文只把关键短语命中从 19/39 抬到 25/39。原因很直接：
+     * 那一行写的是**结论**，不是"更新了某个文件"。
+     *
+     * <p>所以这里把摘要从段落改成条目。**只改形状，不改语义** ——
+     * 合并、增量、异步、上限都没动，方便出问题时判断是哪一处引起的。
+     */
     private static final String PROMPT = """
-            你是对话摘要器。把「新增对话」并入「已有摘要」，输出一段连贯的中文摘要。
+            你是对话记忆的整理器。把「新增对话」并入「已有记忆」，输出**一行一条**的条目。
 
             要求：
-            1. 保留具体信息：讨论的主题、得出的结论、用户明确表达过的偏好或约束、尚未解决的问题。
-            2. 用户明确要求记住的任何内容必须原样保留 —— 名字、代号、数字、约定、日期。
+            1. **新增对话是新信息的唯一来源，每条结论都必须落到条目上** —— 已有条目为空时同样如此。
+               任何情况下都不许返回空数组。
+            2. 一条一个事实或结论，不要写成段落，不要写「用户问了…助手回答了…」的流水账。
+            3. 保留具体信息：讨论的主题、得出的结论、用户明确表达过的偏好或约束、尚未解决的问题。
+               用户明确要求记住的任何内容必须原样保留 —— 名字、代号、数字、约定、日期。
                这类信息一旦丢掉就再也找不回来，比主题概括重要得多。
-            3. 不要写成「用户问了…助手回答了…」的流水账，直接写内容本身。
-            4. 已有摘要里仍然重要的信息要保留，只有被推翻或过时的才丢掉。
-            5. 全文不超过 300 字。
+            4. 已有条目里仍然成立的**原样保留**，不要改写、不要合并同义条目。
+            5. 只有被新增对话推翻或过时的条目才丢掉。
+            6. 最多 12 条，每条不超过 40 字。
 
-            只输出 JSON：{"summary":"摘要正文"}""";
+            只输出 JSON：{"items":["一条结论","另一条结论"]}""";
 
     private static final String SCHEMA = """
-            {"type":"object","properties":{"summary":{"type":"string"}},"required":["summary"]}""";
+            {"type":"object","properties":{"items":{"type":"array","items":{"type":"string"}}},"required":["items"]}""";
+
+    /** 条目硬上限：比提示词里的 12 宽松一档，只用来挡住模型偶发的刷屏 */
+    private static final int MAX_ITEMS = 20;
 
     private final MessageMapper messages;
     private final ConversationMapper conversations;
@@ -145,7 +163,7 @@ public class SummaryService {
 
     private String summarize(String old, List<Message> fresh) throws Exception {
         StringBuilder user = new StringBuilder();
-        user.append("已有摘要：\n").append(old == null || old.isBlank() ? "（无，这是第一次）" : old)
+        user.append("已有条目：\n").append(old == null || old.isBlank() ? "（无，这是第一次）" : old)
                 .append("\n\n新增对话：\n");
         for (Message m : fresh) {
             String text = m.getContent() == null ? "" : m.getContent().replace('\n', ' ').strip();
@@ -161,12 +179,25 @@ public class SummaryService {
                 0.2, SCHEMA).content();
 
         JsonNode node = JsonExtract.parseObject(mapper, reply);
-        String s = node == null ? null : JsonExtract.string(node, "summary", "");
-        if (s == null || s.isBlank()) {
-            log.debug("摘要输出无法解析，本次跳过。片段：{}", clip(reply));
+        List<String> items = new ArrayList<>();
+        if (node != null && node.path("items").isArray()) {
+            for (JsonNode it : node.path("items")) {
+                String s = it.asText("").strip();
+                if (!s.isEmpty()) {
+                    items.add(s);
+                }
+                if (items.size() >= MAX_ITEMS) {
+                    break;
+                }
+            }
+        }
+        // 空数组**不能**覆盖已有摘要 —— 语法约束下 {"items":[]} 是最省的合法输出，
+        // 而它在语义上等于「把记忆清空」。宁可这次不更新（下一批再试）。
+        if (items.isEmpty()) {
+            log.debug("摘要输出为空数组或无法解析，本次跳过（保留原摘要）。片段：{}", clip(reply));
             return null;
         }
-        return s.strip();
+        return String.join("\n", items);
     }
 
     private static String clip(String s) {

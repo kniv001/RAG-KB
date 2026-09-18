@@ -83,7 +83,8 @@ def post(path, body, timeout=900):
 def ask(sents):
     numbered = "\n".join(f"{i+1}. {s.strip()}" for i, s in enumerate(sents))
     t0 = time.time()
-    r = post("/api/chat", {"model": CHAT, "stream": False, "think": False, "format": SCHEMA,
+    r = post("/api/chat", {"model": CHAT, "stream": False,
+                           "think": os.environ.get("KB_THINK") == "1", "format": SCHEMA,
                            "options": {"temperature": 0.1, "num_ctx": 24576},
                            "messages": [{"role": "system",
                                          "content": PROMPT.replace("N", str(len(sents)))},

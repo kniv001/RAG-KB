@@ -23,3 +23,7 @@ Thumbs.db
 
 # 探针脚本运行时的临时 SQL（每次运行重新生成，不是输入）
 tools/_*.sql
+
+# Python 探针的字节码缓存
+tools/__pycache__/
+__pycache__/
