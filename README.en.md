@@ -529,6 +529,27 @@ node tools\answer-style-test.mjs        #  8 checks: the three-tier answer style
 node tools\history-index-test.mjs       #      vector recall of older turns
 ```
 
+**Retrieval-quality baselines** (not self-tests — they measure rank against known answers;
+run them before and after any retrieval change):
+
+```powershell
+python tools\recall-baseline-probe.py   # 15 single-hop questions: rank of the target chunk (baseline 15/15)
+python tools\hard-query-probe.py        # 15 hard questions: same targets, phrased the way people ask (baseline 14/15)
+```
+
+**The hard set is the one that matters here**: the keyword-phrased questions ("how does the G1
+collector work?") contain the document's own vocabulary, so 15/15 is inevitable — **it cannot
+detect any retrieval improvement**. Rephrased the way a person actually asks ("how do I keep a
+service pinned to one machine?"), it does discriminate: on 2026-09-18 it exposed the "symptom
+words vs mechanism words" failure (target at rank 50) and then verified the context-line fix
+(13/14 → 14/14).
+
+One question is deliberately excluded from scoring: **"why does the cache blow up when I add
+machines?"** — the two consistent-hashing documents contain **zero** chunks mentioning scale-up
+and 4/6 about node death, i.e. **the corpus covers the other direction entirely**. It stays in
+the list because it measures a **different** ability: when the corpus genuinely lacks the answer,
+the reply should say so instead of forcing a retrieval. **Do not score it as a retrieval failure.**
+
 The first two use Node's `crypto` module, whose RSA-OAEP(SHA-256) semantics are
 **identical** to the browser's WebCrypto — verifying browser interop up front.
 
