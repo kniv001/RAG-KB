@@ -307,10 +307,34 @@ only applies to newly fetched documents; older ones stay flattened.
 > losing structure the same way — inconsistent with the fetch path. To close it, swap
 > `DocumentParser.fromHtml` for a DOM walk as well.
 
-**Indexing pipeline**: parse → chunk (next section) → embed → store, with caching at every
-step — parsing is cached by **file content hash** (re-uploading or rebuilding skips it), and
-vectors by **text + model hash** (so a full reindex is nearly instant). Both cache keys include
-every parameter that affects the result, so stale data cannot come back.
+**Indexing pipeline**: parse → chunk (next section) → **context line** → embed → store, with
+caching at every step — parsing is cached by **file content hash**, context lines by
+"document name + chunk text", and vectors by **text + model hash** (so a full reindex is nearly
+instant). All three cache keys include every parameter that affects the result, so stale data
+cannot come back.
+
+**Context lines** (`ChunkContextService`): at ingest each chunk gets one sentence answering
+**"what question does this chunk answer?"**, and that sentence is **prepended to the embedded
+text only — it never enters the prompt**. What the answer displays and cites is still the
+original text: verbatim traceability is this system's one trust boundary, and the indexing
+layer must not rewrite it.
+
+Why it exists: on 2026-09-18 the hard-question benchmark found a real failure — questions use
+**symptom words** ("how do I keep a service pinned to one machine") while documents use
+**mechanism words** ("node affinity", "scheduler"), and the two never meet in embedding space:
+that target sat at **rank 50**, and widening recall does not help (you would have to go to 50).
+With context lines the target returns to **rank 28** and the hard set goes **13/14 → 14/14**.
+
+Two wordings are experiment-determined and **must not be changed**: ask "what does this
+**answer**" rather than "what does this say" — the latter only echoes the document's
+terminology, which lifts precision but leaves the hard failures unfixed; and **meta information
+must be forbidden** ("written by …", "fetched at …" — measured at 9% of lines, worthless for
+retrieval yet occupying index space). The free option was tried: prepending the document title
+**does nothing at all** (titles carry mechanism words too). Degenerate output (nothing but an
+ellipsis or filler) is treated as "not generated"; the index is still built.
+
+Cost: one 4B call per chunk at ingest (≈20 minutes for 661 chunks, in the background);
+**zero cost at query time**.
 
 **Ingesting does not rebuild the topic tree** — after the corpus changes, trigger it manually
 (`POST /api/tree/build`, or run `tools/tree-rebuild.mjs`), otherwise the overview still reports
