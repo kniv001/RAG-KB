@@ -39,6 +39,7 @@ public class IndexService {
     private final ChunkMapper chunks;
     private final DocumentParser parser;
     private final TextChunker chunker;
+    private final ChunkContextService context;
     private final EmbeddingService embedding;
     private final CacheService cache;
 
@@ -99,11 +100,22 @@ public class IndexService {
         }
         report(progress, 0, pieces.size(), "切分为 " + pieces.size() + " 块");
 
-        // ---- 3) 向量化（按文本 + 模型哈希缓存）----
-        List<float[]> vectors = embedding.embedBatched(pieces, EMBED_BATCH,
+        // ---- 3) 语境行（只进索引，不进提示词）----
+        // 难题集实测：不加语境行时"症状词问句"够不着"机制词文档"，靶子排在 rank 50；
+        // 加上之后回到 28，难题 13/14 → 14/14。免费的标题前置试过，完全没用。
+        report(progress, 0, pieces.size(), "生成语境行");
+        List<String> ctxs = context.contextsFor(doc.getName(), pieces);
+
+        // ---- 4) 向量化：嵌「语境行 + 正文」（按文本 + 模型哈希缓存）----
+        List<String> embedTexts = new ArrayList<>(pieces.size());
+        for (int i = 0; i < pieces.size(); i++) {
+            String ctx = ctxs.get(i);
+            embedTexts.add(ctx == null || ctx.isBlank() ? pieces.get(i) : ctx + "\n" + pieces.get(i));
+        }
+        List<float[]> vectors = embedding.embedBatched(embedTexts, EMBED_BATCH,
                 (done, total) -> report(progress, done, total, "向量化 " + done + "/" + total));
 
-        // ---- 4) 入库（整篇替换）----
+        // ---- 5) 入库（整篇替换）----
         report(progress, pieces.size(), pieces.size(), "写入数据库");
         String model = embedding.modelColumn();
         chunks.deleteByDoc(docId);
@@ -112,6 +124,7 @@ public class IndexService {
             c.setDocId(docId);
             c.setSeq(i);
             c.setContent(pieces.get(i));
+            c.setCtx(ctxs.get(i));
             c.setEmbedding(vectors.get(i));
             c.setEmbedModel(model);
             chunks.insert(c);

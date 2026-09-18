@@ -104,11 +104,23 @@ public class RagProperties {
     private Summary summary = new Summary();
 
     /**
+     * 语境行：给每块生成一句「这段能回答什么问题」，**只进检索索引、不进提示词**。
+     * 见 {@code ChunkContextService} —— 难题集实测 13/14 → 14/14，代价是入库时每块一次调用。
+     */
+    private Context context = new Context();
+
+    /**
      * 会话滚动摘要 —— 历史索引漏召时的兜底。
      *
      * <p>它与历史索引是互补而非替代：索引给细节但会漏，摘要给全局但很粗。
      * 漏召时至少还剩一份覆盖全部的背景，不至于彻底断片。
      */
+    @Data
+    public static class Context {
+
+        private boolean enabled = true;
+    }
+
     @Data
     public static class Summary {
 

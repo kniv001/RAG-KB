@@ -29,6 +29,15 @@ public class Chunk {
 
     private String content;
 
+    /**
+     * 语境行：一句「这段能回答什么问题」，**只进检索索引，不进提示词**。
+     *
+     * <p>嵌入时是 {@code ctx + "\n" + content}；展示与引用仍用 content 原文
+     * —— 逐字可追溯是这套系统唯一的信任边界，不能被索引层的改写污染。
+     * 见 {@code ChunkContextService}。
+     */
+    private String ctx;
+
     /** vector(1024)，通过 VectorTypeHandler 以字面量形式读写 */
     @TableField(typeHandler = VectorTypeHandler.class)
     private float[] embedding;

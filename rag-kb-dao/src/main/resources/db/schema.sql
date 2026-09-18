@@ -69,6 +69,13 @@ CREATE TABLE IF NOT EXISTS conversations (
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS summary      text;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS summary_upto bigint NOT NULL DEFAULT 0;
 
+-- ctx：语境行（一句「这段能回答什么问题」），**只进检索索引、不进提示词**。
+-- 嵌入时是「语境行 + 换行 + 正文」；展示与引用仍用 content 原文。
+-- 为什么加：难题集实测，问句用症状词、文档用机制词，向量空间里够不着
+-- （靶子排在 rank 50）；加上用提问者说法写的语境行后回到 rank 28，难题 13/14 → 14/14。
+-- 见 tools/contextual-retrieval-probe.py 与 ChunkContextService。
+ALTER TABLE chunks ADD COLUMN IF NOT EXISTS ctx text;
+
 CREATE TABLE IF NOT EXISTS messages (
     id         bigserial PRIMARY KEY,
     conv_id    text NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
