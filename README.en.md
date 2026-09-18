@@ -14,7 +14,7 @@ web search, and a topic tree are all running behind a Cloudflare tunnel.
 |---|---|
 | Frontend | Single-page chat UI, no framework and no build step; file attachments, streaming, math rendering |
 | Retrieval | Vector + keyword with RRF fusion; an agent plans, assesses and retries |
-| Conversation | Persistent multi-turn; vector recall of older turns; rolling summary; per-turn notes |
+| Conversation | Persistent multi-turn; vector recall of older turns; line-per-fact summary; per-turn notes |
 | Knowledge base | Upload files or fetch from the web; a topic tree reports what the corpus covers |
 | Encryption | End-to-end (a fresh AES key per request, RSA-wrapped) — uploads included |
 | Auth | Dual tokens (JWT + opaque refresh held in Redis) |
@@ -89,7 +89,7 @@ Web search is off by default; enable it with an environment variable:
 KB_WEB_ENABLED=true java -jar rag-kb-web/target/rag-kb.jar
 ```
 
-Other environment variables: `KB_PROMPT_WINDOW` (prompt window, default 10240),
+Other environment variables: `KB_PROMPT_WINDOW` (prompt window, default 16384),
 `KB_STORAGE_ROOT`, `KB_KEY_DIR`, `KB_DEEPSEEK_KEY`.
 
 The service listens on `127.0.0.1:8080` only. Everything external goes through a
@@ -314,18 +314,25 @@ units; Chinese prose keeps its wrapping and is not split.
 This is the most carefully tuned part of the project; every number below was
 measured (see [docs/ollama-tuning.md](docs/ollama-tuning.md), in Chinese).
 
-**The window is 10240 tokens, but the real limit is 9920.** Exceeding it is not
-graceful degradation — it is a **cliff**: Ollama resets the entire context to
-5122 tokens and **drops the beginning**, which is the system prompt. The result
-is not "a worse answer" but "an answer bound by nothing", while the model
-returns something that looks perfectly normal and reports no error. So the
-application layer runs a `PromptBudget` that trims by priority: summary → oldest
-history → recall excerpt → retrieved material (material goes last; it is the
-factual basis).
+**The window is 16384 tokens.** Exceeding it is not graceful degradation — it is
+a **cliff**: Ollama resets the entire context and **drops the beginning**, which
+is the system prompt. The result is not "a worse answer" but "an answer bound by
+nothing", while the model returns something that looks perfectly normal and
+reports no error. So the application layer runs a `PromptBudget` that trims by
+priority: oldest history → recall excerpt → retrieved material (material goes
+last; it is the factual basis).
 
-**A measured Q&A turn costs 2.6K–6.1K tokens** (16%–60% of the window). The fixed
+> **The summary and the recall excerpt are dropped together.** The summary used to
+> go first; that changed on 2026-09-18. Recalled excerpts are verbatim text or
+> notes — they have **no notion of "which one is newer"** and may carry a value
+> that was later changed, while the summary is exactly the tier that holds current
+> values. Measured (`tools/stale-recall-probe.py`): with a stale excerpt and **no**
+> summary the model served the stale value **3/3 times**; with the summary present
+> it recovered **3/3 times**. Cost: about 400 tokens.
+
+**A measured Q&A turn costs 2.6K–6.1K tokens** (16%–37% of the window). The fixed
 part is about 1100: system prompt 530 + topic overview 440 + question. The rest is
-material (up to 12 chunks) and recent history (up to 16 messages).
+material (up to 24 chunks) and recent history (up to 16 messages).
 
 **Three tiers of history, in decreasing reliability**:
 
@@ -333,7 +340,26 @@ material (up to 12 chunks) and recent history (up to 16 messages).
 |---|---|---|
 | Recent window | Verbatim text | Taken directly, no retrieval involved |
 | Older turns | Vector-recalled excerpts | See "Query ordering" below |
-| Rolling summary | One passage covering all history | One model call per 6 messages |
+| Summary | **One line per entry, each written as "was → now"** | Merged once per 6 messages |
+
+**How the summary is written — all three rules are measured** (`tools/summary-*.py`):
+
+- **One line per entry, each shaped "was → now".** The point is not the arrow; the
+  **shape itself is a completeness constraint**: forcing both sides to be filled in
+  turns "facts that did not change" into an explicit `— → now`. With the earlier
+  free-form wording the model silently dropped unchanged facts — in three repeated
+  runs it lost the same user preference twice.
+- **A merge must not end up with fewer entries than it started with.** Merging is
+  **bimodal**: given identical input (8 existing facts + the same new dialogue) five
+  times in a row, the survivor counts were `[7, 7, 2, 8, 2]` — when it collapses it
+  loses **6 facts at once**, always the `— → now` ones. So on shrinkage it retries,
+  up to three times, keeping the entry-richest attempt (a healthy merge needs one call).
+- **Numbers get a mechanical check.** The local 4B model replaces the last digit of
+  certain numbers with a colon (`600 → 60:`, `16384 → 1:16384`) — **value-specific,
+  deterministic, and unfixable by prompting**. After merging, every number in the
+  summary must be findable in the input; if not, it logs a warning (log only, the
+  text is left alone). Known gap: **isolated single-fact loss** (8 entries, one goes
+  missing) is invisible to that check.
 
 **Query ordering is the crux**: recall must happen *after* planning. The planner
 rewrites "what about that?" into a self-contained query, and only that key can
@@ -430,7 +456,7 @@ Clustering is k-means++ with a fixed random seed (otherwise the same corpus
 produces different clusters on every rebuild); the model only names and summarises
 each cluster at the end. Two levels, not a deep tree: a deep tree pays off through
 progressive narrowing, but every descent costs KV, which is not worthwhile inside
-a 10240-token budget.
+a 16384-token budget.
 
 ## Regression tests
 
@@ -502,7 +528,7 @@ a reference and fallback.
 - **Upload size is bounded by the request-body limit**: encrypted upload is a
   single whole-body transfer with no chunking, so it is limited by Cloudflare's
   100 MB and the origin's record size. Currently configured at 50 MB.
-- **Local context: configured at 10240, but measurably higher**. Re-measured on
+- **Local context: configured at 16384, but measurably higher**. Re-measured on
   2026-09-17 (criterion: generation at full speed **and** embedding calls at
   30~100 ms rather than thousands):
 
@@ -515,16 +541,16 @@ a reference and fallback.
   With both models resident, 24576~28672 is usable; only 32768 collapses. The
   collapse is not layers falling back to CPU (`ollama ps` still reports 100%
   resident) but a VRAM capacity wall. **That wall moves with the desktop's VRAM
-  footprint** —— an earlier scan concluded "32768 drops to 9 tok/s" on a run where
+  footprint** — an earlier scan concluded "32768 drops to 9 tok/s" on a run where
   the desktop happened to hold 0.35 GB more, so re-measure after changing machine
   or desktop load (`tools/joint-ceiling-v2-probe.py`).
 
-  The configuration stays conservative at 10240: the payoff of a larger window is
-  "a few more passages per turn", and the marginal value of extra passages has
-  never been measured (`max-contexts: 12`). Long conversations are still handled
-  by the history index and summaries, not by stretching the window.
+  The configuration sits at **16384** (raised from 10240 on 2026-09-17, kept in
+  lockstep with `provider.local.num-ctx`). Going up to 24576 leaves only 552 MiB
+  of headroom on the card, and long conversations are handled by the history index
+  and the summary — not by stretching the window.
 - **Within-conversation recall depends on pronoun resolution**: the planner
-  resolves pronouns from the last 16 messages plus the rolling summary, so a
+  resolves pronouns from the last 16 messages plus the summary, so a
   referent that is both far back and uncovered by the summary can still be missed.
 
 ---
