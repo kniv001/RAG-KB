@@ -1,0 +1,79 @@
+{
+ "tag": "q4",
+ "ctx_chars": 24200,
+ "hits": 6,
+ "rows": [
+  {
+   "depth": 0.05,
+   "code": "KX-318",
+   "field": "评审人",
+   "value": "蒲远舟",
+   "answer": "代号 KX-318 的评审人是 蒲远舟。",
+   "hit": true,
+   "prompt_tokens": 13054,
+   "prefill_s": 4.41,
+   "tok_s": 46.7,
+   "wall_s": 5.3
+  },
+  {
+   "depth": 0.2,
+   "code": "KX-742",
+   "field": "额定压力",
+   "value": "4.7 MPa",
+   "answer": "代号 KX-742 的额定压力是 4.7 MPa。",
+   "hit": true,
+   "prompt_tokens": 13055,
+   "prefill_s": 0.05,
+   "tok_s": 49.4,
+   "wall_s": 0.7
+  },
+  {
+   "depth": 0.35,
+   "code": "KX-905",
+   "field": "验收日期",
+   "value": "2027 年 3 月 11 日",
+   "answer": "代号 KX-905 的验收日期是 2027 年 3 月 11 日。",
+   "hit": true,
+   "prompt_tokens": 13054,
+   "prefill_s": 0.05,
+   "tok_s": 50.1,
+   "wall_s": 0.9
+  },
+  {
+   "depth": 0.55,
+   "code": "KX-127",
+   "field": "备用件编号",
+   "value": "BR-60221",
+   "answer": "代号 KX-127 的备用件编号是 BR-60221。",
+   "hit": true,
+   "prompt_tokens": 13055,
+   "prefill_s": 0.05,
+   "tok_s": 48.5,
+   "wall_s": 0.7
+  },
+  {
+   "depth": 0.75,
+   "code": "KX-463",
+   "field": "维护周期",
+   "value": "每 19 天",
+   "answer": "代号 KX-463 的维护周期是 每 19 天。",
+   "hit": true,
+   "prompt_tokens": 13054,
+   "prefill_s": 0.05,
+   "tok_s": 48.8,
+   "wall_s": 0.7
+  },
+  {
+   "depth": 0.95,
+   "code": "KX-880",
+   "field": "负责部门",
+   "value": "第九计量室",
+   "answer": "第九计量室",
+   "hit": true,
+   "prompt_tokens": 13054,
+   "prefill_s": 0.05,
+   "tok_s": 40.5,
+   "wall_s": 0.4
+  }
+ ]
+}

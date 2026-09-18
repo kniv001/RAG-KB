@@ -537,6 +537,17 @@ python tools\recall-baseline-probe.py   # 15 single-hop questions: rank of the t
 python tools\hard-query-probe.py        # 15 hard questions: same targets, phrased the way people ask (baseline 14/15)
 ```
 
+**Long-context check** (run after changing the KV-cache quantization, the window, or the model;
+baseline 6/6):
+
+```powershell
+python tools\kv-quant-needle-probe.py q4   # 6 facts planted at 6 depths in a 24K-character context
+```
+
+The planted codes and values **do not exist in the corpus**, so this measures "can it be read
+out", not "can it be retrieved" — both retrieval gates sit at their ceiling, and only this one
+catches a window that fits but cannot be read.
+
 **The hard set is the one that matters here**: the keyword-phrased questions ("how does the G1
 collector work?") contain the document's own vocabulary, so 15/15 is inevitable — **it cannot
 detect any retrieval improvement**. Rephrased the way a person actually asks ("how do I keep a

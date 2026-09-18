@@ -248,6 +248,23 @@ public class SummaryService {
             log.warn("摘要合并三次都少于原有条目（{} → {}）—— 可能有事实被丢掉，本次照用但要留意",
                     oldCount, best.size());
         }
+
+        // 只增不删：三次重试都没着落的旧条目**原样补回**。
+        //
+        // 依据 2026-09-19 的四臂对照（tools/summary-loss-probe.py，各 2 链 × 5 轮增量合并）：
+        // 现状 10 轮里 4 轮塌到 1~4 条（丢的全是「没变化的事实」），**且塌了就回不来**
+        // ——下一轮从短列表继续；补回后每轮 8/8。代价是列表变长（7.5 → 10.5 条），陈旧行实测 0。
+        // 顺带否掉一个猜想：重试各带唯一编号（破 KV 前缀复用）**无效且更差**（最惨一轮剩 1 条），
+        // 塌陷是模型本身的双模态，不是缓存的产物。
+        List<String> missing = missingOld(oldItems, best);
+        for (String o : missing) {
+            if (best.size() >= MAX_ITEMS) {
+                break;
+            }
+            best.add(o);
+            log.warn("合并丢了旧条目，原样补回（只增不删）：{}", o);
+        }
+
         warnIfNumberCorrupted(best, (old == null ? "" : old) + "\n" + user);
         return String.join("\n", best);
     }
@@ -270,7 +287,12 @@ public class SummaryService {
 
     /** 旧条目里有多少条在新输出中找不到着落（改写过也算，见 {@link #hasCounterpart}）。 */
     private int unrepresented(List<String> oldItems, List<String> items) {
-        int n = 0;
+        return missingOld(oldItems, items).size();
+    }
+
+    /** 找不到着落的旧条目**有哪些** —— 用于只增不删时的原样补回。 */
+    private List<String> missingOld(List<String> oldItems, List<String> items) {
+        List<String> missing = new ArrayList<>();
         for (String o : oldItems) {
             boolean found = false;
             for (String it : items) {
@@ -280,10 +302,10 @@ public class SummaryService {
                 }
             }
             if (!found) {
-                n++;
+                missing.add(o);
             }
         }
-        return n;
+        return missing;
     }
 
     /**

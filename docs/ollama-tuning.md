@@ -7,7 +7,7 @@
 
 ```powershell
 setx OLLAMA_FLASH_ATTENTION 1
-setx OLLAMA_KV_CACHE_TYPE q8_0
+setx OLLAMA_KV_CACHE_TYPE q4_0
 # 然后重启 Ollama（退出托盘程序再启动）
 ```
 
@@ -18,7 +18,7 @@ Windows 上 `ollama app.exe` 不会继承调用方的环境 —— 在 shell 里
 设置完用服务端日志确认（`%LOCALAPPDATA%\Ollama\server.log` 里的 `server config`）：
 
 ```
-OLLAMA_FLASH_ATTENTION:true  OLLAMA_KV_CACHE_TYPE:q8_0
+OLLAMA_FLASH_ATTENTION:true  OLLAMA_KV_CACHE_TYPE:q4_0
 ```
 
 ## 为什么需要 KV 量化
@@ -81,13 +81,54 @@ KV 缓存是「上下文」在显存里的真实形态，与文本大小无关�
 
 **换机器或改了桌面占用，务必重测。** 真出问题就退回 `num-ctx: 8192`。
 
+### q4_0：再降一档（2026-09-19 实测）
+
+q8_0 之上再降一档到 `q4_0`，每 token 的 KV 从 **76.7 KB → 40.7 KB**（≈53%），
+**两个模型同驻的容量墙从 32768 推到 49152**（同一桌面、同一天配对测得）：
+
+| num_ctx | q8_0 | q4_0 |
+|---|---|---|
+| 16384 | 3.97G ✅ | 3.36G ✅ |
+| 32768 | 5.25G ✅ | 4.05G ✅ |
+| **49152** | **❌ 驻留 0.00G、11 tok/s** | **✅ 4.81G、100 tok/s** |
+| 65536 | — | ❌ 11.6 tok/s |
+
+工具：`tools/kv-quant-wall-probe.py`（判据与本文档一致：生成 ~100 tok/s **且** embed 延迟 30~100ms）。
+
+**两个必须一起看的验证**（`tools/kv-quant-needle-probe.py`、`tools/digit-garble-probe.py`）：
+
+- **32K 窗口能用**：24K 字上下文、6 个深度各埋一条事实，q4 与 q8 都是 **6/6**（含 5% 与 95% 深度）
+- **数字糊化没出现**：同一个探针，q8 下 10/10 都写成「60: 600」，q4 下 0/10
+  （**别读成"q4 更准"** —— 量化噪声是数值彩票，它只是没在这条上翻车）
+
+**注意跨天不可比**：09-17 量到"q8 下 32768 崩"，今天 q8 在 32768 是好的 ——
+桌面显存会挪墙。要论证档位的作用，**必须在同一天做配对**，别拿今天和上周的数比。
+
+**当前配置仍是 `num-ctx: 16384`**，没有跟着往上抬：容量有了，但**没有仪器能把它换成收益**
+（两门基准都在天花板），而解码随上下文变长会变慢（13K 上下文实测 46~50 tok/s）。
+
+### 跑完换档位的探针，务必确认没有残留的 runner
+
+反复换 `num_ctx` 装载/卸载（悬崖探针就是干这个的）会留下**孤儿 `llama-server` 进程**，
+它们继续占着显存。症状是**下一次加载直接掉 CPU**（`ollama ps` 显示 `96%/4% CPU/GPU`），
+应用侧表现为一次问答从十几秒变成十分钟，而**日志里什么错都没有**。
+
+```powershell
+(Get-Process llama-server -ErrorAction SilentlyContinue).Count   # 应为 0（没有模型加载时）
+nvidia-smi --query-gpu=memory.used,memory.free --format=csv,noheader
+```
+
+2026-09-19 实测：跑完一轮档位扫描后残留 8 个进程、GPU 只剩 824 MiB 空闲；
+重启 Ollama 后回到 1451 MiB 已用 / 6449 MiB 空闲。（这也说明**跨天的墙测量不可比** ——
+桌面与残留进程都会挪墙。）
+
 ## 为什么不用更大的模型
 
 | 模型 | 结论 |
 |---|---|
-| `qwen3:4b` | ✅ 唯一能与 bge-m3 同时常驻的 |
-| `qwen3:8b` | ❌ 装进来瞬间 bge-m3 被挤出（实测 `ollama ps` 只剩 8b）。而 agent 每轮都要调向量模型，切换重载 4.3 s(4b) / 1.8 s(bge-m3)，省下的时间全被重载吃回去 |
-| `qwen3.5:9b` / `llama3.1:8b` | ❌ 同上，且更大 |
+| `qwen3:4b` | ✅ 当前在用（16384 窗口，约 100 tok/s，与 bge-m3 同驻） |
+| `qwen3:8b` | ⚠️ **旧判定已过期**：原来"装进来就把 bge-m3 挤出去"是在 f16/q8 KV 下算的。2026-09-19 用 q4_0 实测：**8192 窗口下 8b 与 bge-m3 同驻、63 tok/s**，数字保真 5/5 干净；**16384 下滑到 10 tok/s**（掉 CPU）。⇒ 可选，代价是窗口减半 + 速度减半，换之前要 A/B |
+| `qwen3.5:9b` / `llama3.1:8b` | ❌ 更大，未重测 |
 
 **换更大模型前先确认真实显存够不够，否则会以「模型更强」的名义大幅变慢。**
 
