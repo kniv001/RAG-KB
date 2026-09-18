@@ -148,8 +148,13 @@ def main():
             p = line.split("\t", 2)
             if len(p) == 3:
                 chunks.append((p[0], p[1], p[2]))
-        c13 = sum(1 for t in terms if t in answer(q, chunks[:13], sysmsg))
-        c24 = sum(1 for t in terms if t in answer(q, chunks[:24], sysmsg))
+        # 注意：answer() 必须在生成器**外面**先算好。
+        # 写在 `sum(1 for t in terms if t in answer(...))` 里的话，每个词都会重新生成一次答案
+        # —— 40 个词就是 40 次生成，一题要跑一小时。（踩过）
+        a13 = answer(q, chunks[:13], sysmsg)
+        a24 = answer(q, chunks[:24], sysmsg)
+        c13 = sum(1 for t in terms if t in a13)
+        c24 = sum(1 for t in terms if t in a24)
         tot13 += c13
         tot24 += c24
         print(f"{q[:28]:<30}{c13:>7}/{len(terms)}{c24:>7}/{len(terms)}", flush=True)
