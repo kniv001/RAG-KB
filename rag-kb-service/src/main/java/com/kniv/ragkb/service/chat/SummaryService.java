@@ -100,6 +100,19 @@ public class SummaryService {
     /** 条目硬上限：比提示词里的 12 宽松一档，只用来挡住模型偶发的刷屏 */
     private static final int MAX_ITEMS = 20;
 
+    /**
+     * 一次合并最多试几次。
+     *
+     * <p>2026-09-18 实测：**合并是双模态的** —— 同一份输入连发五次，原有 8 条事实的存活数是
+     * {@code [7, 7, 2, 8, 2]}，也就是**五次里有两次一次丢掉 6 条**。塌陷模式高度一致：
+     * 丢的全是 {@code — → 现状} 那批（没变化的事实），正是提示词第 4 条要保的。
+     *
+     * <p>所以这里用最省事的机械判据兜底：**合并后条目数不该比原来少**（健康的合并是
+     * 8→9/10，塌陷是 8→4/5）。少了就重试，取条目最多的那次 —— 单次成功率约六成，
+     * 三次就是 1−0.4³ ≈ 94%。健康时只发一次，不浪费。
+     */
+    private static final int MERGE_ATTEMPTS = 3;
+
     /** 「数字 + 冒号且后面不是数字」——可疑形态（时间 12:30 这类后面是数字，不会命中） */
     private static final java.util.regex.Pattern DIGIT_COLON =
             java.util.regex.Pattern.compile("(\\d{2,})\\s*[:：](?!\\d)");
@@ -202,10 +215,40 @@ public class SummaryService {
         }
 
         ProviderRegistry.Ref ref = providers.resolveChat(props.getAgent().getUtilityModel());
-        String reply = providers.chatJson(ref,
-                List.of(ChatMessage.system(PROMPT), ChatMessage.user(user.toString())),
-                0.2, SCHEMA).content();
+        List<ChatMessage> msgs =
+                List.of(ChatMessage.system(PROMPT), ChatMessage.user(user.toString()));
+        int oldCount = old == null ? 0 : (int) old.lines().filter(l -> !l.isBlank()).count();
 
+        List<String> best = new ArrayList<>();
+        String lastReply = "";
+        for (int attempt = 1; attempt <= MERGE_ATTEMPTS; attempt++) {
+            lastReply = providers.chatJson(ref, msgs, 0.2, SCHEMA).content();
+            List<String> items = parseItems(lastReply);
+            if (items.size() > best.size()) {
+                best = items;
+            }
+            // 不比原来少 = 健康合并（实测健康时是 8→9/10），不必再试
+            if (best.size() >= oldCount) {
+                break;
+            }
+            log.debug("合并后条目少于原有（{} → {}），第 {} 次重试", oldCount, best.size(), attempt);
+        }
+
+        // 空数组**不能**覆盖已有摘要 —— 语法约束下 {"items":[]} 是最省的合法输出，
+        // 而它在语义上等于「把记忆清空」。宁可这次不更新（下一批再试）。
+        if (best.isEmpty()) {
+            log.debug("摘要输出为空数组或无法解析，本次跳过（保留原摘要）。片段：{}", clip(lastReply));
+            return null;
+        }
+        if (oldCount > 0 && best.size() < oldCount) {
+            log.warn("摘要合并三次都少于原有条目（{} → {}）—— 可能有事实被丢掉，本次照用但要留意",
+                    oldCount, best.size());
+        }
+        warnIfNumberCorrupted(best, (old == null ? "" : old) + "\n" + user);
+        return String.join("\n", best);
+    }
+
+    private List<String> parseItems(String reply) {
         JsonNode node = JsonExtract.parseObject(mapper, reply);
         List<String> items = new ArrayList<>();
         if (node != null && node.path("items").isArray()) {
@@ -219,14 +262,7 @@ public class SummaryService {
                 }
             }
         }
-        // 空数组**不能**覆盖已有摘要 —— 语法约束下 {"items":[]} 是最省的合法输出，
-        // 而它在语义上等于「把记忆清空」。宁可这次不更新（下一批再试）。
-        if (items.isEmpty()) {
-            log.debug("摘要输出为空数组或无法解析，本次跳过（保留原摘要）。片段：{}", clip(reply));
-            return null;
-        }
-        warnIfNumberCorrupted(items, (old == null ? "" : old) + "\n" + user);
-        return String.join("\n", items);
+        return items;
     }
 
     /**
