@@ -219,19 +219,23 @@ public class SummaryService {
                 List.of(ChatMessage.system(PROMPT), ChatMessage.user(user.toString()));
         int oldCount = old == null ? 0 : (int) old.lines().filter(l -> !l.isBlank()).count();
 
+        List<String> oldItems = old == null ? List.of()
+                : old.lines().map(String::strip).filter(l -> !l.isBlank()).toList();
+
         List<String> best = new ArrayList<>();
         String lastReply = "";
         for (int attempt = 1; attempt <= MERGE_ATTEMPTS; attempt++) {
             lastReply = providers.chatJson(ref, msgs, 0.2, SCHEMA).content();
             List<String> items = parseItems(lastReply);
-            if (items.size() > best.size()) {
+            if (better(items, best, oldItems)) {
                 best = items;
             }
-            // 不比原来少 = 健康合并（实测健康时是 8→9/10），不必再试
-            if (best.size() >= oldCount) {
+            // 两条都满足才算健康合并：条目不比原来少（防塌陷）**且**旧条目都有着落（防零星丢失）
+            if (best.size() >= oldCount && unrepresented(oldItems, best) == 0) {
                 break;
             }
-            log.debug("合并后条目少于原有（{} → {}），第 {} 次重试", oldCount, best.size(), attempt);
+            log.debug("合并后条目 {}（原有 {}）、旧条目没着落的 {} 条，第 {} 次重试",
+                    best.size(), oldCount, unrepresented(oldItems, best), attempt);
         }
 
         // 空数组**不能**覆盖已有摘要 —— 语法约束下 {"items":[]} 是最省的合法输出，
@@ -246,6 +250,75 @@ public class SummaryService {
         }
         warnIfNumberCorrupted(best, (old == null ? "" : old) + "\n" + user);
         return String.join("\n", best);
+    }
+
+    /**
+     * 挑更好的那一版：**先看旧条目有没有着落，再看条目多少**。
+     *
+     * <p>为什么不能只看条目数：实测有一类塌陷是"总数不降但换了内容" ——
+     * 8 条旧事实变成 9 条，可其中一条（用户偏好）被挤掉了。
+     * 计数判据看不见这种丢失，所以要用「旧条目在新输出里找不找得到」来判。
+     */
+    private boolean better(List<String> cand, List<String> best, List<String> oldItems) {
+        if (best.isEmpty()) {
+            return !cand.isEmpty();
+        }
+        int a = unrepresented(oldItems, cand);
+        int b = unrepresented(oldItems, best);
+        return a != b ? a < b : cand.size() > best.size();
+    }
+
+    /** 旧条目里有多少条在新输出中找不到着落（改写过也算，见 {@link #hasCounterpart}）。 */
+    private int unrepresented(List<String> oldItems, List<String> items) {
+        int n = 0;
+        for (String o : oldItems) {
+            boolean found = false;
+            for (String it : items) {
+                if (hasCounterpart(o, it)) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    /**
+     * 两条是否算"同一条"：**归一化**之后最长公共子串 ≥ min(6, 旧条目长度的一半)。
+     *
+     * <p>先去掉变化式标记（{@code —} {@code →}）再比 —— 否则会误报：
+     * 旧「分块粒度：— → 600 字」对新「分块粒度：600 字 → 450 字」，
+     * 事实明明还在（箭头左边），可箭头一插进来公共子串就断在「分块粒度：」上（5 字 &lt; 6）。
+     * 归一化后是「分块粒度：600 字」对「分块粒度：600 字 450 字」，一眼能看出来。
+     *
+     * <p>阈值 6：中文 40 字的条目里，6 字连续重合已经不像巧合。
+     */
+    private boolean hasCounterpart(String a, String b) {
+        String x = normalise(a);
+        String y = normalise(b);
+        int need = Math.min(6, Math.max(2, x.length() / 2));
+        int[] prev = new int[y.length() + 1];
+        for (int i = 1; i <= x.length(); i++) {
+            int[] cur = new int[y.length() + 1];
+            for (int j = 1; j <= y.length(); j++) {
+                if (x.charAt(i - 1) == y.charAt(j - 1)) {
+                    cur[j] = prev[j - 1] + 1;
+                    if (cur[j] >= need) {
+                        return true;
+                    }
+                }
+            }
+            prev = cur;
+        }
+        return false;
+    }
+
+    /** 去掉变化式标记与多余空白，只留内容本身。 */
+    private static String normalise(String s) {
+        return s.replace("→", " ").replace("—", " ").replaceAll("\\s+", "").strip();
     }
 
     private List<String> parseItems(String reply) {
