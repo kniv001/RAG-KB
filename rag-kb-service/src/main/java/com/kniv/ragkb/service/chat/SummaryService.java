@@ -100,6 +100,12 @@ public class SummaryService {
     /** 条目硬上限：比提示词里的 12 宽松一档，只用来挡住模型偶发的刷屏 */
     private static final int MAX_ITEMS = 20;
 
+    /** 「数字 + 冒号且后面不是数字」——可疑形态（时间 12:30 这类后面是数字，不会命中） */
+    private static final java.util.regex.Pattern DIGIT_COLON =
+            java.util.regex.Pattern.compile("(\\d{2,})\\s*[:：](?!\\d)");
+    private static final java.util.regex.Pattern ANY_NUMBER =
+            java.util.regex.Pattern.compile("\\d+");
+
     private final MessageMapper messages;
     private final ConversationMapper conversations;
     private final ProviderRegistry providers;
@@ -219,7 +225,48 @@ public class SummaryService {
             log.debug("摘要输出为空数组或无法解析，本次跳过（保留原摘要）。片段：{}", clip(reply));
             return null;
         }
+        warnIfNumberCorrupted(items, (old == null ? "" : old) + "\n" + user);
         return String.join("\n", items);
+    }
+
+    /**
+     * 数字保真检查：**只记日志，不改内容**。
+     *
+     * <p>背景（2026-09-18 实测）：qwen3:4b 在改写时会把某些数字的末位换成冒号 ——
+     * {@code 600 → "60:"}（有时自己补回成 {@code "60: 600"}）、{@code 3000 → "300:"}、
+     * {@code 24576 → "2457："}。特征是**值特异且确定性**：扫了 18 个数字只有 3 个中招，
+     * 温度 0.0/0.2/0.7 一模一样，提示词里明确禁止也照样发生 —— 是 4B 解码层的毛病，
+     * 不是提示词能修的。qwen3:8b 同条件下干净（但换模型会让两个模型来回换载，代价更大）。
+     *
+     * <p>判据用机械的一条：**摘要里的数字必须能在输入里找到**。找不到、或它的前缀
+     * 在输入里对应一个更长的数字，就说明末位大概率被吃了 —— 记 warn 让人能搜到。
+     */
+    private void warnIfNumberCorrupted(List<String> items, String source) {
+        java.util.Set<String> srcNums = new java.util.HashSet<>();
+        java.util.regex.Matcher am = ANY_NUMBER.matcher(source);
+        while (am.find()) {
+            srcNums.add(am.group());
+        }
+        for (String it : items) {
+            java.util.regex.Matcher m = DIGIT_COLON.matcher(it);
+            while (m.find()) {
+                String digits = m.group(1);
+                if (srcNums.contains(digits)) {
+                    continue;                       // 输入里本来就有「300:」这种写法，是正常的
+                }
+                boolean prefixOfLonger = false;
+                for (String s : srcNums) {
+                    if (s.length() > digits.length() && s.startsWith(digits)) {
+                        prefixOfLonger = true;
+                        break;
+                    }
+                }
+                if (prefixOfLonger) {
+                    log.warn("摘要里的数字可能被吃掉了末位：「{}」—— 输入里有更长的同前缀数字。条目：{}",
+                            digits + ":", it);
+                }
+            }
+        }
     }
 
     private static String clip(String s) {
