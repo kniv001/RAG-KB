@@ -68,6 +68,12 @@ java -jar rag-kb-web\target\rag-kb.jar
 > **打包前必须先停掉正在跑的应用** —— 否则 `clean` 删不掉被占用的 `rag-kb.jar`，
 > 报「另一个程序正在使用此文件」。这个报错跟编译错误长得很像，但完全无关。
 >
+> **端口通不等于服务可用** —— 漏掉 `KB_DB_PASSWORD` 那行时，应用照常启动、首页照常
+> 200，但建表这一步会报 `SCRAM-based authentication, but no password was provided`，
+> 之后所有数据库操作全废。**换进程启动后要看 `/actuator/health`**：`db` 与 `redis`
+> 两个组件都得是 `UP`，别只看端口。（这个坑踩过：重启时用 `Start-Process` 起，
+> 父进程没有那个环境变量。）
+>
 > Maven 在 `C:\Users\kniv\tools\apache-maven-3.9.6`。注意它**只在 Git Bash 的 PATH 里**
 > （profile 加的），PowerShell 里直接敲 `mvn` 会报「不是 cmdlet」。
 > `~/.m2/settings.xml` 已配阿里云镜像（镜像 id 设为 `central`，以复用本地仓库缓存）。

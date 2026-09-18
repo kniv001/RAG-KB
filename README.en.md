@@ -71,6 +71,13 @@ java -jar rag-kb-web\target\rag-kb.jar
 > in-use `rag-kb.jar` and reports "the file is being used by another process".
 > The message looks like a compile error but has nothing to do with one.
 >
+> **An open port does not mean a working service.** Without `KB_DB_PASSWORD` the app
+> still starts and the home page still returns 200, but schema init fails with
+> `SCRAM-based authentication, but no password was provided` and every later database
+> call fails too. After starting a new process, check `/actuator/health` — both the
+> `db` and `redis` components must be `UP`; don't trust the port alone. (Hit this while
+> restarting via `Start-Process`, whose parent shell lacked the variable.)
+>
 > Maven lives at `C:\Users\kniv\tools\apache-maven-3.9.6`. Note that it is **only
 > on Git Bash's PATH** (added by the shell profile) — typing `mvn` in PowerShell
 > fails with "not recognized as a cmdlet". `~/.m2/settings.xml` points at an
