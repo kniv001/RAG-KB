@@ -460,16 +460,20 @@ public class AgenticRagService {
                 + PromptBudget.estimateTokens(historyExcerpt) + PromptBudget.estimateTokens(convSummary)
                 + PromptBudget.estimateTokens(overview) + PromptBudget.estimateTokens(question);
         if (over > budget) {
-            // 裁的顺序（最不重要的先走）：摘要 → 最旧的历史 → 召回片段 → 资料。
+            // 裁的顺序（最不重要的先走）：最旧的历史 → 召回片段 → 资料。
             //
             // **召回片段排在靠后是刻意的**：它的全部意义就是补偿被裁掉的历史
             // （见 HistoryContext 的说明），把它第一个丢掉等于这个功能白做。
             // 第一版就是那么写的（摘要 → 召回片段 → 历史 → 资料），
             // 结果每次触发裁剪，召回片段都成了 0 字 —— 实测踩过。
             //
+            // **摘要原先也是第一个丢的，2026-09-18 改了**：摘要是「当前值」的兜底，
+            // 而召回片段可能带回**已被改掉的旧值**（片段是原文/笔记，没有"谁更新"的机制）。
+            // 实测（tools/stale-recall-probe.py）：只召回旧片段而无摘要时 3/3 端出陈旧值，
+            // 有摘要时 3/3 救回 —— 所以两者**共进退**：片段被丢掉时摘要才跟着丢。
+            // 代价很小：变化式摘要只有 12 条 × ≤40 字 ≈ 400 token。
+            //
             // 资料放最后，它是事实依据，丢了回答就没有根。
-            convSummary = null;
-            hasSummary = false;
 
             // takeLast 而不是 take：history 是最旧在前的，要留的是末尾那几条
             int histKeep = Math.min(histTexts.size(), props.getAgent().getTrimKeepTurns() * 2);
@@ -482,6 +486,11 @@ public class AgenticRagService {
             if (fixed + PromptBudget.estimateTokens(historyExcerpt) > budget * 3 / 4) {
                 historyExcerpt = null;
                 hasExcerpt = false;
+                // 摘要与召回片段共进退 —— 片段在，摘要就在（它是「当前值」的兜底）；
+                // 片段走了，摘要才跟着走。顺序反过来会造出最坏组合：
+                // 留着可能过时的片段、丢掉写着当前值的摘要。
+                convSummary = null;
+                hasSummary = false;
             }
             int usedByOthers = fixed
                     + (hasExcerpt ? PromptBudget.estimateTokens(historyExcerpt) : 0);
