@@ -60,6 +60,17 @@ SPLIT_PROMPT = """下面是同一篇文档中一段连续区间的内容摘录�
 SWAPPED_PROMPT = SPLIT_PROMPT.replace('- "A" 表示转换点在前半，"B" 表示在后半',
                                       '- "A" 表示转换点在**后半**，"B" 表示在**前半**')
 
+# 示例值可以是个坑：提示词里写 `{"half":"A"}`，模型可能**原样抄那个字母**。
+# （同一天在 structure-point-probe 上撞实了：示例写 `{"at": 3}` → 五种控制情形**全答 3**，
+#  连"没有就答 0"都压不过它。）加 KB_NOEXAMPLE=1 去掉字面示例，只描述形状，用来分辨
+#  "模型偏好某个字母" 与 "模型在抄示例"。
+if os.environ.get("KB_NOEXAMPLE") == "1":
+    for _name in ("SPLIT_PROMPT", "SWAPPED_PROMPT"):
+        _p = globals()[_name]
+        _p = _p.replace('只输出 JSON：{"half":"A"}',
+                        '只输出 half 字段，值是 "A" 或 "B"（按上面两条的含义选一个）')
+        globals()[_name] = _p
+
 SPLIT_SCHEMA = {"type": "object", "properties": {"half": {"type": "string"}}, "required": ["half"]}
 
 
