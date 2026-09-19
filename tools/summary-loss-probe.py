@@ -29,7 +29,10 @@ import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OLLAMA = "http://127.0.0.1:11434"
-CHAT = "qwen3:4b"
+# 用法：python tools/summary-loss-probe.py [链数] [臂] [模型] [num_gpu]
+# 例：python tools/summary-loss-probe.py 2 A qwen3:8b 26
+CHAT = sys.argv[3] if len(sys.argv) > 3 else "qwen3:4b"
+NUM_GPU = int(sys.argv[4]) if len(sys.argv) > 4 else None
 ATTEMPTS = 3
 
 spec = importlib.util.spec_from_file_location("ssp", os.path.join(HERE, "summary-shape-probe.py"))
@@ -91,8 +94,11 @@ def post(system, user, timeout=180, nonce=None):
         # 破前缀：Ollama 会复用逐字相同前缀的 KV，而"重试"发的正是同一条提示词 ——
         # 于是三次重试很可能拿到同一个塌陷结果（batch-collapse-probe 已证 A/C 组差异）
         system = system + f"\n\n（编号 {nonce}）"
+    opts = {"temperature": 0.2, "num_ctx": 8192}
+    if NUM_GPU is not None:
+        opts["num_gpu"] = NUM_GPU      # 8b 必须钉住层数，否则会把 bge-m3 挤出显存
     body = {"model": CHAT, "stream": False, "think": False, "format": SCHEMA,
-            "options": {"temperature": 0.2, "num_ctx": 8192},
+            "options": opts,
             "messages": [{"role": "system", "content": system},
                          {"role": "user", "content": user}]}
     for _ in range(3):
