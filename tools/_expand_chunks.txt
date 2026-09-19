@@ -1,0 +1,350 @@
+
+########## 模式 Redis%持久化%　50 块 ##########
+[Redis两种持久化方式(RDB&AOF) - 坦荡 - 博客园.md] seq=0  # Redis两种持久化方式(RDB&AOF) - 坦荡 - 博客园
+
+> 来源：https://www.cnblogs.com/tdws/p/5754706.html
+> 抓取时间：2026-09-
+[Redis两种持久化方式(RDB&AOF) - 坦荡 - 博客园.md] seq=1  Redis两种持久化方式(RDB&AOF) 爬虫和转载请注明原文地址;博客园蜗牛：http://www.cnblogs.com/tdws/p/5754706.html Redis的持久化过程中并不需要
+[Redis两种持久化方式(RDB&AOF) - 坦荡 - 博客园.md] seq=2  子进程将数据写入临时文件，并在写完后，替换原有的.rdb文件。Fork发生时，父子进程内存共享，所以为了不影响子进程做数据快照，在这期间修改的数据，将会被复制一份，而不进共享内存。所以说，RDB所持久
+[Redis两种持久化方式(RDB&AOF) - 坦荡 - 博客园.md] seq=3  但事实上，并不会立即将命令写入到硬盘文件中，而是写入到硬盘缓存，在接下来的策略中，配置多久来从硬盘缓存写入到硬盘文件。所以在一定程度一定条件下，还是会有数据丢失，不过你可以大大减少数据损失。 这里是配
+[Redis两种持久化方式(RDB&AOF) - 坦荡 - 博客园.md] seq=4  是的，的确会变得庞大，但redis会有优化的策略，比如你对一个key1键的操作，set key1 001 , set key1 002, set key1 003。那优化的结果就是将前两条去掉咯，那具
+[Redis持久化RDB和AOF原理 - 赵大先生 - 博客园.md] seq=0  # Redis持久化RDB和AOF原理 - 赵大先生 - 博客园
+
+> 来源：https://www.cnblogs.com/zhaozhitong/p/12567626.html
+> 抓取时间：20
+[Redis持久化RDB和AOF原理 - 赵大先生 - 博客园.md] seq=1  硬盘上。由两个参数构成：时间和改动的键的个数。当在指定的时间内被更改的键的个数大于指定的数值时就会进行快照，在配置文件redis.conf中已经预置了3个条件：
+
+save 900 1 # 900秒内
+[Redis持久化RDB和AOF原理 - 赵大先生 - 博客园.md] seq=2  c函数强制os写入到磁盘的时机。有三种方式如下（默认是：每秒fsync一次）
+
+appendonly yes              //启用aof持久化方式
+
+# appendfsync alwa
+[Redis持久化RDB和AOF原理 - 赵大先生 - 博客园.md] seq=3  难性故障，我们可以非常容易的进行恢复。
+
+2). 对于灾难恢复而言，RDB是非常不错的选择。因为我们可以非常轻松的将一个单独的文件压缩后再转移到其它存储介质上。
+
+3). 性能最大化。对于Redis的
+[Redis持久化RDB和AOF原理 - 赵大先生 - 博客园.md] seq=4  通过fork子进程来协助完成数据持久化工作的，因此，如果当数据集较大时，可能会导致整个服务器停止服务几百毫秒，甚至是1秒钟。
+
+#### AOF的优势有哪些呢？
+
+1). 该机制可以带来更高的数据安全
+[Redis持久化RDB和AOF原理 - 赵大先生 - 博客园.md] seq=5  的将修改数据写入到老的磁盘文件中，同时Redis还会创建一个新的文件用于记录此期间有哪些修改命令被执行。因此在进行rewrite切换时可以更好的保证数据安全性。
+
+4). AOF包含一个格式清晰、易于
+[Redis持久化RDB和AOF原理 - 赵大先生 - 博客园.md] seq=6  rdb文件中。此外，我们也可以通过配置文件来修改Redis服务器dump快照的频率，在打开6379.conf文件之后，我们搜索save，可以看到下面的配置信息：
+
+save 900 1        
+[Redis持久化之RDB&AOF - Margaery - 博客园.md] seq=0  # Redis持久化之RDB&AOF - Margaery - 博客园
+
+> 来源：https://www.cnblogs.com/jasonZh/p/9544895.html
+> 抓取时间：2026
+[Redis持久化之RDB&AOF - Margaery - 博客园.md] seq=1  Redis持久化之RDB&AOF 　　在说Redis持久化之前，需要搞明白什么是数据库状态，因为持久化就是将内存中的数据库状态保存到磁盘上。那么什么是数据库状态呢？Redis是一个key-value数
+[Redis持久化之RDB&AOF - Margaery - 博客园.md] seq=2  对于 persistence 持久化存储，Redis 有两种持久化方案，RDB(Redis DataBase)和 AOF(Append-Only File)。其中RDB是一份内存快照，AOF则为可回放
+[Redis持久化之RDB&AOF - Margaery - 博客园.md] seq=3  RDB 持久化默认生成的文件名为 dump.rdb ，这个可以通过配置文件配置，RDB文件一个经过压缩的二进制文件，接下来介绍一些RDB文件结构，RDB文件包含五个部分，分别是【Redis | db_
+[Redis持久化之RDB&AOF - Margaery - 博客园.md] seq=4  e】第一个常量和 SELECTDB 一样，第二部分是毫秒为单位的 UNIX 时间戳，就是键值对的过期时间，然后是 TYPE 记录了 value 的类型，是 String，list，set，zset，h
+[Redis持久化之RDB&AOF - Margaery - 博客园.md] seq=5  不带过期值的键值对部分的结构没有前两部分，只是【TYPE | key | value】。 　　RDB持久化可以通过命令进行手动触发，也可以配置好后让服务器自动触发，手动触发可以使用Redis命令【SA
+[Redis持久化之RDB&AOF - Margaery - 博客园.md] seq=6  bgsave 命令不会阻塞服务器，而是通过派生出一个子进程，然后由子进程负责创建RDB文件，服务器进程继续处理命令请求，这里需要说明一下，bgsave 处理期间，服务器进程虽然能够继续处理命令请求，但
+[Redis持久化之RDB&AOF - Margaery - 博客园.md] seq=7  RDB操作借用 copy on write 机制进行写时复制，父进程 fork 一个子进程，由子进程进行内存遍历将数据写入临时文件，父进程仍处理客户端请求，待子进程执行完毕，将临时文件 rename 
+[Redis持久化之RDB&AOF - Margaery - 博客园.md] seq=8  Redis没有专门的RDB文件载入命令，只要Redis服务器开启，就会检测RDB文件是否存在，就会自动载入RDB文件，这里需要说明一点，如果服务器开启了AOF持久化功能，服务器会优先使用AOF文件来还
+[Redis持久化之RDB&AOF - Margaery - 博客园.md] seq=9  服务器中有个dirty计数器和一个lastsave时间戳，当服务器执行一个数据库修改命令之后，dirty计数器就会进行更新，命令修改了多少次数据库，dirty就会增加多少，如：【set msg hel
+[Redis持久化之RDB&AOF - Margaery - 博客园.md] seq=10  就是发生事件的时候才会动一下，不然就跟死了一样，事件驱动又分为文件事件和时间事件，ServerCron就是一种时间驱动，至于文件驱动，其实就是客户端发过来一个命令，服务器才会去执行，然后给客户端返回结
+[Redis持久化之RDB&AOF - Margaery - 博客园.md] seq=11  校验：如果Redis加载损坏的RDB文件时拒绝启动，并打印如下日志： Short read or OOM loading DB. Unrecoverable error , aborting now.
+[Redis持久化之RDB&AOF - Margaery - 博客园.md] seq=12  对于Redis的服务进程而言，在开始持久化时，它唯一需要做的只是fork出子进程，之后再由子进程完成这些持久化的工作，这样就可以极大的避免服务进程执行IO操作了。 　　　　3、如果数据集很大，RDB的
+[Redis持久化之RDB&AOF - Margaery - 博客园.md] seq=13  所以Redis 的持久化和数据的恢复要选择在夜深人静的时候执行是比较合理的。 　　　　3、RDB文件使用特定二进制格式保存，Redis版本演进过程中有多个格式的RDB版本，存在老版本Redis服务无法
+[Redis持久化之RDB&AOF - Margaery - 博客园.md] seq=14  AOF相对可靠，它和MySQL中bin.log、apache.log、zookeeper中txn-log简直异曲同工。AOF文件内容是字符串，非常容易阅读和解析。 使用AOF 　　开启AOF功能需要设
+[Redis持久化之RDB&AOF - Margaery - 博客园.md] seq=15  理由如下：Redis使用单线程响应命令，如果每次写AOF文件命令都直接追加到硬盘，那么性能完全取决于当前硬盘负载。县写入缓冲区aof_buf中，还有另一个好处，Redis可以提供多种缓冲区同步硬盘的策
+[Redis持久化之RDB&AOF - Margaery - 博客园.md] seq=16  随着命令不断写入AOF，文件会越来越大，Redis引入了AOF重写机制压缩文件体积。AOF文件重写是把Redis进程内的数据转化为写命令同步到新AOF文件的过程。 　　AOF重写由父进程fork一个子
+[Redis持久化之RDB&AOF - Margaery - 博客园.md] seq=17  ③ 多条写命令可以合并为一个，如lpush list a、lpush list b、 lpush list c 可以转化为：lpush list a b c。为了防止但挑明了过大造成客户端缓冲区溢出，
+[Redis持久化之RDB&AOF - Margaery - 博客园.md] seq=18  事实上，每秒同步也是异步完成的，其效率也是非常高的，所差的是一旦系统出现宕机现象，那么这一秒钟之内修改的数据将会丢失。而每修改同步，我们可以将其视为同步持久化，即每次发生的数据变化都会被立即记录到磁盘
+[Redis持久化之RDB&AOF - Margaery - 博客园.md] seq=19  事实上，我们也可以通过该文件完成数据的重建。 　　缺点： 　　　　1、对于相同数量的数据集而言，AOF文件通常要大于RDB文件。RDB 在恢复大数据集时的速度比 AOF 的恢复速度要快。 　　　　2、
+[Redis持久化之RDB&AOF - Margaery - 博客园.md] seq=20  Redis 需要手动开启AOF持久化方式，默认是每秒将写操作日志追加到AOF文件中。 　　AOF 数据完整性比RDB高，更加安全，可以将数据更加及时的同步到文件中，但是AOF需要较多的磁盘IO开支。记
+[Redis持久化之RDB&AOF - Margaery - 博客园.md] seq=21  可以通过配置文件来指定它们中的一种，或者同时使用它们(不建议同时使用)，或者全部禁用，在架构良好的环境中，master通常使用AOF，slave使用snapshot，主要原因是master需要首先确保
+[Redis持久化之RDB&AOF - Margaery - 博客园.md] seq=22  如果你的环境一切非常良好，且服务需要接收密集性的write操作，那么建议master采取snapshot，而slave采用AOF。 补充：RDB+AOF 恢复方案 　　RDB恢复数据不完整，AOF恢复
+[Redis持久化原理 — RDB与AOF详细解释 - jstarseven - 博客园.md] seq=0  # Redis持久化原理 — RDB与AOF详细解释 - jstarseven - 博客园
+
+> 来源：https://www.cnblogs.com/jstarseven/p/14926593.ht
+[Redis持久化原理 — RDB与AOF详细解释 - jstarseven - 博客园.md] seq=1  一遍即可。
+
+例：Mysql的Binlog、Redis的AOF、Hbase的HLog。
+
+## 二、RDB
+
+### 1. 什么是RDB
+
+#### RDB简介
+
+RDB持久化方式能够在指定的时间间隔
+[Redis持久化原理 — RDB与AOF详细解释 - jstarseven - 博客园.md] seq=2  （同步数据到磁盘上）
+
+save 命令执行一个同步操作，以RDB文件的方式保存所有数据的快照。
+
+```
+127.0.0.1:6379> save
+OK
+```
+
+由于 save 命令是同步命令，会占
+[Redis持久化原理 — RDB与AOF详细解释 - jstarseven - 博客园.md] seq=3  |
+
+|
+IO类型 |
+同步 |
+异步 |
+
+|
+阻塞？ |
+是 |
+是（阻塞发生在fock()，通常非常快） |
+
+|
+复杂度 |
+O(n) |
+O(n) |
+
+|
+优点 |
+不会消耗额外的内存 |
+[Redis持久化原理 — RDB与AOF详细解释 - jstarseven - 博客园.md] seq=4  -bgsave-error yes
+
+# rdb文件是否使用压缩格式
+
+rdbcompression yes
+
+# 是否对rdb文件进行校验和检验，通常为yes
+
+rdbchecksum yes" t
+[Redis持久化原理 — RDB与AOF详细解释 - jstarseven - 博客园.md] seq=5  rdbcompression yes
+
+# 是否对rdb文件进行校验和检验，通常为yes
+
+rdbchecksum yes
+```
+
+### 4. RDB的优点
+
+- RDB是一个非常紧凑的文件，它保
+[Redis持久化原理 — RDB与AOF详细解释 - jstarseven - 博客园.md] seq=6  响应客户端的请求。如果数据集巨大并且CPU性能不是很好的情况下，这种情况会持续1秒，AOF也需要fork，但是你可以调节重写日志文件的频率来提高数据集的耐久度。
+
+- 不可控、丢失数据。如果你希望在r
+[Redis持久化原理 — RDB与AOF详细解释 - jstarseven - 博客园.md] seq=7  文件的末尾。这样的话， 当 Redis 重新启时， 程序就可以通过重新执行 AOF 文件中的命令来达到重建数据集的目的。
+
+#### AOF运行原理 - 创建
+
+#### AOF运行原理 - 恢复
+
+
+[Redis持久化原理 — RDB与AOF详细解释 - jstarseven - 博客园.md] seq=8  TA磁盘只有几百TPS |
+
+|
+everysec |
+每秒进行与fsync，最多丢失1秒数据 |
+可能丢失1秒数据 |
+
+|
+no |
+不用管 |
+不可控 |
+
+推荐（并且也是默认）的措施为每秒 f
+[Redis持久化原理 — RDB与AOF详细解释 - jstarseven - 博客园.md] seq=9  2.4 则可以通过配置自动触发 AOF 重写。
+
+#### AOF重写的作用
+
+- 减少磁盘占用量
+
+- 加速数据恢复
+
+#### AOF重写的实现方式
+
+-
+
+bgrewriteaof 命令
+
+Re
+[Redis持久化原理 — RDB与AOF详细解释 - jstarseven - 博客园.md] seq=10  OF文件执行重写的最小尺寸 |
+
+|
+auto-aof-rewrite-percentage |
+触发AOF文件执行重写的增长率 |
+
+|
+统计名 |
+含义 |
+
+|
+aof_current_size
+[Redis持久化原理 — RDB与AOF详细解释 - jstarseven - 博客园.md] seq=11  riteaof 命令进行重写。
+
+#### AOF重写的流程
+
+### 3. AOF相关配置
+
+```
+
+# 开启AOF持久化方式
+appendonly yes
+
+# AOF持久化文件名
+append
+[Redis持久化原理 — RDB与AOF详细解释 - jstarseven - 博客园.md] seq=12  c。使用默认的每秒fsync策略，Redis的性能依然很好(fsync是由后台线程进行处理的，主线程会尽力处理客户端请求)，一旦出现故障，你最多丢失1秒的数据。
+
+- AOF文件是一个只进行追加的日志
+[Redis持久化原理 — RDB与AOF详细解释 - jstarseven - 博客园.md] seq=13  有的 AOF 文件也不会丢失。 而一旦新 AOF 文件创建完毕，Redis 就会从旧 AOF 文件切换到新 AOF 文件，并开始对新 AOF 文件进行追加操作。
+
+- AOF 文件有序地保存了对数据库
+[Redis持久化原理 — RDB与AOF详细解释 - jstarseven - 博客园.md] seq=14  保证的最大延迟时间（latency）。
+
+## 四、RDB和AOF的抉择
+
+### 1. RDB 和 AOF 对比
+
+|
+----- |
+RDB |
+AOF |
+
+|
+启动优先级 |
+低 |
+高 |
+
+
+########## 模式 Kubernetes%Pod%　34 块 ##########
+[Kubernetes Pod调度策略：节点亲和性与污点容忍 - DBLens数据库开发工具 - 博客园.md] seq=0  # Kubernetes Pod调度策略：节点亲和性与污点容忍 - DBLens数据库开发工具 - 博客园
+
+> 来源：https://www.cnblogs.com/dblens/p/1955458
+[Kubernetes Pod调度策略：节点亲和性与污点容忍 - DBLens数据库开发工具 - 博客园.md] seq=1  Kubernetes Pod调度策略：节点亲和性与污点容忍 Kubernetes Pod调度策略：节点亲和性与污点容忍 在Kubernetes面试中，Pod调度策略是考察候选人集群管理能力的重要环节。
+[Kubernetes Pod调度策略：节点亲和性与污点容忍 - DBLens数据库开发工具 - 博客园.md] seq=2  apiVersion: v1
+kind: Pod
+metadata:
+ name: mysql-pod
+spec:
+ affinity:
+ nodeAffinity:
+ requiredDuringS
+[Kubernetes Pod调度策略：节点亲和性与污点容忍 - DBLens数据库开发工具 - 博客园.md] seq=3  例如，你可以通过dblens SQL编辑器（ https://www.dblens.com ）清晰地管理和验证Kubernetes资源配置文件，其语法高亮和智能提示功能让YAML编写事半功倍。 二、污
+[Kubernetes Pod调度策略：节点亲和性与污点容忍 - DBLens数据库开发工具 - 博客园.md] seq=4  operator: "Equal"
+ value: "true"
+ effect: "NoSchedule"
+ containers:
+ - name: cuda-app
+ image: nvidia
+[Kubernetes Pod调度策略：节点亲和性与污点容忍 - DBLens数据库开发工具 - 博客园.md] seq=5  nodeSelectorTerms:
+ - matchExpressions:
+ - key: monitoring
+ operator: In
+ values:
+ - enabled
+ contai
+[Kubernetes Pod调度策略：节点亲和性与污点容忍 - DBLens数据库开发工具 - 博客园.md] seq=6  操作符理解：熟悉In、NotIn、Exists、DoesNotExist、Gt、Lt等操作符在匹配表达式中的使用。 组合策略：理解如何结合两者实现精细化的集群调度，例如“必须调度到某类节点，且能容忍该
+[Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md] seq=0  # Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园
+
+> 来源：https://www.cnblogs.com/tben/articles/13844763.h
+[Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md] seq=1  Kubernetes Pod调度说明1-亲和性 Kubernetes Pod调度说明 简介 Scheduler 是 Kubernetes 的调度器，主要任务是把定义的Pod分配到集群的节点上，听起来非
+[Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md] seq=2  Predicate有一系列的算法可以使用： PodFitsResources：节点上剩余的资源是否大于 Pod 请求的资源 PodFitsHost：如果Pod指定了nodeName，检查节点名称是否和
+[Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md] seq=3  ory使用率非常及接近，权重就越高，这个要和上边的一起使用，不可单独使用 ImageLocalityPriority：倾向于已经要使用镜像的节点，镜像的总大小值越大，权重越高 通过算法对所有的优先级项
+[Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md] seq=4  kind: Pod
+metadata:
+ name: scheduler-test
+ labels:
+ name: example-scheduler
+spec:
+ schedulername: my
+[Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md] seq=5  NAME STATUS ROLES AGE VERSION
+centos8 Ready master 134d v1.15.1
+testcentos7 Ready <none> 133d v1.15.
+[Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md] seq=6  apiVersion: v1
+kind: Pod
+metadata:
+ name: affinity-required
+ labels:
+ app: node-affinity-pod
+spec:
+ 
+[Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md] seq=7  - testcentos7 #node节点
+ 　 以上策略表示：此Pod不要落在node名称为testcentos7的节点上，下边开始创建 [root@Centos8 ~]# kubectl get 
+[Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md] seq=8  testcentos7 Ready <none> 133d v1.15.1 beta.kubernetes.io/arch=amd64,beta.kubernetes.io/os=linux,kube
+[Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md] seq=9  [root@Centos8 scheduler]# kubectl describe pod affinity-required
+default-scheduler 0/2 nodes are ava
+[Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md] seq=10  - testcentos7 #node节点
+ 再次创建，已经落在指定node节点中 [root@Centos8 scheduler]# kubectl get pod -o wide 
+NAME RE
+[Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md] seq=11  apiVersion: v1
+kind: Pod
+metadata:
+ name: affinity-preferred
+ labels:
+ app: node-affinity-pod
+spec:
+
+[Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md] seq=12  [root@Centos8 scheduler]# kubectl get pod -o wide 
+NAME READY STATUS RESTARTS AGE IP NODE 
+affinity-
+[Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md] seq=13  - kube-node2 #node真实名称 以上策略表示：此Pod更想落在node名称为kube-node2的节点上，开始创建 [root@Centos8 scheduler]# kubectl c
+[Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md] seq=14  ##创建后，同样是落在了testcentos7节点上，虽然它更想落在kube-node2节点上，但因为没有这个节点，只好落在testcentos7节点中
+[root@Centos8 scheduler
+[Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md] seq=15  apiVersion: v1
+kind: Pod
+metadata:
+ name: affinity-node
+ labels:
+ app: node-affinity-pod
+spec:
+ cont
+[Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md] seq=16  - weight: 1 
+ preference:
+ matchExpressions:
+ - key: source
+ operator: In
+ values:
+ - hello 软硬结合达到一个
+[Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md] seq=17  - hello 软硬结合达到一个更为准确的node选择，以上文件意思为此Pod必须不存在k8s-node2节点中，其他的节点都可以，但最好落在label中source的值为hello的节点中 键值运算
+[Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md] seq=18  apiVersion: v1
+kind: Pod
+metadata:
+ name: pod-1
+ labels:
+ app: nginx
+ type: web
+spec:
+ containers:
+ 
+[Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md] seq=19  iredDuringSchedulingIgnoredDuringExecution Pod硬策略 vim pod-affinity-required.yaml
+
+apiVersion: v1
+kin
+[Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md] seq=20  [root@Centos8 scheduler]# kubectl get pod -o wide 
+NAME READY STATUS RESTARTS AGE IP NODE 
+affinity-
+[Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md] seq=21  requiredDuringSchedulingIgnoredDuringExecution:
+ - labelSelector:
+ matchExpressions:
+ - key: app #标签
+[Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md] seq=22  [root@Centos8 scheduler]# kubectl get pod 
+NAME READY STATUS RESTARTS AGE
+affinity-required 1/1 Runn
+[Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md] seq=23  apiVersion: v1
+kind: Pod
+metadata:
+ name: affinity-prefered
+ labels:
+ app: pod-3
+spec:
+ containers:
+
+[Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md] seq=24  podAffinityTerm:
+ labelSelector:
+ matchExpressions:
+ - key: app
+ operator: In
+ values:
+ - pod-2
+ top
+[Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md] seq=25  __biz=MzAxMTkwODIyNA==&mid=2247509005&idx=1&sn=df917b45feafe5a9afb895e101cf557b&chksm=9bbb01e2accc88
+[Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md] seq=26  02f&lang=zh_CN&exportkey=AeNCVAseSVEvkA%2FRjSw6KE8%3D&pass_ticket=G7I9JFYfm6c3gYRZ9SXY%2BKNXNh2nbPrn
+
+########## 模式 G1%：没匹配到 ##########
+
+########## 模式 PostgreSQL%：没匹配到 ##########
