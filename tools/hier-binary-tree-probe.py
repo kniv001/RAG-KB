@@ -26,7 +26,19 @@ PSQL = r"D:\vs\rag-kb\pgsql\bin\psql.exe"
 PGPASS = r"D:\vs\rag-kb\data\pgapp.txt"
 HERE = os.path.dirname(os.path.abspath(__file__))
 CACHE = os.path.join(HERE, "..", "data", "_bintree-segs.json")
-CHAT = "qwen3:4b"
+CHAT = os.environ.get("KB_MODEL", "qwen3:4b")
+
+# 换模型重测用：KB_MODEL / KB_NUM_CTX / KB_NUM_GPU。
+# 8b 必须带 num_gpu 钉住层数，否则默认装载会抢显存把 bge-m3 挤出去（见 docs/ollama-tuning.md）。
+_NG = int(os.environ["KB_NUM_GPU"]) if os.environ.get("KB_NUM_GPU") else None
+
+
+def _opts(temp, ctx):
+    o = {"temperature": temp, "num_ctx": int(os.environ.get("KB_NUM_CTX", ctx))}
+    if _NG is not None:
+        o["num_gpu"] = _NG
+    return o
+
 BS = chr(92)
 
 LEAF_PROMPT = """下面这段资料已按句子编号（1 到 N）。请按**语义**把它切成若干段，每段讲一件事。
@@ -116,7 +128,7 @@ def sentences(text):
 def ask(system, user, schema):
     r = post("/api/chat", {"model": CHAT, "stream": False,
                            "think": os.environ.get("KB_THINK") == "1", "format": schema,
-                           "options": {"temperature": 0.1, "num_ctx": 16384},
+                           "options": _opts(0.1, 16384),
                            "messages": [{"role": "system", "content": system},
                                         {"role": "user", "content": user}]})
     try:

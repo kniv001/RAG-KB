@@ -88,6 +88,17 @@ ROUNDS = [
     "助手：已记住。",
 ]
 
+# 每轮必须**真的进去**的新信息（字面量任一中出现即算落地）。
+# 没有这一列，度量会瞎：4b 开思考时"存活 8/8、条目一条不涨"，看着完美，
+# 实际是**把旧列表原样抄回来**（冻结记忆）—— 一种与"丢事实"方向相反的退化解。
+UPDATES = [
+    ["450"],                     # 分块粒度 600 → 450
+    ["24576", "占位符"],          # 窗口上限改 24576；README 网址改占位符
+    ["20"],                      # 摘要窗口 16 → 20
+    ["机械判据", "判据"],          # 数字加机械判据
+    ["不进提示词", "只进索引"],     # 语境行不进提示词
+]
+
 
 def post(system, user, timeout=180, nonce=None):
     if nonce:
@@ -97,7 +108,10 @@ def post(system, user, timeout=180, nonce=None):
     opts = {"temperature": 0.2, "num_ctx": 8192}
     if NUM_GPU is not None:
         opts["num_gpu"] = NUM_GPU      # 8b 必须钉住层数，否则会把 bge-m3 挤出显存
-    body = {"model": CHAT, "stream": False, "think": False, "format": SCHEMA,
+    if os.environ.get("KB_NUM_PREDICT"):
+        opts["num_predict"] = int(os.environ["KB_NUM_PREDICT"])
+    think = os.environ.get("KB_THINK") == "1"
+    body = {"model": CHAT, "stream": False, "think": think, "format": SCHEMA,
             "options": opts,
             "messages": [{"role": "system", "content": system},
                          {"role": "user", "content": user}]}
@@ -224,8 +238,9 @@ def chain(arm):
         old, appended = merge(old, fresh, arm)
         items = [x for x in old.split("\n") if x.strip()]
         joined = " ".join(items)
+        landed = sum(1 for lits in UPDATES[r - 1] if any(l in joined for l in lits))
         log.append((r, alive(items, joined), len(items), dup_pairs(items),
-                    len(appended), stale_count(items)))
+                    len(appended), stale_count(items), landed))
     return old, log
 
 
@@ -245,9 +260,9 @@ def main():
             t0 = time.time()
             final, log = chain(arm)
             print(f"  链{rep}（{time.time()-t0:.0f}s）")
-            for r, a, n, d, ap, st in log:
-                print(f"    轮{r}  种子存活 {a}/8   条目 {n:>2}   重复对 {d}   "
-                      f"陈旧行 {st}   补回 {ap}")
+            for r, a, n, d, ap, st, ld in log:
+                print(f"    轮{r}  种子存活 {a}/8   新信息落地 {ld}/{len(UPDATES[r-1])}   "
+                      f"条目 {n:>2}   重复对 {d}   陈旧行 {st}   补回 {ap}")
             if rep == 1:
                 print("    最终条目：")
                 for x in final.split("\n"):
@@ -266,7 +281,10 @@ def main():
         f"臂{a} {sum(x[-1][2] for x in summary[a]) / len(summary[a]):.1f}" for a in arms))
     print("末轮陈旧行：" + "  ".join(
         f"臂{a} {sum(x[-1][5] for x in summary[a]) / len(summary[a]):.1f}" for a in arms))
-    print("（补回的代价是列表变长、可能留下陈旧行 —— 两个数一起看）")
+    print("末轮新信息落地：" + "  ".join(
+        f"臂{a} {sum(x[-1][6] for x in summary[a]) / len(summary[a]):.1f}" for a in arms))
+    print("（补回的代价是列表变长、可能留下陈旧行；"
+          "**落地那一列不能省** —— 它区分「真合并」与「把旧列表原样抄回来」）")
 
 
 if __name__ == "__main__":

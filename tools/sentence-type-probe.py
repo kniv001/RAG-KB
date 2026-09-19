@@ -31,7 +31,19 @@ OLLAMA = "http://127.0.0.1:11434"
 PSQL = r"D:\vs\rag-kb\pgsql\bin\psql.exe"
 PGPASS = r"D:\vs\rag-kb\data\pgapp.txt"
 HERE = os.path.dirname(os.path.abspath(__file__))
-CHAT = "qwen3:4b"
+CHAT = os.environ.get("KB_MODEL", "qwen3:4b")
+
+# 换模型重测用：KB_MODEL / KB_NUM_CTX / KB_NUM_GPU。
+# 8b 必须带 num_gpu 钉住层数，否则默认装载会抢显存把 bge-m3 挤出去（见 docs/ollama-tuning.md）。
+_NG = int(os.environ["KB_NUM_GPU"]) if os.environ.get("KB_NUM_GPU") else None
+
+
+def _opts(temp, ctx):
+    o = {"temperature": temp, "num_ctx": int(os.environ.get("KB_NUM_CTX", ctx))}
+    if _NG is not None:
+        o["num_gpu"] = _NG
+    return o
+
 BS = chr(92)
 
 LABELS = ["疑问", "条件", "因果", "转折", "举例"]
@@ -138,7 +150,7 @@ def main():
     for i, s in enumerate(sents, 1):
         rule = {L for L, pat in RULES.items() if re.search(pat, s)}
         d = post({"model": CHAT, "stream": False, "think": False, "format": SCHEMA,
-                  "options": {"temperature": 0.1, "num_ctx": 16384},
+                  "options": _opts(0.1, 16384),
                   "messages": [{"role": "system", "content": PROMPT},
                                {"role": "user", "content": s}]})
         try:

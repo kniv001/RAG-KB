@@ -28,7 +28,19 @@ import time
 import urllib.request
 
 OLLAMA = "http://127.0.0.1:11434"
-CHAT = "qwen3:4b"
+CHAT = os.environ.get("KB_MODEL", "qwen3:4b")
+
+# 换模型重测用：KB_MODEL / KB_NUM_CTX / KB_NUM_GPU。
+# 8b 必须带 num_gpu 钉住层数，否则默认装载会抢显存把 bge-m3 挤出去（见 docs/ollama-tuning.md）。
+_NG = int(os.environ["KB_NUM_GPU"]) if os.environ.get("KB_NUM_GPU") else None
+
+
+def _opts(temp, ctx):
+    o = {"temperature": temp, "num_ctx": int(os.environ.get("KB_NUM_CTX", ctx))}
+    if _NG is not None:
+        o["num_gpu"] = _NG
+    return o
+
 STORAGE = r"D:\vs\rag-kb\data\uploads"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "..", "data", "_hier.json")
@@ -85,7 +97,7 @@ def ask(sents):
     t0 = time.time()
     r = post("/api/chat", {"model": CHAT, "stream": False,
                            "think": os.environ.get("KB_THINK") == "1", "format": SCHEMA,
-                           "options": {"temperature": 0.1, "num_ctx": 24576},
+                           "options": _opts(0.1, 24576),
                            "messages": [{"role": "system",
                                          "content": PROMPT.replace("N", str(len(sents)))},
                                         {"role": "user", "content": numbered}]})
