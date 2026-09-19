@@ -68,12 +68,20 @@ def psql_rows(sql):
     return out
 
 
-def embed(rows, use_ctx=True):
-    """索引文本 = 语境行 + 正文（线上就是这套）。`--no-ctx` 时只用正文 ——
-    两个变体只差这一个因素，于是差值就是**语境行的贡献**。"""
+def embed(rows, mode="ctx+body"):
+    """索引文本的三种形态（只差这一个因素，差值就是**语境行的贡献**）：
+      · `ctx+body`（线上现状）· `body`（对照）· `ctx`（只用语境行）——
+    第三种是拿来分辨**"ctx 被正文淹没"**这个解释的：正文约 600 字、ctx 约 25 字，权重差 20 倍。
+    """
     ids = [r[0] for r in rows]
-    texts = [((r[1] + "\n" + r[2]) if (use_ctx and r[1]) else r[2]) for r in rows]
-    cache = VCACHE if use_ctx else VCACHE.replace(".json", "-noctx.json")
+    if mode == "body":
+        texts = [r[2] for r in rows]
+    elif mode == "ctx":
+        texts = [(r[1] or r[2]) for r in rows]
+    else:
+        texts = [((r[1] + "\n" + r[2]) if r[1] else r[2]) for r in rows]
+    cache = VCACHE.replace(".json", {"ctx+body": ".json", "body": "-noctx.json",
+                                     "ctx": "-ctxtonly.json"}[mode])
     if os.path.exists(cache):
         d = json.load(io.open(cache, encoding="utf-8"))
         if d.get("ids") == ids:
@@ -109,8 +117,17 @@ def main():
     ids = [r[0] for r in rows]
     texts = [(r[1] + "\n" + r[2]) if r[1] else r[2] for r in rows]
     meta = [(r[3], r[4], r[5]) for r in rows]          # doc_id, seq, doc_name
-    use_ctx = "--no-ctx" not in sys.argv
-    vecs = embed(rows, use_ctx)
+    # `--fuse`：**两个索引各排一遍、再 RRF 融合**。
+    # 现状是把 ctx 拼在正文前面（"拼接"是很弱的融合：600 字里 25 字，占了 4% 的权重）。
+    # 分开建索引再融合，才真正给了 ctx 一票。
+    fuse = "--fuse" in sys.argv
+    mode = "ctx" if "--ctx-only" in sys.argv else ("body" if "--no-ctx" in sys.argv else "ctx+body")
+    if fuse:
+        vecs = embed(rows, "body")
+        vecs_ctx = embed(rows, "ctx")
+        mode = "RRF(正文, 语境行)"
+    else:
+        vecs = embed(rows, mode)
     pos = {cid: i for i, cid in enumerate(ids)}
     norm = lambda s: re.sub(r"\s+", "", s)
 
@@ -129,8 +146,7 @@ def main():
             grp_all.append(grp or [t])
         return grp_all
 
-    print(f"全库 {len(ids)} 块　题 {len(cfg['cases'])}　k 扫描 {ks}　"
-          f"索引文本={'语境行+正文' if use_ctx else '仅正文'}\n")
+    print(f"全库 {len(ids)} 块　题 {len(cfg['cases'])}　k 扫描 {ks}　索引文本={mode}\n")
     per = []
     for c in cfg["cases"]:
         want = targets_of(c)
@@ -143,8 +159,20 @@ def main():
             headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=300) as r:
             qv = json.load(r)["embeddings"][0]
-        order = [j for _, j in sorted(((cos(qv, v), j) for j, v in enumerate(vecs)),
-                                      reverse=True)[:topk]]
+        if fuse:
+            r1 = [j for _, j in sorted(((cos(qv, v), j) for j, v in enumerate(vecs)),
+                                       reverse=True)[:topk]]
+            r2 = [j for _, j in sorted(((cos(qv, v), j) for j, v in enumerate(vecs_ctx)),
+                                       reverse=True)[:topk]]
+            sc = {}
+            for rank, j in enumerate(r1):
+                sc[j] = sc.get(j, 0) + 1 / (60 + rank)
+            for rank, j in enumerate(r2):
+                sc[j] = sc.get(j, 0) + 1 / (60 + rank)
+            order = [j for j, _ in sorted(sc.items(), key=lambda x: -x[1])][:topk]
+        else:
+            order = [j for _, j in sorted(((cos(qv, v), j) for j, v in enumerate(vecs)),
+                                          reverse=True)[:topk]]
         rk = [min([order.index(j) + 1 for j in grp if j in order], default=0) for grp in want]
         per.append((c["q"], rk))
         sys.stdout.flush()
