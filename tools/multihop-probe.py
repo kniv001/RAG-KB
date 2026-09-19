@@ -132,6 +132,12 @@ def main():
     pos = {cid: i for i, cid in enumerate(ids)}
     norm = lambda s: re.sub(r"\s+", "", s)
 
+    # 靶子的**内容指纹自检**：靶子按 doc+seq 存，分块器一改或换语料就会指错 ——
+    # 而且**不报错**，只是静默给 0（2026-09-20 就因此差点改错生产）。
+    # 所以每次跑之前先核对指纹，对不上就大声说。
+    def fp_of(s):
+        return re.sub(r"[\s\\]+", "", s)[:10]
+
     def targets_of(case):
         """→ 每个靶子一组可接受的块下标（同文档 + 含该块**正文**的这段文字）。
 
@@ -140,12 +146,20 @@ def main():
         同一改动一边 48% 一边 56%，就是这里来的）。
         """
         grp_all = []
-        for sq in case["targets_seq"]:
+        tg = case.get("targets") or [{"seq": s} for s in case.get("targets_seq", [])]
+        for item in tg:
+            sq = item["seq"]
             t = next((i for i, m in enumerate(meta)
                       if m[2] == case["doc"] and str(m[1]) == str(sq)), None)
             if t is None:
+                print(f"  ⚠ 靶子指不到块：{case['doc'][:24]} seq={sq}")
                 grp_all.append([])
                 continue
+            if item.get("fp") and fp_of(bodies[t]) != fp_of(item["fp"]):
+                print(f"  ⚠ **靶子指纹不符**：{case['doc'][:24]} seq={sq}\n"
+                      f"      标的是「{item['fp'][:20]}」现在是「{bodies[t][:20]}」"
+                      f" —— 分块器或语料变过，这题的数不可信")
+                bad[0] += 1
             key = norm(bodies[t])[:40]
             grp = [i for i, m in enumerate(meta)
                    if m[2] == case["doc"] and (key in norm(bodies[i]) or norm(bodies[i]) in key)]
@@ -153,6 +167,7 @@ def main():
         return grp_all
 
     print(f"全库 {len(ids)} 块　题 {len(cfg['cases'])}　k 扫描 {ks}　索引文本={mode}\n")
+    bad = [0]
     per = []
     for c in cfg["cases"]:
         want = targets_of(c)
@@ -183,6 +198,9 @@ def main():
         per.append((c["q"], rk))
         sys.stdout.flush()
 
+    if bad[0]:
+        print(f"\n⚠️ **{bad[0]} 个靶子的内容指纹对不上** —— 分块器或语料变过，"
+              f"下面的数不可信，先重标靶子。\n")
     print(f"{'k':>5}{'全中率':>12}{'逐靶召回':>10}")
     for k in ks:
         nh = sum(1 for _, rk in per if all(0 < r <= k for r in rk))
