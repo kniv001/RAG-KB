@@ -115,7 +115,8 @@ def main():
     rows = psql_rows("SELECT c.id, coalesce(c.ctx,''), c.content, c.doc_id, c.seq, d.name "
                      "FROM chunks c JOIN documents d ON d.id=c.doc_id ORDER BY c.id")
     ids = [r[0] for r in rows]
-    texts = [(r[1] + "\n" + r[2]) if r[1] else r[2] for r in rows]
+    texts = [(r[1] + "\n" + r[2]) if r[1] else r[2] for r in rows]   # 检索用文本（可能带 ctx）
+    bodies = [r[2] for r in rows]                                    # **正文**：靶子匹配只用它
     meta = [(r[3], r[4], r[5]) for r in rows]          # doc_id, seq, doc_name
     # `--fuse`：**两个索引各排一遍、再 RRF 融合**。
     # 现状是把 ctx 拼在正文前面（"拼接"是很弱的融合：600 字里 25 字，占了 4% 的权重）。
@@ -132,7 +133,12 @@ def main():
     norm = lambda s: re.sub(r"\s+", "", s)
 
     def targets_of(case):
-        """→ 每个靶子一组可接受的块下标（同文档 + 含该块文字）"""
+        """→ 每个靶子一组可接受的块下标（同文档 + 含该块**正文**的这段文字）。
+
+        **键必须取正文，不能取检索用文本**：后者带 ctx 时，键会变成 ctx 的开头，
+        于是"有 ctx"和"没 ctx"两次测的靶子集不一样，数字没法比（2026-09-20 踩过：
+        同一改动一边 48% 一边 56%，就是这里来的）。
+        """
         grp_all = []
         for sq in case["targets_seq"]:
             t = next((i for i, m in enumerate(meta)
@@ -140,9 +146,9 @@ def main():
             if t is None:
                 grp_all.append([])
                 continue
-            key = norm(texts[t])[:40]
+            key = norm(bodies[t])[:40]
             grp = [i for i, m in enumerate(meta)
-                   if m[2] == case["doc"] and (key in norm(texts[i]) or norm(texts[i]) in key)]
+                   if m[2] == case["doc"] and (key in norm(bodies[i]) or norm(bodies[i]) in key)]
             grp_all.append(grp or [t])
         return grp_all
 
