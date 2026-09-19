@@ -111,7 +111,7 @@ def main():
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
-    for ctx in (8192, 16384):
+    for ctx in ([int(x) for x in sys.argv[1:]] or [8192, 16384]):
         fit(ctx)
     numbers()
     try:
