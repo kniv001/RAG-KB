@@ -1,0 +1,13 @@
+{
+ "model": "qwen3:4b",
+ "window": [
+  86,
+  96
+ ],
+ "bounds": [
+  93
+ ],
+ "answers": [
+  7
+ ]
+}

@@ -132,6 +132,66 @@
         {"lo": 228, "hi": 228, "why": "纯链接列表"},
         {"lo": 246, "hi": 246, "why": "页面尾（posted @ / 公告）"}
       ]
+    },
+    {
+      "lo": 0,
+      "hi": 26,
+      "must": [
+        {"at": 3, "why": "小节『二、常用的限流算法』（首次出现处，4 是它的重复段）"},
+        {"at": 5, "why": "小节『三、限流工具类RateLimiter』"},
+        {"at": 17, "why": "另一篇文章开始：『服务治理---限流（令牌桶算法）』"}
+      ],
+      "optional": [
+        {"at": 2, "why": "标题 + 参考链接块"},
+        {"at": 19, "why": "令牌桶机制详解另起"},
+        {"at": 21, "why": "『3、举例』"}
+      ],
+      "forbidden": [
+        {"lo": 6, "hi": 16, "why": "RateLimiter 源码内部（acquire/reserveNextTicket/resync）"}
+      ]
+    },
+    {
+      "lo": 26,
+      "hi": 51,
+      "must": [],
+      "optional": [
+        {"at": 27, "why": "『5、Java参考代码』（代码段开始）"}
+      ],
+      "forbidden": [
+        {"lo": 28, "hi": 51, "why": "整段 Java 源码内部 —— 这一段**没有任何话题转换**，是一块纯反例窗口"}
+      ]
+    },
+    {
+      "lo": 86,
+      "hi": 96,
+      "must": [
+        {"at": 89, "why": "小节『滑动窗口』"},
+        {"at": 93, "why": "小节『漏桶算法』"}
+      ],
+      "optional": [
+        {"at": 91, "why": "滑动窗口图示另起"},
+        {"at": 95, "why": "漏桶示意图说明另起"}
+      ],
+      "forbidden": []
+    },
+    {
+      "lo": 146,
+      "hi": 171,
+      "must": [
+        {"at": 157, "why": "小节『分布式限流』"},
+        {"at": 168, "why": "小节『接入层限流』"},
+        {"at": 170, "why": "子模块小节『ngx_http_limit_conn_module』"}
+      ],
+      "optional": [
+        {"at": 151, "why": "tryAcquire 与 SmoothWarmingUp 另起"},
+        {"at": 159, "why": "redis+lua 实现另起"},
+        {"at": 164, "why": "Nginx+Lua 脚本另起"}
+      ],
+      "forbidden": [
+        {"lo": 147, "hi": 147, "why": "println 片段"},
+        {"lo": 153, "hi": 156, "why": "示例代码内部"},
+        {"lo": 160, "hi": 163, "why": "lua/java 代码内部"}
+      ]
     }
   ]
 }

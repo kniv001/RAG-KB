@@ -1,0 +1,109 @@
+
+########## 窗口 1–26 ##########
+[1] # 高并发系统限流-漏桶算法和令牌桶算法 - 陶朱公Boy - 博客园 ⏎  ⏎ > 来源：https://www.cnblogs.com/zhangfengshi/p/12488590.html ⏎ > 抓取时间：2026-09-17 ⏎ > 由联网搜索抓取入库，网页内容可能随时间变化。
+[2] 高并发系统限流-漏桶算法和令牌桶算法 令牌桶算法在限流组件的思路 参考： http://www.cnblogs.com/LBSer/p/4083131.html https://blog.csdn.net/scorpio3k/article/details/53103239 https://www.cnblogs.com/clds/p/5850070.html http://jinnianshil
+[3] 同理我们的接口也需要安装上“保险丝”，以防止非预期的请求对系统压力过大而引起的系统瘫痪，当流量过大时，可以采取拒绝或者引流等机制。 二、常用的限流算法 常用的限流算法有两种：漏桶算法和令牌桶算法。
+[4] 同理我们的接口也需要安装上“保险丝”，以防止非预期的请求对系统压力过大而引起的系统瘫痪，当流量过大时，可以采取拒绝或者引流等机制。 二、常用的限流算法 常用的限流算法有两种：漏桶算法和令牌桶算法。 漏桶算法思路很简单，水（请求）先进入到漏桶里，漏桶以一定的速度出水，当水流入速度过大会直接溢出，可以看出漏桶算法能强行限制数据的传输速率。
+[5] 图1 漏桶算法示意图 对于很多应用场景来说，除了要求能够限制数据的平均传输速率外，还要求允许某种程度的突发传输。这时候漏桶算法可能就不合适了，令牌桶算法更为适合。如图2所示，令牌桶算法的原理是系统会以一个恒定的速度往桶里放入令牌，而如果请求需要被处理，则需要先从桶里获取一个令牌，当桶里没有令牌可取时，则拒绝服务。 图2 令牌桶算法示意图 三、限流工具类RateLimiter 　　Google开源工
+[6] RateLimiter类的接口描述请参考：RateLimiter接口描述，具体使用请参考：RateLimiter使用实践。 下面是主要源码： public double acquire() { ⏎  return acquire(1); }
+[7] public double acquire(int permits) { ⏎  checkPermits(permits); //检查参数是否合法（是否大于0）
+[8] long microsToWait; synchronized (mutex) { //应对并发情况需要同步 ⏎  microsToWait = reserveNextTicket(permits, readSafeMicros()); //获得需要等待的时间  ⏎  }
+[9] ticker.sleepMicrosUninterruptibly(microsToWait); //等待，当未达到限制时，microsToWait为0 ⏎  return 1.0 * microsToWait / TimeUnit.SECONDS.toMicros(1L); }
+[10] 制时，microsToWait为0 ⏎  return 1.0 * microsToWait / TimeUnit.SECONDS.toMicros(1L); }
+[11] private long reserveNextTicket(double requiredPermits, long nowMicros) { ⏎  resync(nowMicros); //补充令牌 ⏎  long microsToNextFreeTicket = nextFreeTicketMicros - nowMicros;
+[12] double storedPermitsToSpend = Math.min(requiredPermits, this.storedPermits); //获取这次请求消耗的令牌数目 ⏎  double freshPermits = requiredPermits - storedPermitsToSpend;long waitMicros = storedPermitsToWaitTime(t
+[13] dPermits, storedPermitsToSpend) ⏎  + (long) (freshPermits * stableIntervalMicros);this.nextFreeTicketMicros = nextFreeTicketMicros + waitMicros;
+[14] this.storedPermits -= storedPermitsToSpend; // 减去消耗的令牌 ⏎  return microsToNextFreeTicket; }
+[15] private void resync(long nowMicros) { ⏎  // if nextFreeTicket is in the past, resync to now ⏎  if (nowMicros > nextFreeTicketMicros) {
+[16] storedPermits = Math.min(maxPermits, ⏎  storedPermits + (nowMicros - nextFreeTicketMicros) / stableIntervalMicros); nextFreeTicketMicros = nowMicros; }
+[17] } 服务治理---限流（令牌桶算法） 1、最近在写一个分布式服务的框架，对于分布式服务的框架来说，除了远程调用，还要进行服务的治理 当进行促销的时候，所有的资源都用来完成重要的业务，就比如双11的时候，主要的业务就是让用户查询商品，以及购买支付， 此时，金币查询、积分查询等业务就是次要的，因此要对这些服务进行服务的降级，典型的服务降级算法是采用令牌桶算法， 因此在写框架的时候去研究了一下令牌桶算法
+[18] } 服务治理---限流（令牌桶算法） 1、最近在写一个分布式服务的框架，对于分布式服务的框架来说，除了远程调用，还要进行服务的治理 当进行促销的时候，所有的资源都用来完成重要的业务，就比如双11的时候，主要的业务就是让用户查询商品，以及购买支付， 此时，金币查询、积分查询等业务就是次要的，因此要对这些服务进行服务的降级，典型的服务降级算法是采用令牌桶算法， 因此在写框架的时候去研究了一下令牌桶算法
+[19] 下面详细介绍令牌桶算法机制： 　　　　当网络设备衡量流量是否超过额定带宽时，需要查看令牌桶，而令牌桶中会放置一定数量的令牌，一个令牌允许接口发送 　　或接收1bit数据（有时是1 Byte数据），当接口通过1bit数据后，同时也要从桶中移除一个令牌。当桶里没有令牌的时候，任何流 　　量都被视为超过额定带宽,只有当桶中有令牌时，数据才可以通过接口。
+[20] 下面详细介绍令牌桶算法机制： 　　　　当网络设备衡量流量是否超过额定带宽时，需要查看令牌桶，而令牌桶中会放置一定数量的令牌，一个令牌允许接口发送 　　或接收1bit数据（有时是1 Byte数据），当接口通过1bit数据后，同时也要从桶中移除一个令牌。当桶里没有令牌的时候，任何流 　　量都被视为超过额定带宽,只有当桶中有令牌时，数据才可以通过接口。令牌桶中的令牌不仅仅可以被移除，同样也可以往里添加，
+[21] 因此，我们通过控制往令牌桶里加令牌的速度从而控制用户流量的带宽。而设置的这个用户传输数据的速率被称为承诺信息速率（CIR）， 　　通常以秒为单位。比如我们设置用户的带宽为1000 bit每秒，只要保证每秒钟往桶里添加1000个令牌即可。 3、举例： 　　　　将CIR设置为8000 bit/s，那么就必须每秒将8000个令牌放入桶中，当接口有数据通过时，就从桶中移除相应的令牌，每通过1 bit， 　
+[22] 当桶里没有令牌的时候，任何流量都被视为超出额定带宽，而超出的流量就要采取额外动作。
+[23] 3、举例： 　　　　将CIR设置为8000 bit/s，那么就必须每秒将8000个令牌放入桶中，当接口有数据通过时，就从桶中移除相应的令牌，每通过1 bit， 　　就从桶中移除1个令牌。当桶里没有令牌的时候，任何流量都被视为超出额定带宽，而超出的流量就要采取额外动作。每秒钟往桶里加的令牌 　　就决定了用户流量的速率，这个速率就是CIR，但是每秒钟需要往桶里加的令牌总数，并不是一次性加完的，一次性加
+[24] 还有就是加令牌的时间，Time interval（Tc）， 　　Tc表示多久该往桶里加一次令牌，而这个时间并不能手工设置，因为这个时间可以靠CIR和Bc的关系计算得到， Bc/ CIR= Tc。 4、令牌桶算法图例 　　　　　　 　　　　a. 按特定的速率向令牌桶投放令牌 　　　　b. 根据预设的匹配规则先对报文进行分类，不符合匹配规则的报文不需要经过令牌桶的处理，直接发送； 　　　　c. 符合匹
+[25] d. 当令牌桶中的令牌不足时，报文将不能被发送，只有等到桶中生成了新的令牌，报文才可以发送。
+[26] 当桶中有足够的令牌则报文可以被继续发送下去，同时令牌桶中的令牌 量按报文的长度做相应的减少； 　　　　d. 当令牌桶中的令牌不足时，报文将不能被发送，只有等到桶中生成了新的令牌，报文才可以发送。这就可以限制报文的流量只能是小于等于令牌生成的速度，达到限制流量的目的。
+
+########## 窗口 27–51 ##########
+[27] 5、Java参考代码： package com.netease.datastream.util.flowcontrol;
+[28] import java.io.BufferedWriter;import java.io.FileOutputStream;import java.io.IOException;
+[29] import java.io.OutputStreamWriter;import java.util.Random;import java.util.concurrent.ArrayBlockingQueue;import java.util.concurrent.Executors;
+[30] import java.util.concurrent.ScheduledExecutorService;import java.util.concurrent.TimeUnit;import java.util.concurrent.locks.ReentrantLock;/** ⏎  * <pre>
+[31] * Created by inter12 on 15-3-18. ⏎  * </pre> ⏎  */ ⏎ public class TokenBucket { ⏎ // 默认桶大小个数 即最大瞬间流量是64M ⏎  private static final int DEFAULT_BUCKET_SIZE = 1024 * 1024 * 64;
+[32] 个数 即最大瞬间流量是64M ⏎  private static final int DEFAULT_BUCKET_SIZE = 1024 * 1024 * 64;// 一个桶的单位是1字节
+[33] private int everyTokenSize = 1;// 瞬间最大流量 ⏎  private int maxFlowRate;// 平均流量
+[34] private int avgFlowRate;// 队列来缓存桶数量：最大的流量峰值就是 = everyTokenSize*DEFAULT_BUCKET_SIZE 64M = 1 * 1024 * ⏎  // 1024 * 64 ⏎  private ArrayBlockingQueue<Byte> tokenQueue = new ArrayBlockingQueue<Byte>( ⏎  DE
+[35] private ScheduledExecutorService scheduledExecutorService = Executors ⏎  .newSingleThreadScheduledExecutor();private volatile boolean isStart = false;private ReentrantLock lock = new ReentrantLock(tru
+[36] boolean isStart = false;private ReentrantLock lock = new ReentrantLock(true);private static final byte A_CHAR = 'a';
+[37] public TokenBucket() { ⏎  } ⏎ public TokenBucket(int maxFlowRate, int avgFlowRate) { ⏎  this.maxFlowRate = maxFlowRate;
+[38] this.avgFlowRate = avgFlowRate; } ⏎ public TokenBucket(int everyTokenSize, int maxFlowRate, int avgFlowRate) { ⏎  this.everyTokenSize = everyTokenSize; this.maxFlowRate = maxFlowRate;
+[39] this.avgFlowRate = avgFlowRate; } ⏎ public void addTokens(Integer tokenNum) {
+[40] ; this.avgFlowRate = avgFlowRate; }
+[41] public void addTokens(Integer tokenNum) { ⏎ // 若是桶已经满了，就不再家如新的令牌 ⏎  for (int i = 0; i < tokenNum;
+[42] i++) { ⏎  tokenQueue.offer(Byte.valueOf(A_CHAR)); } ⏎  } ⏎ public TokenBucket build() {
+[43] start(); return this; } ⏎ /** ⏎  * 获取足够的令牌个数 ⏎  *  ⏎  * @return ⏎  */ ⏎  public boolean getTokens(byte[] dataSize) { ⏎ // Preconditions.checkNotNull(dataSize);// Preconditions.checkArgument(isStart, ⏎
+[44] st !");int needTokenNum = dataSize.length / everyTokenSize + 1;
+[45] // 传输内容大小对应的桶个数 ⏎ final ReentrantLock lock = this.lock; lock.lock(); try {
+[46] boolean result = needTokenNum <= tokenQueue.size(); // 是否存在足够的桶数量 ⏎  if (!result) { ⏎  return false;
+[47] } ⏎ int tokenCount = 0; for (int i = 0; i < needTokenNum; i++) { ⏎  Byte poll = tokenQueue.poll(); if (poll != null) { ⏎  tokenCount++; } ⏎  } ⏎ return tokenCount == needTokenNum; } finally { ⏎  lock.
+[48] (maxFlowRate != 0) { ⏎  tokenQueue = new ArrayBlockingQueue<Byte>(maxFlowRate);
+[49] } ⏎ // 初始化令牌生产者 ⏎  TokenProducer tokenProducer = new TokenProducer(avgFlowRate, this); scheduledExecutorService.scheduleAtFixedRate(tokenProducer, 0, 1,
+[50] TimeUnit.SECONDS); isStart = true;} ⏎ public void stop() { ⏎  isStart = false;
+[51] scheduledExecutorService.shutdown(); } ⏎ public boolean isStarted() { ⏎  return isStart; } ⏎ class TokenProducer implements Runnable { ⏎ private int avgFlowRate; private TokenBucket tokenBucket;
+
+########## 窗口 87–111 ##########
+[87] } else { timeStamp = now; reqCount = 1; return true; } } } 这个算法虽然简单，但是有一个十分致命的问题，那就是临界问题，我们看下图： 从上图中我们可以看到，假设有一个恶意用户，他在0:59时，瞬间发送了100个请求，并且1:00又瞬间发送了100个请求，那么其实这个用户在 1秒里面，瞬间发送了200个请求。
+[88] 我们刚才规定的是1分钟最多100个请求，也就是每秒钟最多1.7个请求，用户通过在时间窗口的重置节点处突发请求， 可以瞬间超过我们的速率限制。用户有可能通过算法的这个漏洞，瞬间压垮我们的应用。 聪明的朋友可能已经看出来了，刚才的问题其实是因为我们统计的精度太低。那么如何很好地处理这个问题呢？或者说，如何将临界问题的影响降低呢？
+[89] 我们可以看下面的滑动窗口算法。 滑动窗口 滑动窗口，又称rolling window。为了解决这个问题，我们引入了滑动窗口算法。如果学过TCP网络协议的话，那么一定对滑动窗口这个名词不会陌生。
+[90] 滑动窗口 滑动窗口，又称rolling window。为了解决这个问题，我们引入了滑动窗口算法。如果学过TCP网络协议的话，那么一定对滑动窗口这个名词不会陌生。
+[91] 下面这张图，很好地解释了滑动窗口算法： 在上图中，整个红色的矩形框表示一个时间窗口，在我们的例子中，一个时间窗口就是一分钟。然后我们将时间窗口进行划分，比如图中，我们就将滑动窗口 划成了6格，所以每格代表的是10秒钟。每过10秒钟，我们的时间窗口就会往右滑动一格。每一个格子都有自己独立的计数器counter，比如当一个请求 在0:35秒的时候到达，那么0:30~0:39对应的counter就会加1
+[92] 那么滑动窗口怎么解决刚才的临界问题的呢？我们可以看上图，0:59到达的100个请求会落在灰色的格子中，而1:00到达的请求会落在橘黄色的格 子中。当时间到达1:00时，我们的窗口会往右移动一格，那么此时时间窗口内的总请求数量一共是200个，超过了限定的100个，所以此时能够检测出来触 发了限流。 我再来回顾一下刚才的计数器算法，我们可以发现，计数器算法其实就是滑动窗口算法。只是它没有对时间窗口做进
+[93] 由此可见，当滑动窗口的格子划分的越多，那么滑动窗口的滚动就越平滑，限流的统计就会越精确。 漏桶算法 漏桶算法，又称leaky bucket。
+[94] 只是它没有对时间窗口做进一步地划分，所以只有1格。 由此可见，当滑动窗口的格子划分的越多，那么滑动窗口的滚动就越平滑，限流的统计就会越精确。 漏桶算法 漏桶算法，又称leaky bucket。
+[95] 为了理解漏桶算法，我们看一下维基百科上的对于该算法的示意图： 从图中我们可以看到，整个算法其实十分简单。首先，我们有一个固定容量的桶，有水流进来，也有水流出去。对于流进来的水来说，我们无法预计一共有多 少水会流进来，也无法预计水流的速度。但是对于流出去的水来说，这个桶可以固定水流出的速率。
+[96] 而且，当桶满了之后，多余的水将会溢出。 我们将算法中的水换成实际应用中的请求，我们可以看到漏桶算法天生就限制了请求的速度。当使用了漏桶算法，我们可以保证接口会以一个常速速率来处理请求。所以漏桶算法天生不会出现临界问题。具体的伪代码实现如下： 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 public class LeakyDemo
+[97] public int capacity; public int rate; public int water; public boolean grant() { long now = getNowTime();
+[98] public int rate; public int water; public boolean grant() { long now = getNowTime();
+[99] water = max(0, water - (now - timeStamp) * rate); timeStamp = now; if ((water + 1) < capacity) { water += 1; return true;
+[100] } else { return false; } } } 令牌桶算法 令牌桶算法，又称token bucket。为了理解该算法，我们再来看一下维基百科上对该算法的示意图： 从图中我们可以看到，令牌桶算法比漏桶算法稍显复杂。首先，我们有一个固定容量的桶，桶里存放着令牌（token）。桶一开始是空的，token以 一个固定的速率r往桶里填充，直到达到桶的容量，多余的令牌将会被丢弃。
+[101] 每当一个请求过来时，就会尝试从桶里移除一个令牌，如果没有令牌的话，请求无法通 过。 具体的伪代码实现如下： 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 public class TokenBucketDemo { public long timeStamp = getNowTime(); public int capacity;
+[102] 具体的伪代码实现如下： 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 public class TokenBucketDemo { public long timeStamp = getNowTime(); public int capacity; public int rate;
+[103] public int tokens; public boolean grant() { long now = getNowTime(); tokens = min(capacity, tokens + (now - timeStamp) * rate); timeStamp = now;
+[104] if (tokens < 1) { return false; } else { tokens -= 1; return true; } } } 相关变种 若仔细研究算法，我们会发现我们默认从桶里移除令牌是不需要耗费时间的。如果给移除令牌设置一个延时时间，那么实际上又采用了漏桶算法的思路。
+[105] Google的guava库下的SmoothWarmingUp类就采用了这个思路。 临界问题 我 们再来考虑一下临界问题的场景。在0:59秒的时候，由于桶内积满了100个token，所以这100个请求可以瞬间通过。
+[106] Google的guava库下的SmoothWarmingUp类就采用了这个思路。 临界问题 我 们再来考虑一下临界问题的场景。在0:59秒的时候，由于桶内积满了100个token，所以这100个请求可以瞬间通过。
+[107] 但是由于token是以较低的 速率填充的，所以在1:00的时候，桶内的token数量不可能达到100个，那么此时不可能再有100个请求通过。所以令牌桶算法可以很好地解决临界问 题。下图比较了计数器（左）和令牌桶算法（右）在临界点的速率变化。我们可以看到虽然令牌桶算法允许突发速率，但是下一个突发速率必须要等桶内有足够的 token后才能发生： 总结 计数器 VS 滑动窗口 计数器算法是最简单的算法，
+[108] 滑动窗口由于需要存储多份的计数器（每一个格子存一份），所以滑动窗口在实现上需要更多的存储空间。也就是说，如果滑动窗口的精度越高，需要的存储空间就越大。 漏桶算法 VS 令牌桶算法 漏桶算法和令牌桶算法最明显的区别是令牌桶算法允许流量一定程度的突发。因为默认的令牌桶算法，取走token是不需要耗费时间的，也就是说，假设桶内有100个token时，那么可以瞬间允许100个请求通过。 令牌桶算法由于实现
+[109] 当然我们需要具体情况具体分析，只有最合适的算法，没有最优的算法。
+[110] 因为默认的令牌桶算法，取走token是不需要耗费时间的，也就是说，假设桶内有100个token时，那么可以瞬间允许100个请求通过。 令牌桶算法由于实现简单，且允许某些流量的突发，对用户友好，所以被业界采用地较多。当然我们需要具体情况具体分析，只有最合适的算法，没有最优的算法。
+[111] 聊聊高并发系统之限流特技 在开发高并发系统时有三把利器用来保护系统：缓存、降级和限流。缓存的目的是提升系统访问速度和增大系统能处理的容量，可谓是抗高并发流量的银弹；而降级是当服务出问题或者影响到核心流程的性能则需要暂时屏蔽掉，待高峰或者问题解决后再打开；而有些场景并不能用缓存和降级来解决，比如稀缺资源（秒杀、抢购）、写服务（如评论、下单）、频繁的复杂查询（评论的最后几页），因此需有一种手段来限制这
+
+########## 窗口 147–171 ##########
+[147] System.out.println(limiter.acquire()); System.out.println(limiter.acquire()); System.out.println(limiter.acquire());
+[148] 将得到类似如下的输出： 0.0 0.0 0.0 0.0 0.499876 0.495799 1、创建了一个桶容量为2且每秒新增2个令牌； 2、首先调用limiter.acquire()消费一个令牌，此时令牌桶可以满足（返回值为0）； 3、然后线程暂停2秒，接下来的两个limiter.acquire()都能消费到令牌，第三个limiter.acquire()也同样消费到了令牌，到第四个时就需要等待5
+[149] 令牌桶算法允许将一段时间内没有消费的令牌暂存到令牌桶中，留待未来使用，并允许未来请求的这种突发。
+[150] 此处可以看到我们设置的桶容量为2（即允许的突发量），这是因为SmoothBursty中有一个参数：最大突发秒数（maxBurstSeconds）默认值是1s，突发量/桶容量=速率*maxBurstSeconds，所以本示例桶容量/突发量为2，例子中前两个是消费了之前积攒的突发量，而第三个开始就是正常计算的了。令牌桶算法允许将一段时间内没有消费的令牌暂存到令牌桶中，留待未来使用，并允许未来请求的这种
+[151] 另外RateLimiter还提供了tryAcquire方法来进行无阻塞或可超时的令牌消费。 因为SmoothBursty允许一定程度的突发，会有人担心如果允许这种突发，假设突然间来了很大的流量，那么系统很可能扛不住这种突发。因此需要一种平滑速率的限流工具，从而系统冷启动后慢慢的趋于平均固定速率（即刚开始速率小一些，然后慢慢趋于我们设置的固定速率）。Guava也提供了SmoothWarmingUp来
+[152] 因此需要一种平滑速率的限流工具，从而系统冷启动后慢慢的趋于平均固定速率（即刚开始速率小一些，然后慢慢趋于我们设置的固定速率）。Guava也提供了SmoothWarmingUp来实现这种需求，其可以认为是漏桶算法，但是在某些特殊场景又不太一样。 SmoothWarmingUp创建方式：RateLimiter.create(doublepermitsPerSecond, long warmupPeri
+[153] 示例如下： RateLimiter limiter = RateLimiter.create(5, 1000, TimeUnit.MILLISECONDS); for(int i = 1; i < 5;i++) { System.out.println(limiter.acquire());
+[154] } Thread.sleep(1000L); for(int i = 1; i < 5;i++) { System.out.println(limiter.acquire());
+[155] } Thread.sleep(1000L); for(int i = 1; i < 5;
+[156] i++) { System.out.println(limiter.acquire()); } 将得到类似如下的输出： 0.0 0.51767 0.357814 0.219992 0.199984 0.0 0.360826 0.220166 0.199723 0.199555 速率是梯形上升速率的，也就是说冷启动时会以一个比较大的速率慢慢到平均速率；然后趋于平均速率（梯形下降到平均速率）。可以通过
+[157] 到此应用级限流的一些方法就介绍完了。假设将应用部署到多台机器，应用级限流方式只是单应用内的请求限流，不能进行全局限流。因此我们需要分布式限流和接入层限流来解决这个问题。 分布式限流 分布式限流最关键的是要将限流服务做成原子化，而解决方案可以使使用redis+lua或者nginx+lua技术进行实现，通过这两种技术可以实现的高并发和高性能。 首先我们来使用redis+lua实现时间窗内某个接口的请求
+[158] Lua本身就是一种编程语言，也可以使用它实现复杂的令牌桶或漏桶算法。
+[159] 首先我们来使用redis+lua实现时间窗内某个接口的请求数限流，实现了该功能后可以改造为限流总并发/请求数和限制总资源数。Lua本身就是一种编程语言，也可以使用它实现复杂的令牌桶或漏桶算法。 redis+lua实现中的lua脚本： local key = KEYS[1] --限流KEY（一秒一个） local limit = tonumber(ARGV[1]) --限流大小 local curr
+[160] redis+lua实现中的lua脚本： local key = KEYS[1] --限流KEY（一秒一个） local limit = tonumber(ARGV[1]) --限流大小 local current = tonumber(redis.call("INCRBY", key, "1")) --请求数+1 if current > limit then --如果超出限流大小 return 
+[161] 如上方式有一个缺点就是当达到限流大小后还是会递增的，可以改造成如下方式实现： local key = KEYS[1] --限流KEY（一秒一个） local limit = tonumber(ARGV[1]) --限流大小 local current = tonumber(redis.call('get', key) or "0") if current + 1 > limit then --如果
+[162] Jedis jedis = new Jedis("192.168.147.52", 6379); String key = "ip:" + System.currentTimeMillis()/ 1000; //此处将当前时间戳取秒数 Stringlimit = "3";
+[163] //限流大小 return (Long)jedis.eval(luaScript,Lists.newArrayList(key), Lists.newArrayList(limit)) == 1; } 因为Redis的限制（Lua中有写操作不能使用带随机性质的读操作，如TIME）不能在Redis Lua中使用TIME获取时间戳，因此只好从应用获取然后传入，在某些极端情况下（机器时钟不准的情况下），
+[164] 使用Nginx+Lua实现的Lua脚本： local locks = require "resty.lock" local function acquire() local lock =locks:new("locks") local elapsed, err =lock:lock("limit_key") --互斥锁 local limit_counter =ngx.shared.limit_c
+[165] lock:unlock() return 1 end ngx.print(acquire()) 实现中我们需要使用lua-resty-lock互斥锁模块来解决原子性问题(在实际工程中使用时请考虑获取锁的超时问题)，并使用ngx.shared.DICT共享字典来实现计数器。
+[166] 如果需要限流则返回0，否则返回1。使用时需要先定义两个共享字典（分别用来存放锁和计数器数据）： Java代码 http { …… lua_shared_dict locks 10m; lua_shared_dict limit_counter 10m;
+[167] } 有人会纠结如果应用并发量非常大那么redis或者nginx是不是能抗得住；不过这个问题要从多方面考虑：你的流量是不是真的有这么大，是不是可以通过一致性哈希将分布式限流进行分片，是不是可以当并发量太大降级为应用级限流；对策非常多，可以根据实际情况调节；像在京东使用Redis+Lua来限流抢购流量，一般流量是没有问题的。
+[168] 对于分布式限流目前遇到的场景是业务上的限流，而不是流量入口的限流；流量入口限流应该在接入层完成，而接入层笔者一般使用Nginx。 接入层限流 接入层通常指请求流量的入口，该层的主要目的有：负载均衡、非法请求过滤、请求聚合、缓存、降级、限流、A/B测试、服务质量监控等等，可以参考笔者写的《使用Nginx+Lua(OpenResty)开发高性能Web应用》。 对于Nginx接入层限流可以使用Nginx
+[169] 对于Nginx接入层限流可以使用Nginx自带了两个模块：连接数限流模块ngx_http_limit_conn_module和漏桶算法实现的请求限流模块ngx_http_limit_req_module。还可以使用OpenResty提供的Lua限流模块lua-resty-limit-traffic进行更复杂的限流场景。 limit_conn用来对某个KEY对应的总的网络连接数进行限流，可以按照如I
+[170] limit_req用来对某个KEY对应的请求的平均速率进行限流，并有两种用法：平滑模式（delay）和允许突发模式(nodelay)。 ngx_http_limit_conn_module limit_conn是对某个KEY对应的总的网络连接数进行限流。可以按照IP来限制IP维度的总连接数，或者按照服务域名来限制某个域名的总连接数。但是记住不是每一个请求连接都会被计数器统计，只有那些被Nginx处
+[171] 配置示例： http { limit_conn_zone$binary_remote_addr zone=addr:10m; limit_conn_log_level error; limit_conn_status 503;
