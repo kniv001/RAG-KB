@@ -37,6 +37,9 @@ for (const cs of cfg.cases) {
       const dec = st.decrypt(d);
       if (name === 'plan') { rec.queries = dec.queries || []; rec.rounds++; }
       if (name === 'retrieve') rec.sources.push(...(dec.sources || []));
+      // **收尾事件的 sources 才是"真正进提示词"的那一批**（retrieve 每次查询只报前 5 条显示用）。
+      // 量 top-k 这类"每条查询看多宽"的改动，必须用这个，否则前 5 条不变、量不出差别。
+      if (name === 'done') rec.final = dec.sources || [];
     });
   } catch (e) {
     rec.error = String(e.message || e);
