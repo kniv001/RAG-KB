@@ -97,12 +97,22 @@ CTRL_UNRELATED = [
 ]
 
 
-def ask(prefix, timeout=300):
+# 权重臂：把「已经被选作主旨句的句子 + 次数」作为**数据**喂回去（不是示例，没有可抄的字面值问题）。
+# 要同时看两个数：正确率 **和** 头部集中度 —— 权重的已知双胞胎失败模式是**星形**
+# （万物指向同一个 hub；09-17 话语关系成图实测星形度 0.33/0.25 正是这个形状）。
+WEIGHT_HINT = "\n（参考：前面已经被别的句子选为主旨句的有 {items}。这只是参考，判断以内容为准。）"
+
+
+def ask(prefix, timeout=300, weights=None):
+    user = "\n".join(f"{i+1}. {s}" for i, s in enumerate(prefix))
+    if weights:
+        items = "、".join(f"第 {k} 句（{v} 次）" for k, v in sorted(weights.items()) if v > 0)
+        if items:
+            user += WEIGHT_HINT.format(items=items)
     body = {"model": CHAT, "stream": False, "think": os.environ.get("KB_THINK") == "1",
             "format": SCHEMA, "options": _opts(0.1, 8192),
             "messages": [{"role": "system", "content": PROMPT},
-                         {"role": "user", "content": "\n".join(
-                             f"{i+1}. {s}" for i, s in enumerate(prefix))}]}
+                         {"role": "user", "content": user}]}
     req = urllib.request.Request(OLLAMA + "/api/chat", data=json.dumps(body).encode("utf-8"),
                                  headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -114,17 +124,30 @@ def ask(prefix, timeout=300):
         return -1
 
 
-def run(name, sents, reps=2):
+def ask_weighted(sents):
+    """顺序走一遍，每步把累计权重喂回去（用户提案的权重臂）。"""
+    w, row = {}, []
+    for i in range(len(sents)):
+        v = ask(sents[:i + 1], weights=w)
+        row.append(v)
+        if 1 <= v <= i + 1 and v != i + 1:      # 只统计"指向别人"的
+            w[v] = w.get(v, 0) + 1
+    return row
+
+
+def run(name, sents, reps=2, weighted=False):
     print(f"—— {name} ——")
     got = []
     for rep in range(reps):
-        row = [ask(sents[:i + 1]) for i in range(len(sents))]
+        row = ask_weighted(sents) if weighted else [ask(sents[:i + 1]) for i in range(len(sents))]
         got.append(row)
         print(f"  第{rep+1}次： {' '.join(f'{i+1}→{v}' for i, v in enumerate(row))}")
         sys.stdout.flush()
     dist = Counter(v for row in got for v in row)
+    heads = Counter(v for row in got for v in row if v != 0)
     print(f"  答案分布：{dict(sorted(dist.items()))}"
           f"　{'⚠️ 常数' if len(dist) == 1 else ''}")
+    print(f"  被选中的不同头：{len(heads)} 个（越少越像星形）　{dict(sorted(heads.items()))}")
     return got
 
 
@@ -178,6 +201,14 @@ def main():
 
     count_check()
     print()
+    if os.environ.get("KB_HEAD_WEIGHT") == "1":
+        print("### 权重臂（把累计被选次数喂回去）###\n")
+        gw = run("对照甲（带权重）", CTRL_STRUCTURED, weighted=True)
+        score(gw, CTRL_STRUCTURED_WANT)
+        print()
+        gw2 = run("对照乙（带权重）", CTRL_UNRELATED, weighted=True)
+        score(gw2, list(range(1, 9)))
+        return
     g1 = run("对照甲：两段各「1 主旨 + 3 展开」", CTRL_STRUCTURED)
     s1 = score(g1, CTRL_STRUCTURED_WANT)
     print()
