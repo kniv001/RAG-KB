@@ -68,14 +68,16 @@ def psql_rows(sql):
     return out
 
 
-def embed(texts):
-    if os.path.exists(VCACHE):
-        d = json.load(io.open(VCACHE, encoding="utf-8"))
-        if d.get("ids") == [t[0] for t in texts]:
-            return d["vecs"]
-    rows = psql_rows("SELECT id, coalesce(ctx,''), content FROM chunks ORDER BY id")
+def embed(rows, use_ctx=True):
+    """索引文本 = 语境行 + 正文（线上就是这套）。`--no-ctx` 时只用正文 ——
+    两个变体只差这一个因素，于是差值就是**语境行的贡献**。"""
     ids = [r[0] for r in rows]
-    texts = [(r[1] + "\n" + r[2]) if r[1] else r[2] for r in rows]
+    texts = [((r[1] + "\n" + r[2]) if (use_ctx and r[1]) else r[2]) for r in rows]
+    cache = VCACHE if use_ctx else VCACHE.replace(".json", "-noctx.json")
+    if os.path.exists(cache):
+        d = json.load(io.open(cache, encoding="utf-8"))
+        if d.get("ids") == ids:
+            return d["vecs"]
     vecs = []
     for i in range(0, len(texts), 8):
         req = urllib.request.Request(
@@ -84,7 +86,7 @@ def embed(texts):
             headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=900) as r:
             vecs += json.load(r)["embeddings"]
-    io.open(VCACHE, "w", encoding="utf-8").write(json.dumps({"ids": ids, "vecs": vecs}))
+    io.open(cache, "w", encoding="utf-8").write(json.dumps({"ids": ids, "vecs": vecs}))
     return vecs
 
 
@@ -98,7 +100,7 @@ def main():
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
-    ks = [int(x) for x in sys.argv[1:]] or [4, 8, 12, 24]
+    ks = [int(x) for x in sys.argv[1:] if x.isdigit()] or [4, 8, 12, 24]
     topk = max(ks)
     cfg = json.load(io.open(QFILE, encoding="utf-8"))
 
@@ -107,7 +109,8 @@ def main():
     ids = [r[0] for r in rows]
     texts = [(r[1] + "\n" + r[2]) if r[1] else r[2] for r in rows]
     meta = [(r[3], r[4], r[5]) for r in rows]          # doc_id, seq, doc_name
-    vecs = embed([(i, t) for i, t in zip(ids, texts)])
+    use_ctx = "--no-ctx" not in sys.argv
+    vecs = embed(rows, use_ctx)
     pos = {cid: i for i, cid in enumerate(ids)}
     norm = lambda s: re.sub(r"\s+", "", s)
 
@@ -126,7 +129,8 @@ def main():
             grp_all.append(grp or [t])
         return grp_all
 
-    print(f"全库 {len(ids)} 块　题 {len(cfg['cases'])}　k 扫描 {ks}\n")
+    print(f"全库 {len(ids)} 块　题 {len(cfg['cases'])}　k 扫描 {ks}　"
+          f"索引文本={'语境行+正文' if use_ctx else '仅正文'}\n")
     per = []
     for c in cfg["cases"]:
         want = targets_of(c)
