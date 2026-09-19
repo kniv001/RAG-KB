@@ -189,8 +189,15 @@ def main():
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
-    doc = sys.argv[1] if len(sys.argv) > 1 else None
-    min_leaf = int(sys.argv[2]) if len(sys.argv) > 2 else 24
+    # 先摘掉具名开关，剩下的才是位置参数（否则 --dump 会被当成文档 id）
+    argv = list(sys.argv[1:])
+    dump_path = None
+    if "--dump" in argv:
+        k = argv.index("--dump")
+        dump_path = argv[k + 1] if len(argv) > k + 1 else "tools/_bounds_bintree.json"
+        del argv[k:k + 2]
+    doc = argv[0] if len(argv) > 0 else None
+    min_leaf = int(argv[1]) if len(argv) > 1 else 24
     if not doc:
         doc = psql("SELECT doc_id FROM chunks GROUP BY doc_id ORDER BY count(*) DESC LIMIT 1;").strip().splitlines()[0].strip()
     name = psql(f"SELECT name FROM documents WHERE id='{doc}';").strip().splitlines()[0]
@@ -239,6 +246,12 @@ def main():
             continue
         if codey(segs[j - 1]) and codey(segs[j]):
             bad.append(j)
+    if dump_path:
+        io.open(dump_path, "w", encoding="utf-8").write(json.dumps(
+            {"model": CHAT, "bounds": [lo + 1 for lo, _ in out[1:]]},   # 1-based 段号
+            ensure_ascii=False))
+        print(f"  （切点已写入 {dump_path}）")
+
     print(f"\n  边界 {len(out)-1} 个，其中两侧都是代码味的 **{len(bad)} 个**"
           f"（=切在代码/日志中间，不是主题转换）")
     for j in bad:

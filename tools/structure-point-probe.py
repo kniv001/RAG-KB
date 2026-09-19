@@ -173,11 +173,40 @@ def real(segs):
         print(f"     {segs[j][:44].strip()}…")
 
 
+def scan_window(segs, lo, hi):
+    """在 [lo,hi) 段内滑窗指认，返回切点（1-based 段号）。与 real() 同一套推进规则。"""
+    ats, bounds, i = [], [], lo
+    while i + K <= hi:
+        at = ask(segs[i:i + K])
+        ats.append(at)
+        if 1 <= at <= K:
+            j = i + at - 1
+            if j > lo:
+                bounds.append(j + 1)      # 1-based
+            i = i + at
+        else:
+            i += 4
+    return bounds, ats
+
+
 def main():
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
+    if "--window" in sys.argv:
+        k = sys.argv.index("--window")
+        lo, hi = int(sys.argv[k + 1]), int(sys.argv[k + 2])
+        out = sys.argv[k + 3] if len(sys.argv) > k + 3 else "tools/_bounds.json"
+        cache = os.path.join(HERE, "..", "data", "_bintree-segs.json")
+        segs = json.load(io.open(cache, encoding="utf-8"))["segs"]
+        b, ats = scan_window(segs, lo, hi)
+        io.open(out, "w", encoding="utf-8").write(
+            json.dumps({"model": CHAT, "window": [lo, hi], "bounds": b, "answers": ats},
+                       ensure_ascii=False, indent=1))
+        print(f"窗口 {lo+1}-{hi}　调用 {len(ats)} 次　切点 {len(b)} 个 → {out}")
+        print(f"回答分布 {dict(sorted(__import__('collections').Counter(ats).items()))}")
+        return
     def from_doc(pat, n):
         """**按 seq 取连续段落** —— 随机挑块会让"哪一段是新话题"失去定义（控制实验因此不成立过一版）。
         文档取**匹配里块数最多的那篇**，否则可能挑到只有几块的短篇。"""
