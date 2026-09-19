@@ -50,6 +50,88 @@
         {"lo": 96, "hi": 99, "why": "LeakyDemo 伪代码内部"},
         {"lo": 101, "hi": 104, "why": "TokenBucketDemo 伪代码内部"}
       ]
+    },
+    {
+      "lo": 121,
+      "hi": 146,
+      "must": [
+        {"at": 124, "why": "一级小节『应用级限流』＋子节『限流总并发/连接/请求数』"},
+        {"at": 127, "why": "子节『限流总资源数』"},
+        {"at": 131, "why": "子节『限流某个接口的时间窗请求数』"},
+        {"at": 135, "why": "子节『平滑限流某个接口的请求数』"},
+        {"at": 136, "why": "Guava RateLimiter 实现（SmoothBursty）另起"}
+      ],
+      "optional": [
+        {"at": 122, "why": "令牌桶与漏桶对比收尾"},
+        {"at": 128, "why": "接口级计数器实现另起"},
+        {"at": 140, "why": "突发示例另起"},
+        {"at": 145, "why": "又一个突发示例"}
+      ],
+      "forbidden": [
+        {"lo": 132, "hi": 134, "why": "while(true)/LoadingCache 代码内部"},
+        {"lo": 137, "hi": 139, "why": "System.out.println 输出片段"},
+        {"lo": 141, "hi": 143, "why": "同上"},
+        {"lo": 146, "hi": 146, "why": "println 片段"}
+      ]
+    },
+    {
+      "lo": 176,
+      "hi": 201,
+      "must": [
+        {"at": 182, "why": "新模块小节『ngx_http_limit_req_module』"},
+        {"at": 190, "why": "小节『场景2.1测试』"},
+        {"at": 198, "why": "场景2.2 的配置（速率与桶容量改写）"}
+      ],
+      "optional": [
+        {"at": 181, "why": "error.log 说明另起"},
+        {"at": 185, "why": "limit_req 参数说明另起"},
+        {"at": 199, "why": "req.sh 测试脚本另起"}
+      ],
+      "forbidden": [
+        {"lo": 179, "hi": 180, "why": "ab 压测的 access.log 输出"},
+        {"lo": 183, "hi": 184, "why": "nginx 配置片段"},
+        {"lo": 194, "hi": 197, "why": "access.log / error.log 输出"}
+      ]
+    },
+    {
+      "lo": 201,
+      "hi": 226,
+      "must": [
+        {"at": 207, "why": "小节『场景2.3测试』"},
+        {"at": 219, "why": "小节『lua-resty-limit-traffic』"},
+        {"at": 226, "why": "『参考资料』（正文结束、引用列表开始）"}
+      ],
+      "optional": [
+        {"at": 205, "why": "burst=1 的对照实验"},
+        {"at": 214, "why": "nodelay 时间窗分析另起"},
+        {"at": 217, "why": "多 Nginx 的问题另起"},
+        {"at": 222, "why": "limit_req.lua 代码前说明"}
+      ],
+      "forbidden": [
+        {"lo": 205, "hi": 206, "why": "access.log 输出"},
+        {"lo": 210, "hi": 213, "why": "access.log 输出"},
+        {"lo": 222, "hi": 223, "why": "limit_req.lua 代码内部"}
+      ]
+    },
+    {
+      "lo": 226,
+      "hi": 246,
+      "must": [
+        {"at": 229, "why": "新话题：Java 进程内的 bean 监控与流控（『双十一…打算总结一下』）"},
+        {"at": 237, "why": "另一篇文章开始：『转载公司一位同事的文章』"},
+        {"at": 239, "why": "该文小节『1、滑窗模式』"},
+        {"at": 242, "why": "该文小节『2、响应模式』"}
+      ],
+      "optional": [
+        {"at": 230, "why": "监控手段（1）业务日志 另起"},
+        {"at": 231, "why": "（2）gc 日志"},
+        {"at": 234, "why": "（5）基于 AOP"},
+        {"at": 236, "why": "（6）动态流控"}
+      ],
+      "forbidden": [
+        {"lo": 228, "hi": 228, "why": "纯链接列表"},
+        {"lo": 246, "hi": 246, "why": "页面尾（posted @ / 公告）"}
+      ]
     }
   ]
 }
