@@ -72,7 +72,10 @@ def main():
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
-    topk = int(sys.argv[1]) if len(sys.argv) > 1 else 12
+    # 支持多个 k：**嵌入只做一次**，一次跑出「全中率 vs 召回宽度」的曲线。
+    # 这条曲线就是"加宽召回有用吗"的直接答案（它在旧题集上是被判死的）。
+    ks = [int(x) for x in sys.argv[1:]] or [4, 8, 12, 24]
+    topk = max(ks)
     cfg = json.load(io.open(QFILE, encoding="utf-8"))
     bounds = json.load(io.open(os.path.join(HERE, "_bounds_chunking.json"),
                                encoding="utf-8"))["bounds"]
@@ -117,8 +120,7 @@ def main():
         return [pos[cid] for cid in docids_ if key in norm(texts[pos[cid]])
                 or norm(texts[pos[cid]]) in key]
 
-    allhit = [0, 0]
-    per = []
+    per, ranks_all = [], []
     for c in cfg["cases"]:
         want = []
         for seg in c["targets"]:
@@ -130,18 +132,19 @@ def main():
         qv = embed([c["q"]])[0]
         order = [j for _, j in sorted(((cos(qv, v), j) for j, v in enumerate(vecs)),
                                       reverse=True)[:topk]]
-        ok = [any(j in order for j in grp) for grp in want]
-        ranks = [min([order.index(j) + 1 for j in grp if j in order], default=0) for grp in want]
-        allhit[0] += all(ok)
-        allhit[1] += 1
-        per.append((c["q"], len(want), sum(ok), ranks))
-        mark = "✅" if all(ok) else ("◐" if any(ok) else "❌")
-        print(f"  {mark} 靶 {sum(ok)}/{len(want)}　名次 {ranks}　{c['q'][:44]}")
-    n = allhit[1]
-    tr = sum(p[2] for p in per) / max(sum(p[1] for p in per), 1)
-    print(f"\n—— 结果（top-{topk}）——")
-    print(f"  **全中率 {allhit[0]}/{n} = {100*allhit[0]/n:.0f}%**　逐靶召回 {100*tr:.0f}%")
-    print("  （判据：全中率。现有单跳集是 15/15、难题集 14/15 —— 都能满分）")
+        rk = [min([order.index(j) + 1 for j in grp if j in order], default=0) for grp in want]
+        per.append((c["q"], want, rk))
+        ranks_all.append(rk)
+    print(f"{'k':>5}{'全中率':>9}{'逐靶召回':>10}   逐题（靶数）")
+    for k in ks:
+        nh = sum(1 for _, want, rk in per
+                 if all(any(0 < r <= k for r in [r]) for r in rk))   # 每个靶都在 top-k
+        tr = sum(1 for rk in ranks_all for r in rk if 0 < r <= k)
+        tn = sum(len(rk) for rk in ranks_all)
+        det = " ".join(f"{sum(1 for r in rk if 0 < r <= k)}/{len(rk)}" for _, _, rk in per)
+        print(f"{k:>5}{f'{nh}/{len(per)}':>8}{f'{100*nh/len(per):.0f}%':>8}"
+              f"{f'{100*tr/max(tn,1):.0f}%':>10}   {det}")
+    print("\n判据：全中率（答案要的每一块都进 top-k）。旧两套题（单跳 15/难题 15）都满分 —— 已饱和。")
 
 
 if __name__ == "__main__":
