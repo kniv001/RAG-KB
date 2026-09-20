@@ -68,6 +68,18 @@ public interface ModelProvider {
         chatStream(model, messages, temperature, onToken);
     }
 
+    /**
+     * 同上，并把**这一轮的计时**透出来（prefill / decode 分开，见 {@link ChatStats}）。
+     *
+     * <p>{@code onStats} 在流结束时回调一次；不支持的提供方（OpenAI 兼容端点）
+     * 默认退回上一版，调用方拿到 {@link ChatStats#none()}。
+     */
+    default void chatStream(String model, List<ChatMessage> messages, double temperature,
+                            Consumer<String> onToken, Consumer<String> onThinking,
+                            Consumer<ChatStats> onStats) {
+        chatStream(model, messages, temperature, onToken, onThinking);
+    }
+
     /** 批量向量化。返回顺序与入参一致。 */
     List<float[]> embed(String model, List<String> texts);
 

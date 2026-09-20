@@ -619,14 +619,32 @@ public class AgenticRagService {
                 }
             };
         }
+        // 接住这一轮的计时：**prefill 与 decode 分开**才谈得上"提速往哪使劲"。
+        // 此前 Ollama 在末帧里给的 prompt_eval_* / eval_* 全被丢掉，
+        // 于是只能量到「发出 → 首字」这个混着两种开销的总数。
+        java.util.concurrent.atomic.AtomicReference<com.kniv.ragkb.provider.ChatStats> stats =
+                new java.util.concurrent.atomic.AtomicReference<>(
+                        com.kniv.ragkb.provider.ChatStats.none());
         providers.chatStream(ref, messages, TEMPERATURE,
                 piece -> {
                     out.append(piece);
                     onEvent.accept(AgentEvent.answerToken(piece));
                 },
-                onThinking);
+                onThinking,
+                stats::set);
         if (thinkBuf.length() > 0) {
             onEvent.accept(AgentEvent.thinking(thinkBuf.toString()));
+        }
+        com.kniv.ragkb.provider.ChatStats st = stats.get();
+        if (st.promptTokens() > 0 || st.evalTokens() > 0) {
+            // 单独一条事件，不动 done 的载荷 —— 客户端不认识就忽略
+            onEvent.accept(AgentEvent.of(AgentEvent.STATS,
+                    "promptTokens", st.promptTokens(),
+                    "promptMs", st.promptMs(),
+                    "evalTokens", st.evalTokens(),
+                    "evalMs", st.evalMs(),
+                    "loadMs", st.loadMs(),
+                    "tokPerSec", Math.round(st.tokensPerSecond() * 10) / 10.0));
         }
 
         if (out.length() > 0) {

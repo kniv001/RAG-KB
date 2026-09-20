@@ -121,6 +121,14 @@ public class ProviderRegistry {
         get(ref.providerId()).chatStream(ref.model(), messages, temperature, onToken, onThinking);
     }
 
+    /** 同上，并把这一轮的计时透出来（prefill / decode 分开）。见 {@link ChatStats}。 */
+    public void chatStream(Ref ref, List<ChatMessage> messages, double temperature,
+                           Consumer<String> onToken, Consumer<String> onThinking,
+                           Consumer<ChatStats> onStats) {
+        get(ref.providerId()).chatStream(ref.model(), messages, temperature,
+                onToken, onThinking, onStats);
+    }
+
     public List<float[]> embed(String ref, List<String> texts) {
         Ref r = resolveEmbed(ref);
         return get(r.providerId()).embed(r.model(), texts);

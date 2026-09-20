@@ -22,6 +22,14 @@ public record AgentEvent(String type, Map<String, Object> data) {
      */
     public static final String THINKING = "thinking";
     public static final String META = "meta";
+    /**
+     * **这一轮的计时**（prefill / decode 分开）。
+     *
+     * <p>为什么单开一条而不是塞进 {@code done}：{@code done} 的载荷要穿过
+     * ChatService.Outcome 四五个文件才到得了控制器；而这条只从生成处发出，
+     * **客户端不认识它就忽略**，不动任何既有契约。
+     */
+    public static final String STATS = "stats";
     public static final String DONE = "done";
     public static final String ERROR = "error";
 

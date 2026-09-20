@@ -84,6 +84,23 @@ public class OllamaProvider extends AbstractProvider {
     public void chatStream(String model, List<ChatMessage> messages, double temperature,
                            java.util.function.Consumer<String> onToken,
                            java.util.function.Consumer<String> onThinking) {
+        chatStream(model, messages, temperature, onToken, onThinking, s -> { });
+    }
+
+    /**
+     * 同上，并把**这一轮的计时**透出来（见 {@link ChatStats}）。
+     *
+     * <p>Ollama 在最后一帧（{@code done:true}）里本来就有 {@code prompt_eval_count} /
+     * {@code prompt_eval_duration} / {@code eval_count} / {@code eval_duration} /
+     * {@code load_duration} —— 此前**整个被丢掉**，于是"首字慢"到底慢在 prefill
+     * 还是慢在别处，只能猜。接住它，prefill（随装入量增长）与 decode（随回答长度增长）
+     * 才分得开，提速才有方向。
+     */
+    @Override
+    public void chatStream(String model, List<ChatMessage> messages, double temperature,
+                           java.util.function.Consumer<String> onToken,
+                           java.util.function.Consumer<String> onThinking,
+                           java.util.function.Consumer<ChatStats> onStats) {
         ObjectNode body = chatBody(model, messages, temperature, true);
         postStream("/api/chat", body, line -> {
             String t = line.strip();
@@ -103,10 +120,24 @@ public class OllamaProvider extends AbstractProvider {
                 if (!piece.isEmpty()) {
                     onToken.accept(piece);
                 }
+                if (n.path("done").asBoolean(false)) {
+                    // Ollama 的时间单位是**纳秒**
+                    onStats.accept(new ChatStats(
+                            ns(n, "load_duration"),
+                            n.path("prompt_eval_count").asLong(0),
+                            ns(n, "prompt_eval_duration"),
+                            n.path("eval_count").asLong(0),
+                            ns(n, "eval_duration"),
+                            ns(n, "total_duration")));
+                }
             } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
                 // 单行解析失败不应中断整段回答，跳过即可
             }
         });
+    }
+
+    private static long ns(JsonNode n, String field) {
+        return n.path(field).asLong(0) / 1_000_000L;   // 纳秒 → 毫秒
     }
 
     @Override

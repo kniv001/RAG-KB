@@ -27,22 +27,27 @@ const arg = (k, d) => {
   const i = process.argv.indexOf(`--${k}`);
   return i >= 0 ? process.argv[i + 1] : d;
 };
-const N = parseInt(arg('n', process.argv[2] || '5'), 10);
-const SET = arg('bench', process.argv[3] || 'multihop-25');
+const N = parseInt(arg('n', '5'), 10);
+const OFF = parseInt(arg('offset', '0'), 10);
+const SET = arg('bench', 'multihop-25');
 const MODEL = arg('model', 'qwen3:4b');
 const MODEL_REF = MODEL.includes('/') ? MODEL : `local/${MODEL}`;
 const cfg = JSON.parse(fs.readFileSync(`tools/cases/${SET}.json`, 'utf8'));
-const cases = cfg.cases.slice(0, N);
+// **错开起点**：同一批题问第二遍会命中答案缓存（实测 4/5 命中，每题 2 秒就返回），
+// 那种样本量不出生成速度。
+const cases = cfg.cases.slice(OFF, OFF + N);
 
 console.log(`跑 ${cases.length} 道（agent 模式，真实链路）· 题目集 ${SET}\n`);
-console.log('  题                                          plan  retrieve  assess   TTFT   生成   总');
+console.log('  题                                          plan  retrieve  assess   TTFT   生成   总'
+  + '   prefill  decode  tok/s  装入tok');
 
 const rows = [];
 for (const cs of cases) {
   const body = { question: cs.q, strategy: 'agent', model: MODEL_REF };
   const t0 = Date.now();
   let tPlan = 0, tRetr = 0, tAssess = 0, tFirst = 0, tDone = 0;
-  let ansChars = 0, nPlan = 0, nRetr = 0, nAssess = 0;
+  let ansChars = 0, thinkChars = 0, nPlan = 0, nRetr = 0, nAssess = 0;
+  let stats = null;          // 注意：**别叫 st** —— 下面 const st = openStream() 会遮蔽它
   try {
     const st = await c.openStream('POST', '/api/chat/stream', body, { token: TOKEN });
     await readSse(st.response, (name, raw) => {
@@ -56,25 +61,41 @@ for (const cs of cases) {
         if (!tFirst) tFirst = now;
         // 逐块累加正文长度，用来算有效 tok/s
         ansChars += String(dec.t ?? dec.text ?? "").length;
-      } else if (name === 'thinking') { if (!tFirst) tFirst = now; }
+      } else if (name === 'thinking') {
+        if (!tFirst) tFirst = now;
+        thinkChars += String(dec.t ?? '').length;   // 思考也占 decode 时间
+      }
+      else if (name === 'stats') { stats = dec; }    // 模型侧计时（prefill / decode 分开）
       else if (name === 'done') { tDone = now; }
     });
   } catch (e) {
     console.log(`  ✗ ${String(e.message || e).slice(0, 60)}`);
     continue;
   }
-  const row = { q: cs.q, tPlan, tRetr, tAssess, tFirst, tDone, ansChars, nPlan, nRetr, nAssess };
+  const row = { q: cs.q, tPlan, tRetr, tAssess, tFirst, tDone, ansChars, thinkChars, nPlan, nRetr, nAssess, stats };
   rows.push(row);
   const seg = (a, b) => (b && a ? `${((b - a) / 1000).toFixed(1)}s` : '—');
   console.log(`  ${cs.q.slice(0, 40).padEnd(42)}${String(tPlan / 1000 || 0).slice(0, 5).padStart(5)}s`
     + `${seg(tPlan, tRetr).padStart(9)}${seg(tRetr, tAssess).padStart(8)}`
     + `${(tFirst / 1000).toFixed(1).padStart(7)}s${seg(tFirst, tDone).padStart(8)}`
-    + `${(tDone / 1000).toFixed(1).padStart(7)}s`);
+    + `${(tDone / 1000).toFixed(1).padStart(7)}s`
+    + (stats ? `${(stats.promptMs / 1000).toFixed(1).padStart(9)}s`
+          + `${(stats.evalMs / 1000).toFixed(1).padStart(7)}s`
+          + `${String(stats.tokPerSec).padStart(7)}`
+          + `${String(stats.promptTokens).padStart(9)}`
+        : '        —       —       —         —'));
 }
 
 if (!rows.length) { console.log('\n没有跑成功的样本'); process.exit(1); }
+const cached = rows.filter((r) => !r.stats);
+const live = rows.filter((r) => r.stats);
+if (cached.length) {
+  console.log('\n  ⚠ ' + cached.length + '/' + rows.length + ' 题命中**答案缓存**（没走模型，量不出速度）'
+    + ' —— 换 --offset 错开题目');
+}
+const base = live.length ? live : rows;
 const med = (f) => {
-  const v = rows.map(f).filter((x) => x > 0).sort((a, b) => a - b);
+  const v = base.map(f).filter((x) => x > 0).sort((a, b) => a - b);
   return v.length ? v[Math.floor(v.length / 2)] : 0;
 };
 const s = (ms) => (ms / 1000).toFixed(1) + 's';
@@ -85,6 +106,29 @@ console.log(`  评估      ${s(med((r) => r.tAssess - r.tRetr))}   （${rows[0].
 console.log(`  **TTFT**  ${s(med((r) => r.tFirst))}   ← 用户感知最强的那个数`);
 console.log(`  生成      ${s(med((r) => r.tDone - r.tFirst))}`);
 console.log(`  总计      ${s(med((r) => r.tDone))}`);
+
+const withSt = rows.filter((r) => r.stats);
+if (withSt.length) {
+  const m = (f) => {
+    const v = withSt.map(f).filter((x) => x > 0).sort((a, b) => a - b);
+    return v.length ? v[Math.floor(v.length / 2)] : 0;
+  };
+  const pt = m((r) => r.stats.promptTokens), pm = m((r) => r.stats.promptMs);
+  const et = m((r) => r.stats.evalTokens), em = m((r) => r.stats.evalMs);
+  console.log('\n—— 模型侧（来自 Ollama 末帧的计时，n=' + withSt.length + '）——');
+  console.log(`  **prefill**  ${s(pm)}　装机 ${pt} token ⇒ **${(pt / (pm / 1000)).toFixed(0)} token/秒**（并行，随装入量涨）`);
+  console.log(`  **decode**   ${s(em)}　生成 ${et} token ⇒ **${(et / (em / 1000)).toFixed(1)} token/秒**（串行，随回答长度涨）`);
+  console.log(`  模型侧合计   ${s(m((r) => r.stats.promptMs + r.stats.evalMs))}`
+    + `　加载 ${s(m((r) => r.stats.loadMs))}（换模型后第一次会很大）`);
+  const ac = m((r) => r.ansChars), tc = m((r) => r.thinkChars);
+  const per = (c) => Math.round(c * et / Math.max(1, ac + tc));
+  console.log('\n—— decode 里花在哪 ——');
+  console.log(`  正文 ${ac} 字 ≈ ${per(ac)} token　思考 ${tc} 字 ≈ ${per(tc)} token`
+    + `　⇒ 思考约占 **${Math.round(100 * tc / Math.max(1, ac + tc))}%**`);
+
+  console.log('\n  读法：**prefill 大 ⇒ 少装资料；decode 是瓶颈 ⇒ 只能少写**。'
+    + '两者混在"TTFT"里就分不出来。');
+}
 const chars = med((r) => r.ansChars);
 const gen = med((r) => r.tDone - r.tFirst);
 console.log(`\n  回答正文中位 ${chars} 字；生成阶段 ${s(gen)} ⇒ 约 **${(chars / (gen / 1000)).toFixed(0)} 字/秒**`);

@@ -146,7 +146,10 @@ def score(bench_name, model, paths=None, quiet=False):
         print(f"\n  没通过的 {len(bad)} 题：")
         for p in bad:
             need = judges.PASS[p["kind"]]
-            why = "、".join(f"{k}={p['rows'][0].get(k)}" for k in need if not p["rows"][0].get(k))
+            # **None 是"不适用"，不算失败** —— 这里要与 passes() 同一套语义，
+            # 否则显示出来的失败原因会包含根本没判的那条（第一版就错在这里）。
+            why = "、".join(f"{k}={p['rows'][0].get(k)}" for k in need
+                            if p["rows"][0].get(k) is not None and not p["rows"][0].get(k))
             print(f"    ❌ [{p['kind']}] {p['q'][:30]}　（{why or '多轮不一致'}）")
             head = (p["answer"] or "").replace("\n", " ")[:86]
             print(f"       答：{head or p['error'] or '(空)'}")
