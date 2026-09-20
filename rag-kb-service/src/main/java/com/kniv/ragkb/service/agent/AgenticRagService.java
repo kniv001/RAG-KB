@@ -94,6 +94,38 @@ public class AgenticRagService {
      * <p>标注要求写得这么硬，是因为这是这套系统唯一的信任边界：
      * 用户必须一眼分得清哪句来自自己的资料、哪句是模型的通用知识。
      */
+    /**
+     * **给思考一个会终止的形状** —— 拼在 {@code ANSWER_SYSTEM} 末尾（默认关，见
+     * {@code RagProperties.Agent#shapeThinking}）。
+     *
+     * <p>依据：decode 里 79~87% 的 token 是思考，而思考与正文**在同一条 decode 流里串行产生**。
+     * 但回答路径的 {@code think} 不能关（{@code think:false} 会把推理转进正文污染输出）。
+     * 所以只能约束**形状**：条目化 + 一个终止标记，写完就进正文。
+     *
+     * <p>为什么是形状而不是"请简短思考"：这条线上两次验证过 ——
+     * 摘要的「变化式」和 plan/assess 的结构化输出，**形状本身就是约束**，祈使句弱得多。
+     *
+     * <p>注意这里的措辞在描述**思考该长什么样**，不是在替用户规定答案格式；
+     * 三段式的回答要求不受影响。
+     */
+    private static final String THINK_SHAPE = """
+
+            【关于思考过程】
+            推理请写成**有编号的短清单**，最多 4 条、每条不超过 20 字，只写「用哪几块资料、结论是什么」。
+            写完第 4 条（或更早想清楚时）**立刻换行开始写正文**，不要再展开、不要复述资料原文、
+            不要自我辩论。清单里的编号沿用正文的引用编号即可。
+            """;
+
+    /** 回答用的系统提示：开关打开时拼上「思考形状」那一段。
+     *
+     *  <p>**三处必须都走这里**（发消息 + 两处预算估算）——
+     *  只改发消息那处的话预算会低估，而低估的后果是提示词顶到窗口悬崖，
+     *  Ollama 会把开头（也就是系统提示）整个丢掉。
+     */
+    private String answerSystem() {
+        return props.getAgent().isShapeThinking() ? ANSWER_SYSTEM + THINK_SHAPE : ANSWER_SYSTEM;
+    }
+
     private static final String ANSWER_SYSTEM = """
             你是个人知识库助手。**先判断问题属于哪一类**，再按下面对应的方式回答：
 
@@ -445,7 +477,7 @@ public class AgenticRagService {
 
         int reserve = props.getAgent().getGenerationReserveTokens();
         int budget = Math.max(1024,
-                props.getAgent().getPromptWindowTokens() - reserve - PromptBudget.estimateTokens(ANSWER_SYSTEM));
+                props.getAgent().getPromptWindowTokens() - reserve - PromptBudget.estimateTokens(answerSystem()));
         List<String> ctxTexts = new ArrayList<>(contexts.size());
         for (ChunkHit h : contexts) {
             ctxTexts.add(h.getContent());
@@ -559,9 +591,9 @@ public class AgenticRagService {
                 hasExcerpt ? historyExcerpt.length() : 0,
                 hasSummary ? convSummary.length() : 0,
                 history == null ? 0 : history.size(),
-                usedTokens, budget + reserve + PromptBudget.estimateTokens(ANSWER_SYSTEM),
+                usedTokens, budget + reserve + PromptBudget.estimateTokens(answerSystem()),
                 Math.round(100.0 * usedTokens / Math.max(1, budget + reserve
-                        + PromptBudget.estimateTokens(ANSWER_SYSTEM))));
+                        + PromptBudget.estimateTokens(answerSystem()))));
 
         // ---- 回答缓存 ----
         // 键里含「上下文哈希」与「历史哈希」：资料改了或对话历史变了，键就变，
@@ -587,7 +619,10 @@ public class AgenticRagService {
         }
         String cacheKey = CacheService.answerKey(question,
                 CacheService.contextHash(contents), CacheService.historyHash(historyLines),
-                ref.providerId(), ref.model(), TEMPERATURE);
+                ref.providerId(), ref.model(), TEMPERATURE,
+                // 系统提示的哈希进键 —— 改提示词（含"思考形状"这类开关）自动失效，
+                // 而不是继续拿旧提示词跑出来的答案。见 CacheService.answerKey。
+                CacheService.hash(answerSystem()));
 
         CachedAnswer hit = cache.getAnswer(cacheKey);
         if (hit != null && hit.getAnswer() != null && !hit.getAnswer().isBlank()) {
@@ -599,7 +634,7 @@ public class AgenticRagService {
         }
 
         List<ChatMessage> messages = new ArrayList<>();
-        messages.add(ChatMessage.system(ANSWER_SYSTEM));
+        messages.add(ChatMessage.system(answerSystem()));
         // 历史放在资料之前：事实依据仍来自资料，历史只用来理解指代
         if (history != null) {
             messages.addAll(history);

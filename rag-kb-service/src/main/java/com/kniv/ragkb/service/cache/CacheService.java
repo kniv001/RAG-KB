@@ -81,9 +81,26 @@ public class CacheService {
                 ? "" : hash(historyLines.toArray(new String[0]));
     }
 
+    /**
+     * 回答缓存键。
+     *
+     * <p><b>{@code promptHash} 必须进键</b>：原来只算 question / 资料 / 历史 / 模型 / 温度，
+     * **系统提示不在里面** —— 于是改提示词之后，同一批问题照样命中**用旧提示词跑出来的**答案。
+     * 后果有两层：
+     * <ol>
+     *   <li>生产上：改了提示词，老问题的行为不会变</li>
+     *   <li>实验上：**任何提示词 A/B 都做不了** —— 第二臂全部命中第一臂的结果</li>
+     * </ol>
+     * 这与同一天踩到的「换解析器不会让解析缓存失效」（`cache_parses`）是同一类坑。
+     *
+     * <p>这里**不写手动版本号，而是算实际提示词的哈希** —— 手动的要靠人记得加，
+     * 而"记得加"正是这类坑的成因；哈希则是改了就自动失效，包括开关切换（如思考形状）。
+     */
     public static String answerKey(String question, String ctxHash, String histHash,
-                                   String provider, String model, double temperature) {
-        return hash(question, ctxHash, histHash, provider, model, String.valueOf(temperature));
+                                   String provider, String model, double temperature,
+                                   String promptHash) {
+        return hash(question, ctxHash, histHash, provider, model, String.valueOf(temperature),
+                promptHash);
     }
 
     // ---------------- 向量 ----------------
