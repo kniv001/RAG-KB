@@ -130,6 +130,9 @@ ragkb:
       # 思考的大头是逐条扫描召回块（15 段 ≈ 700 token decode），
       # 而语境行本来就在库里、只差没给模型 —— 代价是 prefill（快 50 倍）。
       ctx-in-prompt: ${KB_CTX_IN_PROMPT:false}
+      # 两段式：第一段用 format 语法约束把"想"挤进固定 schema（关思考），
+      # 第二段照分析直接写。语法约束是唯一能截断"换措辞说十几遍"那个循环的东西。
+      two-stage: ${KB_TWO_STAGE:false}
       # 检索不到资料时仍让模型作答：先说明知识库没有、再用通用知识回答并标注清楚。
       # 关掉则退回「不调模型、直接回一句资料中没有相关内容」，秒回但毫无帮助。
       answer-without-context: true

@@ -116,6 +116,20 @@ public class AgenticRagService {
             不要自我辩论。清单里的编号沿用正文的引用编号即可。
             """;
 
+    /** 回答路径的开关指纹。
+     *
+     *  <p>**必须进缓存键**：这几个开关都会改变"同一问题得到什么答案"，却都不改提示词文本
+     *  （或只改用户消息），于是它们共用缓存条目 —— 表现是"开了开关但行为没变"，
+     *  而且任何 A/B 都做不了（第二臂全命中第一臂）。
+     *  这与「换解析器不会让解析缓存失效」「改提示词不会让答案缓存失效」是同一类坑，
+     *  一天之内第三次了；所以这次不写手动版本号，直接**把开关状态算进键**。
+     */
+    private String answerPathTag() {
+        return "2s=" + props.getAgent().isTwoStage()
+                + ",ctx=" + props.getAgent().isCtxInPrompt()
+                + ",shape=" + props.getAgent().isShapeThinking();
+    }
+
     /** 回答用的系统提示：开关打开时拼上「思考形状」那一段。
      *
      *  <p>**三处必须都走这里**（发消息 + 两处预算估算）——
@@ -180,6 +194,39 @@ public class AgenticRagService {
     /** 评估输出的形状。只强制 enough，因为它是唯一被程序读取的字段。 */
     private static final String ASSESS_SCHEMA = """
             {"type":"object","properties":{"enough":{"type":"boolean"},"reason":{"type":"string"},"missing":{"type":"string"}},"required":["enough"]}""";
+
+    /**
+     * **两段式的第一段**：把「想」挤进固定 schema。
+     *
+     * <p>为什么需要它（2026-09-20 直接读思考原文得到的证据）：回答路径的 decode 里
+     * 84~86% 是思考，而思考的绝大部分是**同一件事换措辞说十几遍** ——
+     * 最极端那题（「用一句话解释什么是限流」）：思考 3598 字 / 正文 58 字 = **62 倍**，
+     * 里面是同一句定义的反复微调（"或者"↔"或"、有没有"一旦"、有没有 `[1][2]`）。
+     *
+     * <p>**所以逐字指标全都测不到它**（shingle 重合只有 2~19%，因为每遍用词都不同），
+     * 而**形状约束也拦不住**（实测"最多 4 条"只压了 14% —— 它只是给每轮换个标签继续改）。
+     *
+     * <p>唯一能截断这个循环的是**语法约束**：{@code format} 下模型只能往固定格子里填，
+     * **没有反复改措辞的余地**。这就是 plan/assess 已经验证过的机制（51.5s → 0.94s）。
+     */
+    private static final String ANALYSIS_PROMPT = """
+            你是知识库问答的**分析器**。只做分析，**不要写回答**。
+
+            1. 判断问题属于【甲】【乙】【丙】哪一类，以【参考资料】为准。
+            2. 定出回答要点：每条一句话（不超过 30 字），**不要摘抄资料原文**，只写结论。
+            3. 列出这些要点用到的资料编号。
+            4. 若是【丙】，在 note 里写库里确实覆盖的相关方向。
+
+            只输出 JSON，不要解释。""";
+
+    /** 第一段的形状。**它是硬约束** —— 反复改措辞在这种形状下写不出来。 */
+    private static final String ANALYSIS_SCHEMA = """
+            {"type":"object","properties":{
+              "cls":{"type":"string","enum":["甲","乙","丙"]},
+              "points":{"type":"array","items":{"type":"string"}},
+              "srcs":{"type":"array","items":{"type":"integer"}},
+              "note":{"type":"string"}},
+             "required":["cls","points"]}""";
 
     private static final double TEMPERATURE = 0.2;
 
@@ -376,6 +423,37 @@ public class AgenticRagService {
         return providers.chat(ref,
                 List.of(ChatMessage.system(system), ChatMessage.user(user)),
                 temperature).content();
+    }
+
+    /**
+     * 把第一段的分析渲染成给第二段看的一段话。
+     *
+     * <p>措辞是**要求**而不是建议：这一段存在的全部意义就是让第二段**不必再想一遍**。
+     * 但要注意它仍然是提示词层面的要求 —— 第二段走的是普通流式调用（思考照开），
+     * 所以这版实验能测的是「**分析已完成，思考会不会自己变短**」；
+     * 若还长，下一步才是给第二段也关掉思考。
+     */
+    private String renderAnalysis(JsonNode node) {
+        StringBuilder sb = new StringBuilder("【已完成的分析（直接照着写，不要重复分析）】\n");
+        sb.append("类别：").append(node.path("cls").asText("乙")).append('\n');
+        JsonNode srcs = node.path("srcs");
+        if (srcs.isArray() && !srcs.isEmpty()) {
+            List<String> ids = new ArrayList<>();
+            srcs.forEach(s -> ids.add("[" + s.asInt() + "]"));
+            sb.append("用到的资料：").append(String.join(" ", ids)).append('\n');
+        }
+        sb.append("回答要点：\n");
+        int i = 1;
+        for (JsonNode p : node.path("points")) {
+            sb.append(i++).append(". ").append(p.asText()).append('\n');
+        }
+        String note = node.path("note").asText("");
+        if (!note.isBlank()) {
+            sb.append("补充（若库里没有相关资料，用它点出确实覆盖的方向）：").append(note).append('\n');
+        }
+        sb.append("\n要求：**直接依据以上要点写回答**，不要再分析、不要复述资料原文、"
+                + "不要反复修改措辞，也不要引用上面没列出的编号。");
+        return sb.toString();
     }
 
     private List<String> plan(ProviderRegistry.Ref ref, String question, String missing,
@@ -640,7 +718,7 @@ public class AgenticRagService {
                 ref.providerId(), ref.model(), TEMPERATURE,
                 // 系统提示的哈希进键 —— 改提示词（含"思考形状"这类开关）自动失效，
                 // 而不是继续拿旧提示词跑出来的答案。见 CacheService.answerKey。
-                CacheService.hash(answerSystem()));
+                CacheService.hash(answerSystem() + "|" + answerPathTag()));
 
         CachedAnswer hit = cache.getAnswer(cacheKey);
         if (hit != null && hit.getAnswer() != null && !hit.getAnswer().isBlank()) {
@@ -656,6 +734,29 @@ public class AgenticRagService {
         // 历史放在资料之前：事实依据仍来自资料，历史只用来理解指代
         if (history != null) {
             messages.addAll(history);
+        }
+        // ---- 两段式：先把「想」挤进固定 schema，再写正文 ----
+        //
+        // 依据见 ANALYSIS_PROMPT 的注释：思考的大头是**同一件事换措辞说十几遍**，
+        // 而语法约束是唯一能截断它的东西。第一段用 `json()`（关思考 + format），
+        // 它的产物由代码原样拼进第二段 —— 模型不必再"想一遍"，也不必复述资料。
+        String planBlock = "";
+        if (props.getAgent().isTwoStage()) {
+            try {
+                String reply = json(ref, ANALYSIS_PROMPT, user.toString(), TEMPERATURE, ANALYSIS_SCHEMA);
+                JsonNode node = JsonExtract.parseObject(mapper, reply);
+                if (node != null && node.path("points").isArray() && !node.path("points").isEmpty()) {
+                    planBlock = renderAnalysis(node);
+                    log.debug("两段式·第一段产出：{} 字", planBlock.length());
+                } else {
+                    log.warn("两段式第一段没产出要点，退回单段：{}", truncate(reply));
+                }
+            } catch (Exception e) {
+                log.warn("两段式第一段失败，退回单段：{}", e.getMessage());
+            }
+            if (!planBlock.isEmpty()) {
+                user.append("\n\n").append(planBlock);
+            }
         }
         messages.add(ChatMessage.user(user.toString()));
 
