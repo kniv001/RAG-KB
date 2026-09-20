@@ -124,6 +124,48 @@ def judge_scored(question, snippet, topn=20, timeout=300):
     return (exp / tot) if tot > 0 else None
 
 
+CHOICE_FEWSHOT = (
+    "问：Redis 挂了重启后数据还在吗？\n片段：RDB 是某一时刻的全量快照，AOF 记录每一条写命令，重启时会自动载入。\n"
+    "这段与问题是什么关系？A=直接回答，B=提供背景，C=同主题但不回答，D=无关。\n答：A\n"
+    "问：Redis 挂了重启后数据还在吗？\n片段：RDB 与 AOF 各有优劣，选择取决于对数据完整性和性能的取舍。\n"
+    "这段与问题是什么关系？A=直接回答，B=提供背景，C=同主题但不回答，D=无关。\n答：B\n"
+    "问：Redis 挂了重启后数据还在吗？\n片段：AOF 文件重写是把进程内数据转化为写命令、同步到新 AOF 文件的过程。\n"
+    "这段与问题是什么关系？A=直接回答，B=提供背景，C=同主题但不回答，D=无关。\n答：C\n"
+    "问：Redis 挂了重启后数据还在吗？\n片段：Kubernetes 调度器先过滤节点再打分。\n"
+    "这段与问题是什么关系？A=直接回答，B=提供背景，C=同主题但不回答，D=无关。\n答：D\n")
+
+
+def judge_choice(question, snippet, topn=20, timeout=300):
+    """Choice 形态：四选一的**关系分类**（不是"程度"），读 A~D 四个 token 的分布。
+
+    为什么值得单独试：今天的二值 / 0~9 评分问的都是**程度**，模型给的是糊的中间值；
+    而抽检里唯一全对的那条（"这句讲的是 Redis 持久化吗"）是**离散分类**。
+    假设：离散关系分类行、连续程度不行。取分用加权（A=1, B=0.5, C=0.25, D=0）。
+    """
+    prompt = CHOICE_FEWSHOT + (
+        f"问：{question}\n片段：{snippet[:300]}\n"
+        "这段与问题是什么关系？A=直接回答，B=提供背景，C=同主题但不回答，D=无关。\n答：")
+    body = {"model": CHAT, "prompt": prompt, "raw": True, "stream": False, "think": False,
+            "logprobs": True, "top_logprobs": topn,
+            "options": {"temperature": 0, "num_predict": 1, "num_ctx": 4096}}
+    req = urllib.request.Request(OLLAMA + "/api/generate",
+                                 data=json.dumps(body).encode("utf-8"),
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        d = json.load(r)
+    lp = (d.get("logprobs") or [{}])[0].get("top_logprobs") or []
+    m = {}
+    for t in lp:
+        k = t["token"].strip().upper()
+        if k in ("A", "B", "C", "D"):
+            m[k] = max(m.get(k, float("-inf")), t["logprob"])
+    if not m:
+        return None
+    w = {k: math.exp(v) for k, v in m.items()}
+    tot = sum(w.values())
+    return (w.get("A", 0) * 1.0 + w.get("B", 0) * 0.5 + w.get("C", 0) * 0.25) / tot
+
+
 def sanity():
     items = [
         ("真", "RDB 是某一时刻的全量快照。这句讲的是 Redis 持久化吗？", True),
@@ -207,7 +249,12 @@ def rerank(topk_pool=16, take=12):
 
         rated = []
         for j in pool:
-            p = judge_scored(case["q"], bodies[j]) if SCORED else judge_relevance(case["q"], bodies[j])
+            if MODE == "choice":
+                p = judge_choice(case["q"], bodies[j])
+            elif SCORED:
+                p = judge_scored(case["q"], bodies[j])
+            else:
+                p = judge_relevance(case["q"], bodies[j])
             rated.append((p if p is not None else 0.0, j))
         rated.sort(key=lambda x: -x[0])
         r12 = {j for _, j in rated[:take]}
@@ -254,6 +301,8 @@ if __name__ == "__main__":
     if mode == "sanity":
         sanity()
     else:
-        SCORED = mode == "rerank-score"
-        print(f"精排形态：{'Score(0~9 期望)' if SCORED else 'Noul(是/否概率)'}\n")
+        MODE = {"rerank-score": "score", "rerank-choice": "choice"}.get(mode, "noul")
+        SCORED = MODE == "score"
+        print(f"精排形态：{{'noul': 'Noul(是/否概率)', 'score': 'Score(0~9 期望)', "
+              f"'choice': 'Choice(四选一关系)'}}[MODE]\n")
         rerank()
