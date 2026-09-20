@@ -89,6 +89,41 @@ def judge_relevance(question, snippet, topn=20, timeout=300):
     return (math.exp(a) / (math.exp(a) + math.exp(b))) if (a is not None and b is not None) else None
 
 
+SCORE_FEWSHOT = (
+    "问：Redis 挂了重启后数据还在吗？\n片段：RDB 是某一时刻的全量快照，AOF 记录每一条写命令，重启时会载入。\n"
+    "这段在多大程度上能回答上面的问题？0 表示完全不能，9 表示直接答上了。\n答：8\n"
+    "问：Redis 挂了重启后数据还在吗？\n片段：Kubernetes 调度器先过滤节点再打分。\n"
+    "这段在多大程度上能回答上面的问题？0 表示完全不能，9 表示直接答上了。\n答：0\n")
+
+
+def judge_scored(question, snippet, topn=20, timeout=300):
+    """Score 形态：首 token 是数字，读 0~9 的分布取期望 ⇒ 连续分。
+
+    比"是/否"细得多 —— 精排失败的一个原因就是二值太饱和（同一篇文档里问"相关吗"个个都相关）。
+    分布形状本身也是置信度：尖峰=确定，平坦=犹豫。
+    """
+    prompt = SCORE_FEWSHOT + (f"问：{question}\n片段：{snippet[:300]}\n"
+                             "这段在多大程度上能回答上面的问题？0 表示完全不能，9 表示直接答上了。\n答：")
+    body = {"model": CHAT, "prompt": prompt, "raw": True, "stream": False, "think": False,
+            "logprobs": True, "top_logprobs": topn,
+            "options": {"temperature": 0, "num_predict": 1, "num_ctx": 4096}}
+    req = urllib.request.Request(OLLAMA + "/api/generate",
+                                 data=json.dumps(body).encode("utf-8"),
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        d = json.load(r)
+    lp = (d.get("logprobs") or [{}])[0].get("top_logprobs") or []
+    m = {}
+    for t in lp:
+        for k in {t["token"], t["token"].strip()}:
+            m[k] = max(m.get(k, float("-inf")), t["logprob"])
+    tot = exp = 0.0
+    for dg in "0123456789":
+        if dg in m:
+            w = math.exp(m[dg]); tot += w; exp += int(dg) * w
+    return (exp / tot) if tot > 0 else None
+
+
 def sanity():
     items = [
         ("真", "RDB 是某一时刻的全量快照。这句讲的是 Redis 持久化吗？", True),
@@ -172,7 +207,7 @@ def rerank(topk_pool=16, take=12):
 
         rated = []
         for j in pool:
-            p = judge_relevance(case["q"], bodies[j])
+            p = judge_scored(case["q"], bodies[j]) if SCORED else judge_relevance(case["q"], bodies[j])
             rated.append((p if p is not None else 0.0, j))
         rated.sort(key=lambda x: -x[0])
         r12 = {j for _, j in rated[:take]}
@@ -216,4 +251,9 @@ if __name__ == "__main__":
     except Exception:
         pass
     mode = sys.argv[1] if len(sys.argv) > 1 else "sanity"
-    sanity() if mode == "sanity" else rerank()
+    if mode == "sanity":
+        sanity()
+    else:
+        SCORED = mode == "rerank-score"
+        print(f"精排形态：{'Score(0~9 期望)' if SCORED else 'Noul(是/否概率)'}\n")
+        rerank()
