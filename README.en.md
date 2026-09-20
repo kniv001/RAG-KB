@@ -83,6 +83,13 @@ java -jar rag-kb-web\target\rag-kb.jar
 > fails with "not recognized as a cmdlet". `~/.m2/settings.xml` points at an
 > Aliyun mirror (with the mirror id set to `central`, so existing local cache is reused).
 
+**Logs go to a file** (`logging.file.name: data/app.log`, 10 MB × 7 rotations) rather than
+relying on shell redirection: started with `Start-Process -WindowStyle Hidden`, stdout is
+simply dropped — and the WARN lines ("re-added a dropped entry", "a number may have lost a
+digit", "output is byte-identical to input (frozen)") **are the instruments**. Losing them
+means having none. (Hit on 2026-09-20: went to check whether a detector had ever fired and
+found the log file stopped two days earlier.)
+
 Web search is off by default; enable it with an environment variable:
 
 ```bash
@@ -289,8 +296,8 @@ Two entry points, and **text extraction takes a different route in each**:
 
 | Entry point | Accepts | Extraction |
 |---|---|---|
-| Upload | `.txt` `.md` `.markdown` `.pdf` `.docx` `.csv` `.json` `.html` `.htm` | Dispatched by extension: PDF→PDFBox, DOCX→POI, CSV→rows joined as "header \| value", JSON kept as-is, **HTML→tag stripping**, unknown extensions treated as plain text (no error — a `.log` or `.conf` should not be rejected). PDFBox and POI are heavyweight, so **they are only loaded when a file of that format actually shows up** |
-| Web fetch | any page | **Walks the DOM and emits Markdown** (`WebSearchService.toMarkdown`): h1–h6 → `#`…`######`, lists → `- `, tables → `\| `, fenced code blocks preserved |
+| Upload | `.txt` `.md` `.markdown` `.pdf` `.docx` `.csv` `.json` `.html` `.htm` | Dispatched by extension: PDF→PDFBox, DOCX→POI, CSV→rows joined as "header \| value", JSON kept as-is, **HTML→`HtmlToText`**, unknown extensions treated as plain text (no error — a `.log` or `.conf` should not be rejected). PDFBox and POI are heavyweight, so **they are only loaded when a file of that format actually shows up** |
+| Web fetch | any page | Picks `<main>` first, then the **same** `HtmlToText` the upload path uses: h1–h6 → `#`…`######`, lists → `- `, **tables linearized** (header bound into every row), fenced code blocks preserved |
 
 **Why fetching now emits Markdown** (landed 2026-09-17): it used to flatten the DOM with
 `main.text()`, which threw the heading hierarchy away on the spot — across 41 ingested
@@ -303,12 +310,25 @@ for free while extracting, not to reconstruct it afterwards.
 Result: the same blog post re-fetched came in at **7161 characters with 59 headings**. This
 only applies to newly fetched documents; older ones stay flattened.
 
-> **Known asymmetry**: uploaded `.html` still goes through tag stripping (`<[^>]+>` → space),
-> losing structure the same way — inconsistent with the fetch path. To close it, swap
-> `DocumentParser.fromHtml` for a DOM walk as well.
+> **The asymmetry is gone** (2026-09-20). Uploaded `.html` used to go through regex tag
+> stripping (`<[^>]+>` → space), which meant **nav and footer text all came through,
+> heading levels vanished, and tables were flattened into "column meaning implied by
+> position only"**. Measured with a synthetic page pushed through the real ingest path;
+> both paths now share `HtmlToText` (`service/parse/HtmlToText.java`) and every fix is
+> mechanical, no model involved:
+>
+> - strip `nav/footer/aside/form/…` by tag, plus `role=navigation|banner|contentinfo`
+> - emit `#` prefixes for headings — the prerequisite for carrying the *heading path*
+>   with each chunk (a **free** contextual embedding)
+> - **linearize tables**: `- 方案：计数器；突发流量：不支持；实现复杂度：低；典型场景：内部接口兜底`
+>   — a table's meaning lives in the **header↔cell relation**, and flattening throws
+>   exactly that away; binding the header into every row means a chunk **cut anywhere
+>   still keeps the column meaning**
+>
+> Verify with `node tools\ingest-shape-probe.mjs` (all three targets are now clean).
 
 **Indexing pipeline**: parse → chunk (next section) → **context line** → embed → store, with
-caching at every step — parsing is cached by **file content hash**, context lines by
+caching at every step — parsing is cached by **file content hash + `DocumentParser.VERSION`** (bump the version after changing the parser, or the same file keeps hitting its old parse), context lines by
 "document name + chunk text", and vectors by **text + model hash** (so a full reindex is nearly
 instant). All three cache keys include every parameter that affects the result, so stale data
 cannot come back.
@@ -399,7 +419,8 @@ material (up to 24 chunks) and recent history (up to 16 messages).
 | Older turns | Vector-recalled excerpts | See "Query ordering" below |
 | Summary | **One line per entry, each written as "was → now"** | Merged once per 6 messages |
 
-**How the summary is written — all three rules are measured** (`tools/summary-*.py`):
+**How the summary is written — every rule here is measured** (`tools/summary-*.py`,
+`tools/supersede-probe.py`, `tools/digit-survive-probe.py`):
 
 - **One line per entry, each shaped "was → now".** The point is not the arrow; the
   **shape itself is a completeness constraint**: forcing both sides to be filled in
@@ -411,12 +432,32 @@ material (up to 24 chunks) and recent history (up to 16 messages).
   times in a row, the survivor counts were `[7, 7, 2, 8, 2]` — when it collapses it
   loses **6 facts at once**, always the `— → now` ones. So on shrinkage it retries,
   up to three times, keeping the entry-richest attempt (a healthy merge needs one call).
-- **Numbers get a mechanical check.** The local 4B model replaces the last digit of
-  certain numbers with a colon (`600 → 60:`, `16384 → 1:16384`) — **value-specific,
-  deterministic, and unfixable by prompting**. After merging, every number in the
-  summary must be findable in the input; if not, it logs a warning (log only, the
-  text is left alone). Known gap: **isolated single-fact loss** (8 entries, one goes
-  missing) is invisible to that check.
+- **Add-only, never delete**: an old entry that no retry managed to place is **copied back
+  verbatim**. The placement test was already being computed; this turns it from a *score*
+  into a *patch*, at zero extra calls. Measured: last-round seed survival 4.5/8 → **8/8**.
+  **But it only saves short lists** — measured 2026-09-20: once the list reaches 18 entries
+  the model **does not drop anything at all** (`missing=0`), so the patch never fires.
+  The cost merely moved to a different axis (next bullet).
+- **Coverage edges are patched in code too, never asked of the model.** When a value is
+  overturned the model writes `分块粒度：— → 450` — the **old value is dropped every time**
+  (12/12), and saying so explicitly in the prompt changed nothing (still 12/12).
+  It is a **pure string operation** (the previous entry's right side is this entry's left
+  side); after patching, **12/12 land in "covered"**. Order matters: the patch must run
+  *before* add-only, or the same key gets both re-added and patched and ends up in the
+  list twice.
+- **Freeze detector**: output **byte-identical to input** ⇒ nothing new landed this round.
+  This is the **opposite** degradation from losing facts (with long lists, 2 of 5 rounds
+  showed "new information landed 0/2" while the entry count was exactly right); add-only
+  cannot fix it, and nothing else could see it. Known limit: only catches a *complete* freeze.
+- **Numbers get a mechanical check.** The local 4B model inserts a colon into numbers, and it
+  is **value-specific, deterministic, and unfixable by prompting**: measured 2026-09-20 under
+  q4 KV, `24576` was written as `2:4576` in **30/30** runs, while the other five numbers in
+  the very same input (`10240`/`16384`/`450`/`1024`/`20`) were **30/30 correct**. There is
+  more than one shape — both "last digit eaten" (`600 → 60:`) and "colon inserted after the
+  first digit" (`24576 → 2:4576`). After merging, every number in the summary must be
+  findable in the input; if not, it logs a warning (log only, the text is left alone):
+  **the detector catches it, the auto-repair is not enabled** (the existing repair rule was
+  verified against the "last digit" shape and does not fit this one).
 
 **Query ordering is the crux**: recall must happen *after* planning. The planner
 rewrites "what about that?" into a self-contained query, and only that key can
@@ -533,8 +574,41 @@ node tools\history-index-test.mjs       #      vector recall of older turns
 run them before and after any retrieval change):
 
 ```powershell
-python tools\recall-baseline-probe.py   # 15 single-hop questions: rank of the target chunk (baseline 15/15)
-python tools\hard-query-probe.py        # 15 hard questions: same targets, phrased the way people ask (baseline 14/15)
+python tools\ruler.py audit     # self-check first: corpus stamp / vector-cache freshness / every target resolves
+python tools\ruler.py gate      # five gates in one run (baselines below)
+python tools\ruler.py vocab     # vocabulary gap: are misses caused by wording that does not match the text?
+```
+
+**The ruler framework** (`tools/ruler.py`, the single evaluation entry point). Why it exists:
+every ruler used to be its own script, each handling psql's CRLF, its own unescaping, its own
+vector cache — and on 2026-09-20 the vector cache turned out to be **aligned by position**,
+so after the corpus was rebuilt **438 of 661 entries were silently misaligned**, dragging every
+metric down together and making it look like "this approach simply does not work".
+
+Now: **targets are anchored to content, not position** (case sets live in `tools/cases/*.json`
+and re-resolve themselves after a corpus rebuild — no more editing questions); the cache is
+keyed by a **corpus stamp**; **every number carries its ruler name and corpus stamp**.
+
+| Gate | Cases | Baseline (k=8 / k=12 / k=24) |
+|---|---|---|
+| `single-hop-15` | 15 | 100% |
+| `hard-query-15` | 15 | 87% / 93% |
+| `multihop-25` | 25 | **56% / 68% / 84%** (within-document) |
+| `xdoc-8` | 8 | 75% / 100% (**cross-document**, saturates at k=24) |
+| `selfretrieval-23` | 23 | rank-1 43%, top-10 83% |
+| `segmentation-10` | 10 windows | WindowDiff — production chunking **0.77**, point-based **0.32** (lower is better) |
+
+Single ruler: `python tools\ruler.py run multihop-25 --k 8,12,24 --cap same --source raw`
+(`--k` per-query depth, `--cap` how many slots, `--cap same` = take k and judge at k,
+`--source raw|planner` which queries to use, `--thresh` distance cutoff,
+`--mmr cos:0.90` redundancy filter, `--repeat 3`, `--pair` paired comparison with a sign test).
+Segmentation: `python tools\ruler.py seg` (self-check), `python tools\ruler.py seg --all`.
+
+**Ingest-shape check** (run after changing the parser; `--keep` keeps the probe document,
+otherwise it **deletes itself when done**):
+
+```powershell
+node tools\ingest-shape-probe.mjs      # one HTML page with nav/table/headings/code through the real ingest path
 ```
 
 **Long-context check** (run after changing the KV-cache quantization, the window, or the model;
