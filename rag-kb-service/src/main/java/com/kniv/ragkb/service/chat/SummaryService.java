@@ -266,6 +266,17 @@ public class SummaryService {
         }
 
         warnIfNumberCorrupted(best, (old == null ? "" : old) + "\n" + user);
+
+        // **冻结检测**：输出与输入**逐字相同** ⇒ 这一轮新信息一条都没落地。
+        //
+        // 为什么需要它：现有的告警只覆盖"条目变少"（丢事实）那一个方向。
+        // 而 2026-09-20 实测出**反方向**的退化 —— 列表长到 18 条时模型倾向照抄，
+        // 5 轮里有 2 轮「新信息落地 0/2」而条目数一条不差，所有已有判据都看不见。
+        // 只增不删治的是丢，治不了这个。
+        if (oldCount > 0 && best.size() == oldCount && best.equals(oldItems)) {
+            log.warn("摘要合并输出与输入逐字相同 —— 本轮新信息可能一条都没落地（冻结），片段：{}",
+                    clip(user.toString()));
+        }
         return String.join("\n", best);
     }
 

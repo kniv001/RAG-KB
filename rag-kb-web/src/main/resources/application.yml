@@ -357,6 +357,16 @@ management:
       show-details: always
 
 logging:
+  # **落盘，别只发控制台**：WARN 级的那几条正是"人眼仪器"——
+  # 「只增不删补回」「数字可能被吃掉末位」「合并三次都少于原有条目」。
+  # 控制台在 `Start-Process -WindowStyle Hidden` 启动时直接丢掉（2026-09-20 踩过：
+  # 想查判据响过没有，发现日志文件停在两天前）。
+  file:
+    name: data/app.log
+  logback:
+    rollingpolicy:
+      max-file-size: 10MB
+      max-history: 7
   level:
     root: INFO
     com.kniv.ragkb: DEBUG

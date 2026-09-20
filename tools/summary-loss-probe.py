@@ -61,6 +61,30 @@ SEED = """分块粒度：— → 600 字
 裁剪顺序：— → 摘要与召回片段共进退
 嵌入文本：— → 块文本前面拼一行语境行"""
 
+# **把初始列表垫到接近上限**（KB_SEED_PAD=n）：要问的只是"撞到 MAX_ITEMS=20 之后
+# 只增不删还保不保护"，这个条件可以直接造，不必手写十几轮对话。
+# 垫的是**本项目的真事实**（都是"没变化"那类 —— 正是模型最爱丢的），
+# 判据仍只盯原来那 8 个种子，所以垫了不影响读数。
+PAD = [
+    "云端仓库：— → 不暴露网址",
+    "分块方式：— → 按句子边界",
+    "PDF 解析：— → PDFBox",
+    "向量维度：— → 1024",
+    "检索融合：— → RRF",
+    "摘要写法：— → 一行一条",
+    "会话摘要：— → 变化式",
+    "传输加密：— → RSA+AES 混合",
+    "认证：— → 双令牌",
+    "KV 量化：— → q4_0",
+    "抓取：— → 输出 Markdown",
+    "主题树：— → 概览进提示词",
+]
+_pad_n = int(os.environ.get("KB_SEED_PAD", "0"))
+if _pad_n:
+    SEED = SEED + "\n" + "\n".join(PAD[:_pad_n])
+    print(f"（初始列表垫到 {len([x for x in SEED.split(chr(10)) if x.strip()])} 条，"
+          f"MAX_ITEMS=20）", flush=True)
+
 ROUNDS = [
     "用户：块大小 600 有点大，抽不出事实，改成 450 试试。\n"
     "助手：450 字边界会更碎，召回条数会变多，先在小范围试。\n"
@@ -182,13 +206,18 @@ def merge(old, fresh, arm):
         if best and len(best) >= len(old_items) and not missing:
             break
     if not best:
-        return old, []
+        return old, [], len(missing)
+    if os.environ.get("KB_DEBUG"):
+        print(f"    [调试] old_items={len(old_items)} best={len(best)} missing={len(missing)} "
+              f"best前2={best[:2]}", flush=True)
     appended = []
     if append_missing and missing:
         for o in missing:
             if not any(counterpart(o, it) for it in best) and len(best) + len(appended) < 20:
                 appended.append(o)
-    return "\n".join(best + appended), appended
+    # 多返一个 **missing 条数**：把「上限挡住了补回」与「本来就没丢」分开 ——
+    # 只看 appended 的话这两种情况长得一模一样（都是 0）。
+    return "\n".join(best + appended), appended, len(missing)
 
 
 def alive(items, joined):
@@ -235,12 +264,12 @@ def stale_count(items):
 def chain(arm):
     old, log = SEED, []
     for r, fresh in enumerate(ROUNDS, 1):
-        old, appended = merge(old, fresh, arm)
+        old, appended, nmiss = merge(old, fresh, arm)
         items = [x for x in old.split("\n") if x.strip()]
         joined = " ".join(items)
         landed = sum(1 for lits in UPDATES[r - 1] if any(l in joined for l in lits))
         log.append((r, alive(items, joined), len(items), dup_pairs(items),
-                    len(appended), stale_count(items), landed))
+                    len(appended), stale_count(items), landed, nmiss))
     return old, log
 
 
@@ -260,9 +289,10 @@ def main():
             t0 = time.time()
             final, log = chain(arm)
             print(f"  链{rep}（{time.time()-t0:.0f}s）")
-            for r, a, n, d, ap, st, ld in log:
+            for r, a, n, d, ap, st, ld, nm in log:
+                flag = "  ← 没位置了" if (nm > ap and ap == 0) else ""
                 print(f"    轮{r}  种子存活 {a}/8   新信息落地 {ld}/{len(UPDATES[r-1])}   "
-                      f"条目 {n:>2}   重复对 {d}   陈旧行 {st}   补回 {ap}")
+                      f"条目 {n:>2}   重复对 {d}   陈旧行 {st}   缺{nm}  补回 {ap}{flag}")
             if rep == 1:
                 print("    最终条目：")
                 for x in final.split("\n"):
