@@ -17,6 +17,8 @@
 接到真实链路的那半在 `multihop-live-probe.mjs` / `multihop-live-compare.py`。
 
 用法：python tools/multihop-probe.py [k1 k2 ...，默认 4 8 12 24]
+
+【已被 tools/ruler.py 取代】数字与 `python tools/ruler.py run multihop-25 --source raw --k 8,12,24 --cap same` 一致。留着是为了对照。
 """
 import io
 import json

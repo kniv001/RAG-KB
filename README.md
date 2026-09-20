@@ -431,9 +431,29 @@ node tools\history-index-test.mjs       #      旧轮次向量召回
 **检索质量基准**（不是自测，是对着标准答案量排名；改检索前后都该跑）：
 
 ```powershell
-python tools\recall-baseline-probe.py   # 单跳 15 题：目标块进 top-30 的名次（基线 15/15）
-python tools\hard-query-probe.py        # 难题 15 题：同一批靶子换成"人话问法"（基线 14/15）
+python tools\ruler.py audit     # 先自检：语料戳 / 向量缓存新鲜度 / 每个靶子能否解析
+python tools\ruler.py gate      # 四条门一起跑（基线见下表）
 ```
+
+**尺子框架**（`tools/ruler.py`，唯一的评测入口）。为什么要有它：以前每把尺子都是独立脚本，
+各自处理 psql 的 CRLF、各自反转义、各自读向量缓存 —— 2026-09-20 查出向量缓存**按位置对齐**、
+语料重建后 **661 条里 438 条静默错位**，让所有指标一起变低，看起来像"这条路本来就不行"。
+
+现在：**靶子锚内容不锚位置**（题目集在 `tools/cases/*.json`，语料重建后自动重解析，
+不用再改题目）；缓存在**语料戳**上对齐；**每个数字都带尺子名与语料戳**。
+
+| 门 | 题 | 基线（k=8 / k=12 / k=24） |
+|---|---|---|
+| `single-hop-15` | 15 | 100% |
+| `hard-query-15` | 15 | 87% / 93% |
+| `multihop-25` | 25 | **56% / 68% / 84%** |
+| `selfretrieval-23` | 23 | 排第一 43%、进 top-10 83% |
+| `segmentation-10` | 10 窗口 | WindowDiff —— 线上分块 **0.77**、指认式 **0.32**（越小越好） |
+
+单条尺子：`python tools\ruler.py run multihop-25 --k 8,12,24 --cap same --source raw`
+（`--k` 每条查询取几个、`--cap` 装几个名额、`--cap same` 取 k 看 k、`--source raw|planner` 用哪批查询、
+`--thresh` 距离门槛、`--mmr cos:0.90` 冗余过滤、`--repeat 3` 重复、`--pair` 配对比较给符号检验）。
+分段：`python tools\ruler.py seg`（自检）、`python tools\ruler.py seg --all`（评所有候选分段）。
 
 **长上下文体检**（改动 KV 量化档位 / 窗口 / 模型后跑，基线 6/6）：
 

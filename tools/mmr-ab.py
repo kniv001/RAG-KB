@@ -14,6 +14,8 @@
   · `cos`  —— 两块嵌入的余弦（≥ 阈值就踢）
   · `字面`  —— 两块正文的字符 bigram Jaccard（≥ 阈值就踢）
 用法：python tools/mmr-ab.py
+
+【已被 tools/ruler.py 取代】用 `--mmr cos:0.90`（或 lit:0.45）。
 """
 import io
 import json

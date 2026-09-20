@@ -18,6 +18,8 @@
   所以这里的数是**下界**。
 
 用法：python tools/recall-baseline-probe.py
+
+【已被 tools/ruler.py 取代】`python tools/ruler.py run single-hop-15 --source raw --k 8,24 --cap same`。
 """
 import json
 import os

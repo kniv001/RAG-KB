@@ -16,6 +16,8 @@ k=60 时 12/12 道题的靶子**全在池中**，缺的只是"把它们提到前
 提示词里不出现任何可抄的字面编号（今天实测：写了 `{"at": 3}` 就五次全答 3）。
 
 用法：python tools/rerank-probe.py [池子,默认60] [精排后取前几,默认12] [批大小,默认10]
+
+【历史探针】生成式 listwise 精排，结论已归档；精排这条线的收口见 tools/logprob-judge.py。
 """
 import io
 import json

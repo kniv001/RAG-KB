@@ -12,6 +12,8 @@
 （复刻路径：向量 + 每条查询 top-k + RRF，与 topk-ab 同一套，只是多一道门槛。）
 
 用法：python tools/threshold-ab.py [k，默认 8]
+
+【已被 tools/ruler.py 取代】用 `--thresh 0.60`。
 """
 import io
 import json

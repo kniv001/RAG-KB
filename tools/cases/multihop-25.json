@@ -1,0 +1,384 @@
+{
+ "schema": "ruler/cases@1",
+ "name": "multihop-25",
+ "kind": "retrieval",
+ "judge": "all-hit",
+ "note": "多跳检索集（第二版，2026-09-20 扩到 24 题）。判据：**全中率** —— 答案需要的块是否全部进 top-k。 靶子带 fp（正文前 20 字指纹）：改分块器/换语料后指纹对不上就该报错，而不是静默给 0。　靶子已改为锚内容（excerpt），seq 只作提示。",
+ "cases": [
+  {
+   "id": "mh01",
+   "doc": "高并发系统限流-漏桶算法和令牌桶算法 - 陶朱公Boy - 博客园.md",
+   "q": "接入层想限制单个 IP 每秒最多处理 2 个请求，同时允许短时间的突发，配置里要写哪几个参数？",
+   "targets": [
+    {
+     "excerpt": "场景2.3测试首先定义IP维度的限流区域：limit_req_zone$bina",
+     "seq_hint": 75
+    },
+    {
+     "excerpt": "limit_conn_status：配置被限流后返回的状态码，默认返回503；l",
+     "seq_hint": 63
+    }
+   ]
+  },
+  {
+   "id": "mh02",
+   "doc": "高并发系统限流-漏桶算法和令牌桶算法 - 陶朱公Boy - 博客园.md",
+   "q": "我配了每秒 2 个请求，为什么桶里最多能攒下 3 个？这个数是怎么算出来的？",
+   "targets": [
+    {
+     "excerpt": "桶计算时间窗口（1.5秒）=速率（2r/s）/桶容量(3)，也就是说在这个时间窗",
+     "seq_hint": 72
+    },
+    {
+     "excerpt": "为了方便测试设置速率为每秒2个请求，即固定平均速率是500毫秒一个请求。接着在要",
+     "seq_hint": 69
+    }
+   ]
+  },
+  {
+   "id": "mh03",
+   "doc": "高并发系统限流-漏桶算法和令牌桶算法 - 陶朱公Boy - 博客园.md",
+   "q": "不想引第三方限流库，接口级别的并发控制用 Java 自己怎么实现？要按时间窗统计又怎么做？",
+   "targets": [
+    {
+     "excerpt": "maxThreads：Tomcat能启动用来处理请求的最大线程数，如果请求处理量",
+     "seq_hint": 38
+    },
+    {
+     "excerpt": "}适合对业务无损的服务或者需要过载保护的服务进行限流，如抢购业务，超出了大小要么",
+     "seq_hint": 39
+    }
+   ]
+  },
+  {
+   "id": "mh04",
+   "doc": "高并发系统限流-漏桶算法和令牌桶算法 - 陶朱公Boy - 博客园.md",
+   "q": "同一个限流需求，用 Java 代码、用 Redis 脚本、用 Nginx 配置，文档里分别在哪一块讲？",
+   "targets": [
+    {
+     "excerpt": "maxThreads：Tomcat能启动用来处理请求的最大线程数，如果请求处理量",
+     "seq_hint": 38
+    },
+    {
+     "excerpt": "首先我们来使用redis+lua实现时间窗内某个接口的请求数限流，实现了该功能后",
+     "seq_hint": 49
+    },
+    {
+     "excerpt": "如果被限流了，则在error.log中会看到类似如下的内容：2016/06/08",
+     "seq_hint": 61
+    }
+   ]
+  },
+  {
+   "id": "mh05",
+   "doc": "高并发系统限流-漏桶算法和令牌桶算法 - 陶朱公Boy - 博客园.md",
+   "q": "我们的限流是按 IP 做的，如果接入层有好几台 Nginx，同一个 IP 的请求会被算成几份？怎么解决？",
+   "targets": [
+    {
+     "excerpt": "桶计算时间窗口（1.5秒）=速率（2r/s）/桶容量(3)，也就是说在这个时间窗",
+     "seq_hint": 81
+    },
+    {
+     "excerpt": "limit_conn_zone/limit_req_zone定义的内存不足，则后",
+     "seq_hint": 82
+    }
+   ]
+  },
+  {
+   "id": "mh06",
+   "doc": "高并发系统限流-漏桶算法和令牌桶算法 - 陶朱公Boy - 博客园.md",
+   "q": "漏桶和令牌桶，哪个允许突发？为什么两者实现一样效果却相反？",
+   "targets": [
+    {
+     "excerpt": "如果令牌不被消耗，或者被消耗的速度小于产生的速度，令牌就会不断地增多，直到把桶填",
+     "seq_hint": 23
+    },
+    {
+     "excerpt": "漏桶算法漏桶作为计量工具（TheLeakyBucketAlgorithmasaM",
+     "seq_hint": 36
+    }
+   ]
+  },
+  {
+   "id": "mh07",
+   "doc": "高并发系统限流-漏桶算法和令牌桶算法 - 陶朱公Boy - 博客园.md",
+   "q": "用 RateLimiter 时，为什么有时候第一次不等、紧接着的请求却要等一秒？",
+   "targets": [
+    {
+     "excerpt": "再看一个突发示例：RateLimiterlimiter=RateLimiter.",
+     "seq_hint": 43
+    },
+    {
+     "excerpt": "此处可以看到我们设置的桶容量为2（即允许的突发量），这是因为SmoothBurs",
+     "seq_hint": 46
+    }
+   ]
+  },
+  {
+   "id": "mh08",
+   "doc": "高并发系统限流-漏桶算法和令牌桶算法 - 陶朱公Boy - 博客园.md",
+   "q": "Nginx 自带的两个限流模块各管什么？一个管连接数、一个管请求速率，关键参数分别是什么？",
+   "targets": [
+    {
+     "excerpt": "对于Nginx接入层限流可以使用Nginx自带了两个模块：连接数限流模块ngx_",
+     "seq_hint": 56
+    },
+    {
+     "excerpt": "如果被限流了，则在error.log中会看到类似如下的内容：2016/06/08",
+     "seq_hint": 61
+    }
+   ]
+  },
+  {
+   "id": "mh09",
+   "doc": "高并发系统限流-漏桶算法和令牌桶算法 - 陶朱公Boy - 博客园.md",
+   "q": "被限流之后返回 503，怎么改成跳转到自己的错误页面？",
+   "targets": [
+    {
+     "excerpt": "桶计算时间窗口（1.5秒）=速率（2r/s）/桶容量(3)，也就是说在这个时间窗",
+     "seq_hint": 81
+    }
+   ]
+  },
+  {
+   "id": "mh10",
+   "doc": "高并发系统限流-漏桶算法和令牌桶算法 - 陶朱公Boy - 博客园.md",
+   "q": "最简单的那种计数器限流，在时间窗口边界上有什么漏洞？后来用什么办法补的？",
+   "targets": [
+    {
+     "excerpt": "publicbooleangrant(){longnow=getNowTime(",
+     "seq_hint": 27
+    },
+    {
+     "excerpt": "滑动窗口滑动窗口，又称rollingwindow。为了解决这个问题，我们引入了滑",
+     "seq_hint": 28
+    }
+   ]
+  },
+  {
+   "id": "mh11",
+   "doc": "高并发系统限流-漏桶算法和令牌桶算法 - 陶朱公Boy - 博客园.md",
+   "q": "单机限流、多机协同限流、入口层限流，这三层在文档里是分开讲的吗？各在哪？",
+   "targets": [
+    {
+     "excerpt": "两个算法实现可以一样，但是方向是相反的，对于相同的参数得到的限流效果是一样的。另",
+     "seq_hint": 37
+    },
+    {
+     "excerpt": "}Thread.sleep(1000L);for(inti=1;i<5;i++)",
+     "seq_hint": 48
+    },
+    {
+     "excerpt": "如果需要限流则返回0，否则返回1。使用时需要先定义两个共享字典（分别用来存放锁和",
+     "seq_hint": 55
+    }
+   ]
+  },
+  {
+   "id": "mh12",
+   "doc": "高并发系统限流-漏桶算法和令牌桶算法 - 陶朱公Boy - 博客园.md",
+   "q": "令牌桶里令牌按什么节奏补？CIR 和 Tc 是什么意思？",
+   "targets": [
+    {
+     "excerpt": "下面详细介绍令牌桶算法机制：当网络设备衡量流量是否超过额定带宽时，需要查看令牌桶",
+     "seq_hint": 8
+    },
+    {
+     "excerpt": "3、举例：将CIR设置为8000bit/s，那么就必须每秒将8000个令牌放入桶",
+     "seq_hint": 9
+    }
+   ]
+  },
+  {
+   "id": "mh13",
+   "doc": "Redis持久化之RDB&AOF - Margaery - 博客园.md",
+   "q": "Redis 重启时如果 RDB 和 AOF 同时开着，它会用哪个文件恢复？为什么这么选？",
+   "targets": [
+    {
+     "excerpt": "Redis没有专门的RDB文件载入命令，只要Redis服务器开启，就会检测RDB",
+     "seq_hint": 8
+    },
+    {
+     "excerpt": "AOF相对可靠，它和MySQL中bin.log、apache.log、zooke",
+     "seq_hint": 14
+    }
+   ]
+  },
+  {
+   "id": "mh14",
+   "doc": "Redis持久化之RDB&AOF - Margaery - 博客园.md",
+   "q": "bgsave 号称不阻塞，为什么数据集一大还是会卡顿一下？它靠什么保证快照的一致性？",
+   "targets": [
+    {
+     "excerpt": "bgsave命令不会阻塞服务器，而是通过派生出一个子进程，然后由子进程负责创建R",
+     "seq_hint": 6
+    },
+    {
+     "excerpt": "RDB操作借用copyonwrite机制进行写时复制，父进程fork一个子进程，",
+     "seq_hint": 7
+    }
+   ]
+  },
+  {
+   "id": "mh15",
+   "doc": "Redis持久化之RDB&AOF - Margaery - 博客园.md",
+   "q": "AOF 的刷盘策略有哪几种？最坏情况下会丢多少数据？",
+   "targets": [
+    {
+     "excerpt": "理由如下：Redis使用单线程响应命令，如果每次写AOF文件命令都直接追加到硬盘",
+     "seq_hint": 15
+    },
+    {
+     "excerpt": "事实上，每秒同步也是异步完成的，其效率也是非常高的，所差的是一旦系统出现宕机现象",
+     "seq_hint": 18
+    }
+   ]
+  },
+  {
+   "id": "mh16",
+   "doc": "Redis持久化之RDB&AOF - Margaery - 博客园.md",
+   "q": "生产环境里主库和从库分别该配哪种持久化？判断依据是什么？",
+   "targets": [
+    {
+     "excerpt": "可以通过配置文件来指定它们中的一种，或者同时使用它们(不建议同时使用)，或者全部",
+     "seq_hint": 21
+    },
+    {
+     "excerpt": "如果你的环境一切非常良好，且服务需要接收密集性的write操作，那么建议mast",
+     "seq_hint": 22
+    }
+   ]
+  },
+  {
+   "id": "mh17",
+   "doc": "Redis持久化原理 — RDB与AOF详细解释 - jstarseven - 博客园.md",
+   "q": "save 和 bgsave 有什么区别？阻塞具体发生在哪一步？",
+   "targets": [
+    {
+     "excerpt": "（同步数据到磁盘上）save命令执行一个同步操作，以RDB文件的方式保存所有数据",
+     "seq_hint": 2
+    },
+    {
+     "excerpt": "||IO类型|同步|异步||阻塞？|是|是（阻塞发生在fock()，通常非常快）",
+     "seq_hint": 3
+    }
+   ]
+  },
+  {
+   "id": "mh18",
+   "doc": "Redis持久化原理 — RDB与AOF详细解释 - jstarseven - 博客园.md",
+   "q": "appendfsync 三个取值分别意味着什么？最坏丢多少数据？哪个是默认？",
+   "targets": [
+    {
+     "excerpt": "TA磁盘只有几百TPS||everysec|每秒进行与fsync，最多丢失1秒数",
+     "seq_hint": 8
+    },
+    {
+     "excerpt": "c。使用默认的每秒fsync策略，Redis的性能依然很好(fsync是由后台线",
+     "seq_hint": 12
+    }
+   ]
+  },
+  {
+   "id": "mh19",
+   "doc": "Redis持久化原理 — RDB与AOF详细解释 - jstarseven - 博客园.md",
+   "q": "AOF 文件越来越大怎么办？什么条件会自动触发重写？",
+   "targets": [
+    {
+     "excerpt": "2.4则可以通过配置自动触发AOF重写。####AOF重写的作用-减少磁盘占用量",
+     "seq_hint": 9
+    },
+    {
+     "excerpt": "OF文件执行重写的最小尺寸||auto-aof-rewrite-percenta",
+     "seq_hint": 10
+    }
+   ]
+  },
+  {
+   "id": "mh20",
+   "doc": "Redis持久化原理 — RDB与AOF详细解释 - jstarseven - 博客园.md",
+   "q": "RDB 和 AOF 的启动优先级谁高？这个对比表里还列了哪些维度？",
+   "targets": [
+    {
+     "excerpt": "保证的最大延迟时间（latency）。##四、RDB和AOF的抉择###1.RD",
+     "seq_hint": 14
+    }
+   ]
+  },
+  {
+   "id": "mh21",
+   "doc": "Redis持久化原理 — RDB与AOF详细解释 - jstarseven - 博客园.md",
+   "q": "AOF 重写期间的新写命令会丢吗？重写是怎么切换文件的？",
+   "targets": [
+    {
+     "excerpt": "有的AOF文件也不会丢失。而一旦新AOF文件创建完毕，Redis就会从旧AOF文",
+     "seq_hint": 13
+    },
+    {
+     "excerpt": "riteaof命令进行重写。####AOF重写的流程###3.AOF相关配置``",
+     "seq_hint": 11
+    }
+   ]
+  },
+  {
+   "id": "mh22",
+   "doc": "Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md",
+   "q": "调度器把 Pod 放到节点上分哪两大步？每步各自的算法叫什么？",
+   "targets": [
+    {
+     "excerpt": "Predicate有一系列的算法可以使用：PodFitsResources：节点",
+     "seq_hint": 2
+    },
+    {
+     "excerpt": "ory使用率非常及接近，权重就越高，这个要和上边的一起使用，不可单独使用Imag",
+     "seq_hint": 3
+    }
+   ]
+  },
+  {
+   "id": "mh23",
+   "doc": "Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md",
+   "q": "想让 Pod 尽量落在某个节点但不强制，YAML 用哪个字段？如果那个节点根本不存在会怎样？",
+   "targets": [
+    {
+     "excerpt": "apiVersion:v1kind:Podmetadata:name:affin",
+     "seq_hint": 11
+    },
+    {
+     "excerpt": "##创建后，同样是落在了testcentos7节点上，虽然它更想落在kube-n",
+     "seq_hint": 14
+    }
+   ]
+  },
+  {
+   "id": "mh24",
+   "doc": "Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md",
+   "q": "节点亲和里的硬策略和软策略分别对应哪两个长字段名？行为差别是什么？",
+   "targets": [
+    {
+     "excerpt": "iredDuringSchedulingIgnoredDuringExecuti",
+     "seq_hint": 19
+    },
+    {
+     "excerpt": "-weight:1preference:matchExpressions:-ke",
+     "seq_hint": 16
+    }
+   ]
+  },
+  {
+   "id": "mh25",
+   "doc": "Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md",
+   "q": "怎么表达「这个 Pod 要和某个 Pod 待在一起」？它和「落在某类节点上」用的字段有什么不同？",
+   "targets": [
+    {
+     "excerpt": "apiVersion:v1kind:Podmetadata:name:pod-1",
+     "seq_hint": 18
+    },
+    {
+     "excerpt": "podAffinityTerm:labelSelector:matchExpre",
+     "seq_hint": 24
+    }
+   ]
+  }
+ ]
+}

@@ -27,3 +27,12 @@ tools/_*.sql
 # Python 探针的字节码缓存
 tools/__pycache__/
 __pycache__/
+tools/_chk.sql
+tools/_ruler_*.sql
+tools/_lj.sql
+tools/_tk.sql
+tools/_th.sql
+tools/_mmr.sql
+tools/_tq.sql
+tools/_mh.sql
+tools/_fresh.sql

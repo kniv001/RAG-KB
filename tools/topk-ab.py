@@ -12,6 +12,8 @@
 只是从更宽的池子里挑。RRF 的"多查询互相印证"也正是靠这个起作用。
 
 用法：python tools/topk-ab.py [k1 k2 ...，默认 8 12 16] [--cap 24]
+
+【已被 tools/ruler.py 取代】用 `python tools/ruler.py run <题目集> --k ... --cap ...`，旋钮更多且自带天花板列。
 """
 import io
 import json

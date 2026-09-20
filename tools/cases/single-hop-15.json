@@ -1,0 +1,219 @@
+{
+ "schema": "ruler/cases@1",
+ "name": "single-hop-15",
+ "kind": "retrieval",
+ "judge": "all-hit",
+ "note": "单跳基准：**自带词**的自然提问（15/15 是必然的，词面能对上）。靶子 = 该主题对应的那几篇文档。",
+ "cases": [
+  {
+   "id": "sh01",
+   "q": "HTTP/2 的多路复用是怎么回事？",
+   "targets": [
+    {
+     "doc_names": [
+      "浅析HTTP 2的多路复用 - zbs666 - 博客园.md",
+      "http系列--HTTP2.0新特性：二进制传输，多路复用，Haeder压缩，服务端push，QUIC协议 - sauc.md"
+     ]
+    }
+   ],
+   "topic": "HTTP/2 多路复用 头部压缩",
+   "cat": null
+  },
+  {
+   "id": "sh02",
+   "q": "Redis 的 RDB 和 AOF 有什么区别？",
+   "targets": [
+    {
+     "doc_names": [
+      "Redis两种持久化方式(RDB&AOF) - 坦荡 - 博客园.md",
+      "Redis持久化之RDB&AOF - Margaery - 博客园.md"
+     ]
+    }
+   ],
+   "topic": "Redis 持久化 RDB AOF",
+   "cat": null
+  },
+  {
+   "id": "sh03",
+   "q": "Kubernetes 是怎么调度 Pod 的？",
+   "targets": [
+    {
+     "doc_names": [
+      "Kubernetes Pod调度策略：节点亲和性与污点容忍 - DBLens数据库开发工具 - 博客园.md",
+      "Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md"
+     ]
+    }
+   ],
+   "topic": "Kubernetes Pod 调度 亲和性",
+   "cat": null
+  },
+  {
+   "id": "sh04",
+   "q": "Docker 的 namespace 和 cgroup 分别管什么？",
+   "targets": [
+    {
+     "doc_names": [
+      "docker容器网络配置 - 悬溺· - 博客园.md",
+      "docker容器网络 - 世界的尽头 - 博客园.md"
+     ]
+    }
+   ],
+   "topic": "Docker 容器网络 namespace",
+   "cat": null
+  },
+  {
+   "id": "sh05",
+   "q": "G1 垃圾回收器是怎么工作的？",
+   "targets": [
+    {
+     "doc_names": [
+      "JVM基础系列：G1垃圾回收器 - 梅晓煜 - 博客园.md",
+      "JVM垃圾回收器 ：G1 回收器的原理及调优 - FairyTaleTown - 博客园.md"
+     ]
+    }
+   ],
+   "topic": "JVM 垃圾回收 G1",
+   "cat": null
+  },
+  {
+   "id": "sh06",
+   "q": "Python 的 GIL 是什么？",
+   "targets": [
+    {
+     "doc_names": [
+      "Python全局解释器锁GIL机制 - 上好佳28 - 博客园.md",
+      "python全局解释器GIL锁(-死锁） - AlexEvans - 博客园.md"
+     ]
+    }
+   ],
+   "topic": "Python GIL 全局解释器锁",
+   "cat": null
+  },
+  {
+   "id": "sh07",
+   "q": "Rust 的所有权规则是什么？",
+   "targets": [
+    {
+     "doc_names": [
+      "总结一下 Rust 的所有权规则 - fengyujia - 博客园.md",
+      "Rust——所有权【四】 - 。思索 - 博客园.md"
+     ]
+    }
+   ],
+   "topic": "Rust 所有权 借用检查",
+   "cat": null
+  },
+  {
+   "id": "sh08",
+   "q": "布隆过滤器为什么会有误判？",
+   "targets": [
+    {
+     "doc_names": [
+      "什么是布隆过滤器，他的原理是什么，对于布隆过滤器的误判要怎么去处理 - 蒟蒻00 - 博客园.md",
+      "算法(3)---布隆过滤器原理 - 雨点的名字 - 博客园.md"
+     ]
+    }
+   ],
+   "topic": "布隆过滤器 原理 误判率",
+   "cat": null
+  },
+  {
+   "id": "sh09",
+   "q": "一致性哈希的虚拟节点解决什么问题？",
+   "targets": [
+    {
+     "doc_names": [
+      "一致性哈希算法——虚拟节点 - 甜菜波波 - 博客园.md",
+      "一致性哈希算法——虚拟节点 - 提拉没有米苏 - 博客园.md"
+     ]
+    }
+   ],
+   "topic": "一致性哈希 虚拟节点",
+   "cat": null
+  },
+  {
+   "id": "sh10",
+   "q": "模型量化里 int8 和 4bit 有什么区别？",
+   "targets": [
+    {
+     "doc_names": [
+      "深入浅出模型量化与QLoRA：从原理到实践，让大模型更轻更快 - wgwyanfs - 博客园.md",
+      "部署系列——神经网络INT8量化教程第一讲！ - 小kk_p - 博客园.md"
+     ]
+    }
+   ],
+   "topic": "模型量化 int8 4bit",
+   "cat": null
+  },
+  {
+   "id": "sh11",
+   "q": "DNS 递归解析的流程是怎样的？",
+   "targets": [
+    {
+     "doc_names": [
+      "dns解析过程 - 使用D - 博客园.md",
+      "DNS解析原理 递归 && 迭代 - Rogn - 博客园.md"
+     ]
+    }
+   ],
+   "topic": "DNS 递归解析 过程",
+   "cat": null
+  },
+  {
+   "id": "sh12",
+   "q": "MySQL 的 MVCC 是怎么实现事务隔离的？",
+   "targets": [
+    {
+     "doc_names": [
+      "mysql事务隔离级别及MVCC 原理 - 一只阿木木 - 博客园.md",
+      "mysql之事务隔离级别以及MVCC - 湫龙 - 博客园.md"
+     ]
+    }
+   ],
+   "topic": "MySQL 事务隔离级别 MVCC",
+   "cat": null
+  },
+  {
+   "id": "sh13",
+   "q": "向量数据库是怎么做检索的？",
+   "targets": [
+    {
+     "doc_names": [
+      "深入解析：人工智能基础架构与算力之5 向量数据库技术原理：支撑大模型语义检索的关键架构 - clnchanpin - 博.md",
+      "不懂向量数据库？一文讲透其原理与应用场景 - 狸奴算君 - 博客园.md"
+     ]
+    }
+   ],
+   "topic": "向量数据库 检索 原理",
+   "cat": null
+  },
+  {
+   "id": "sh14",
+   "q": "提示词工程里怎么处理上下文窗口？",
+   "targets": [
+    {
+     "doc_names": [
+      "从入门到精通：提示词工程（Prompt Engineering）实战指南 - blfbuaa - 博客园.md",
+      "实用指南：提示词工程方法及框架 - tlnshuju - 博客园.md"
+     ]
+    }
+   ],
+   "topic": "提示词工程 上下文 窗口",
+   "cat": null
+  },
+  {
+   "id": "sh15",
+   "q": "微服务的熔断和降级是什么？",
+   "targets": [
+    {
+     "doc_names": [
+      "浅谈微服务中的熔断,限流,降级 - 苹果芒 - 博客园.md",
+      "微服务熔断，降级 - 根仔 - 博客园.md"
+     ]
+    }
+   ],
+   "topic": "微服务 熔断 降级",
+   "cat": null
+  }
+ ]
+}

@@ -22,6 +22,8 @@
 用法：
   python tools/seg-ruler.py --selfcheck
   python tools/seg-ruler.py boundaries.json       # {"bounds": [1-based 段号...]}
+
+【判据已搬进 tools/ruler.py】用 `python tools/ruler.py seg [--all]`（判据逐字一致，自带语料戳）。
 """
 import io
 import json

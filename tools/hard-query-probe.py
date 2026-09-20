@@ -14,6 +14,8 @@
 判据：目标文档的块**进没进 top-30、排第几**。与自带词版本配对比较。
 
 用法：python tools/hard-query-probe.py
+
+【已被 tools/ruler.py 取代】`python tools/ruler.py run hard-query-15 --source raw --k 8,24 --cap same`。
 """
 import json
 import os

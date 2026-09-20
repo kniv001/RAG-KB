@@ -16,6 +16,8 @@
 两者的块数与长度分布基本不变，所以差异只能来自**边界位置**。
 
 用法：python tools/selfretrieval-ruler.py [topk，默认 10]
+
+【题目已进框架】`python tools/ruler.py run selfretrieval-23 --source raw --k 1,10 --cap same`；本文件仍是那套**重建/挪边界算法**的实现处。
 """
 import io
 import json
