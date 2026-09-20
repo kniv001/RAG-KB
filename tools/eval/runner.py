@@ -164,3 +164,15 @@ def run(bench_name, model, limit=0, repeat=1):
         paths.append(collect(bench_name, model, limit, tag))
         print()
     return score(bench_name, model, paths)
+
+
+def speed(model, n=5, bench="multihop-25"):
+    """**速度维度**：跑一次问答并给出分阶段耗时。
+
+    与质量基准共用 `--model` —— 这才是"小型测评平台"该有的样子：
+    **换一个模型，质量与速度都能量到**。分阶段耗时见 `latency-probe.mjs`。
+    """
+    import subprocess
+    cmd = ["node", os.path.join(HERE, "latency-probe.mjs"),
+           "--n", str(n), "--bench", bench, "--model", model]
+    return subprocess.run(cmd, cwd=os.path.dirname(TOOLS), check=False).returncode

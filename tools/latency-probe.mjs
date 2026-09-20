@@ -10,7 +10,8 @@
  *   · **TTFT**（首字延迟）= 从发出到第一个 answer/thinking 事件 —— 用户感知最强的那个数
  *   · 生成时长 = done − 首字；再除以回答字数就是**有效 tok/s**
  *
- * 用法：node tools/latency-probe.mjs [题数，默认 5] [题目集，默认 multihop-25]
+ * 用法：node tools/latency-probe.mjs --n 5 --bench multihop-25 --model qwen3:4b
+ *      也可以 python tools/eval.py speed --model qwen3:4b（测评平台的速度维度）
  */
 import fs from 'node:fs';
 import { makeClient, readSse } from './kb-client.mjs';
@@ -22,8 +23,14 @@ const login = await c.call('POST', '/api/auth/login',
   { username: cred.user, password: cred.password });
 const TOKEN = `Bearer ${login.body.data.accessToken}`;
 
-const N = parseInt(process.argv[2] || '5', 10);
-const SET = process.argv[3] || 'multihop-25';
+const arg = (k, d) => {
+  const i = process.argv.indexOf(`--${k}`);
+  return i >= 0 ? process.argv[i + 1] : d;
+};
+const N = parseInt(arg('n', process.argv[2] || '5'), 10);
+const SET = arg('bench', process.argv[3] || 'multihop-25');
+const MODEL = arg('model', 'qwen3:4b');
+const MODEL_REF = MODEL.includes('/') ? MODEL : `local/${MODEL}`;
 const cfg = JSON.parse(fs.readFileSync(`tools/cases/${SET}.json`, 'utf8'));
 const cases = cfg.cases.slice(0, N);
 
@@ -32,7 +39,7 @@ console.log('  题                                          plan  retrieve  asse
 
 const rows = [];
 for (const cs of cases) {
-  const body = { question: cs.q, strategy: 'agent', model: 'local/qwen3:4b' };
+  const body = { question: cs.q, strategy: 'agent', model: MODEL_REF };
   const t0 = Date.now();
   let tPlan = 0, tRetr = 0, tAssess = 0, tFirst = 0, tDone = 0;
   let ansChars = 0, nPlan = 0, nRetr = 0, nAssess = 0;

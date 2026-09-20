@@ -8,7 +8,10 @@
   python tools/eval.py score   answer-quality --model qwen3:4b   # 只判分（**改判据不用重跑模型**）
   python tools/eval.py run     answer-quality --model qwen3:4b   # 采集 + 判分
   python tools/eval.py run answer-quality --model qwen3:8b --repeat 2
+  python tools/eval.py speed   --model qwen3:4b --n 5             # 速度维度（分阶段耗时）
   python tools/eval.py compare answer-quality qwen3:4b qwen3:8b   # 对比两个模型的落盘结果
+
+**这个平台量两个维度，换一个模型两个都能量**：质量（`run`/`score`）与速度（`speed`）。
 
 **为什么单独一个模块**：换个模型要重跑的是这一套，不是检索那一套。
 报告带的是**模型名**（管线尺子带的是**语料戳**）—— 一条判死必须写清"用哪把尺子量的"，
@@ -83,6 +86,11 @@ def _flags(argv):
     return a
 
 
+def cmd_speed(argv):
+    a = _flags(argv)
+    runner.speed(a.get("model", "qwen3:4b"), int(a.get("n", 5) or 5), a.get("bench", "multihop-25"))
+
+
 def cmd_compare(argv):
     """对比两个模型在同一基准上的落盘结果 —— 逐题比，不跨题平均。"""
     import glob
@@ -135,6 +143,8 @@ def main():
             cmd_score(rest)
     elif cmd == "compare":
         cmd_compare(rest)
+    elif cmd == "speed":
+        cmd_speed(rest)
     else:
         raise SystemExit(f"不认识：{cmd}\n\n{__doc__}")
 

@@ -604,6 +604,42 @@ Single ruler: `python tools\ruler.py run multihop-25 --k 8,12,24 --cap same --so
 `--mmr cos:0.90` redundancy filter, `--repeat 3`, `--pair` paired comparison with a sign test).
 Segmentation: `python tools\ruler.py seg` (self-check), `python tools\ruler.py seg --all`.
 
+**Model evaluation** (`tools/eval.py`, kept **separate from the pipeline rulers above**).
+The split follows "what changed means re-run what": the pipeline rulers measure the
+**corpus and pipeline** (retrieval rank, segmentation) and carry a **corpus stamp**;
+this one measures **the model itself** (classification, citation discipline, honesty,
+speed) and carries a **model name**.
+
+```powershell
+python tools\eval.py ls                                    # list benches
+python tools\eval.py run answer-quality --model qwen3:4b    # collect + score
+python tools\eval.py score answer-quality --model qwen3:4b  # **score only** (tune judges without re-running the model)
+python tools\eval.py speed   --model qwen3:4b --n 5        # speed: per-stage timings
+python tools\eval.py compare answer-quality qwen3:4b qwen3:8b
+```
+
+**The platform measures two dimensions, and one `--model` switch moves both**:
+quality (`run` / `score`) and speed (`speed`). Speed baseline (qwen3:4b): 24.6s total
+= plan 1.1 + retrieve 0.1 + assess 1.8 + ~1.7 prefill before TTFT + **generate 19.4**;
+median answer 433 chars ⇒ 22 chars/s — **the model is already at line speed**, so the
+only big lever is answer length.
+
+The first bench, **`answer-quality`** (15 cases), judges exactly the three branches of
+`ANSWER_SYSTEM`, using **mechanical judges only — no judge model** (when the judge itself
+is unreliable its score means nothing: swapping in another model as a second annotator gave
+only 53% agreement):
+
+| Kind | Cases | Pass requires |
+|---|---|---|
+| `grounded` (branch 乙, sources exist) | 6 | has a citation + ids valid + **numbers grounded** + no label leak |
+| `ungrounded` (branch 丙, nothing in the KB) | 6 | declares the gap + marks the general-knowledge part + no label leak |
+| `chitchat` (branch 甲, unrelated) | 3 | **does not falsely claim the KB lacks it** + no label leak |
+
+The negative cases were verified by **co-occurrence within a chunk** — counting raw word
+occurrences is not enough ("事务" appears 191 times, all of them about MySQL).
+`None` in a judge means **not applicable** (e.g. "numbers grounded" on a question with no
+numbers) and is skipped, not failed.
+
 **Ingest-shape check** (run after changing the parser; `--keep` keeps the probe document,
 otherwise it **deletes itself when done**):
 

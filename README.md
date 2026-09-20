@@ -486,6 +486,35 @@ python tools\ruler.py vocab     # 词面缺口：召不回是不是因为"用词
 `--thresh` 距离门槛、`--mmr cos:0.90` 冗余过滤、`--repeat 3` 重复、`--pair` 配对比较给符号检验）。
 分段：`python tools\ruler.py seg`（自检）、`python tools\ruler.py seg --all`（评所有候选分段）。
 
+**模型测评**（`tools/eval.py`，与上面的**管线尺子分开**）。分工按「什么变了要重跑」划：
+管线尺子量**语料与管线**（检索排第几、分段准不准），报告带**语料戳**；
+这里量**模型本身**（分类判断、引用纪律、诚实性、速度），报告带**模型名**。
+
+```powershell
+python tools\eval.py ls                                    # 有哪些基准
+python tools\eval.py run answer-quality --model qwen3:4b    # 采集 + 判分
+python tools\eval.py score answer-quality --model qwen3:4b  # **只判分**（改判据不用重跑模型）
+python tools\eval.py speed   --model qwen3:4b --n 5        # 速度维度（分阶段耗时）
+python tools\eval.py compare answer-quality qwen3:4b qwen3:8b
+```
+
+**这个平台量两个维度，换一个模型两个都能量**：质量（`run` / `score`）与速度（`speed`）。
+速度的基线（qwen3:4b）：总计 24.6s = 规划 1.1 + 检索 0.1 + 评估 1.8 + TTFT 其余 ~1.7(prefill)
++ **生成 19.4**；回答中位 433 字 ⇒ 22 字/秒，**模型已满速**，唯一大杠杆是回答长度。
+
+首个基准 **`answer-quality`**（15 题）判的就是 `ANSWER_SYSTEM` 的那三段契约，
+**全用机械判据、不请裁判模型**（裁判本身不可靠时它给的分没有意义 —— 换模型当第二标注者
+同意率只有 53%）：
+
+| 题型 | 题 | 通过条件 |
+|---|---|---|
+| `grounded`（【乙】有资料） | 6 | 有引用 + 编号有效 + **数字有据** + 无标签泄漏 |
+| `ungrounded`（【丙】没资料） | 6 | 声明了没有 + 标注了通用知识 + 无标签泄漏 |
+| `chitchat`（【甲】无关） | 3 | **没误报「知识库没有」** + 无标签泄漏 |
+
+负样本核过**主题词在同一块里凑不齐**（不能只看单词出现次数 —— 「事务」出现 191 次全是 MySQL 的）。
+判据里 `None` 表示**不适用**（如没有数字的题上「数字有据」），要跳过，不是失败。
+
 **入库形状体检**（改解析器后跑；自带 `--keep` 可留档，默认**跑完自己删探针文档**）：
 
 ```powershell
