@@ -10,6 +10,7 @@
   python tools/ruler.py gate                  # 四条回归门一起跑
   python tools/ruler.py seg                   # 分段尺子自检
   python tools/ruler.py seg --all             # 评所有候选分段（tools/_bounds_*.json）
+  python tools/ruler.py vocab                 # 词面缺口：召不回是不是因为"用词对不上"
 
 `run` 的旋钮（＝历史上逐个试过的那些）：
   --k 8,12,16        每条查询取几个
@@ -227,6 +228,64 @@ def cmd_seg(argv):
         show(os.path.basename(f)[8:-5], b.get("bounds", b))
 
 
+def cmd_vocab(argv):
+    """**词面缺口**：召不回来的那些题，是不是因为问句与材料"用词对不上"？
+
+    为什么量这个：「词语层指向」那条从 09-17 起挂着状态「存活候选（等触发场景）」，
+    触发条件写的是**词面不匹配导致召不回**。而"等"不是一个动作 —— 这个条件是能量的：
+
+      对每道题，算 **问句的字符 bigram 有多大比例出现在靶子块里**（词面覆盖率），
+      再看**候选池天花板**（靶子全在池里 = 这题可达）随覆盖率怎么变。
+
+    · 覆盖率低处天花板明显更低 ⇒ **触发条件成立**，该去把「词语层指向」做起来
+    · 各处都一样 ⇒ 触发的不是词面，那条该改成有依据的休眠
+
+    用**天花板**而不是最终全中率：天花板不受"装几个名额"影响，量的纯粹是"找不找得到"。
+    """
+    import collections
+
+    from ruler import retr
+
+    C = corpus.load()
+    names = argv if argv else ["single-hop-15", "hard-query-15", "multihop-25", "xdoc-8"]
+    buckets = [(0.0, .2), (.2, .4), (.4, .6), (.6, .8), (.8, 1.01)]
+    tally = collections.defaultdict(lambda: [0, 0])
+    print(f"—— 词面缺口 · {C.line()} ——")
+    for nm in names:
+        cs = cases.load(nm, C, strict=False)
+        picked, pools, _ = retr.vec(C, cs, k=24, cap=24, query_source="raw")
+        for c, pool in zip(cs.cases, pools):
+            qb = _bigrams(c["q"])
+            if not qb:
+                continue
+            best = 0.0
+            for t in c["_targets"]:
+                for j in t.group:
+                    b = _bigrams(C.body[j])
+                    best = max(best, len(qb & b) / len(qb))
+            reached = all(any(j in pool for j in t.group) for t in c["_targets"])
+            for lo, hi in buckets:
+                if lo <= best < hi:
+                    tally[(lo, hi)][0] += reached
+                    tally[(lo, hi)][1] += 1
+                    break
+    print(f"\n  {'问句词面覆盖率':>14}{'可达':>12}{'题数':>7}")
+    for lo, hi in buckets:
+        ok, n = tally[(lo, hi)]
+        if n:
+            print(f"  {f'{lo:.1f}~{hi:.1f}':>14}{f'{100*ok/n:.0f}%':>12}{n:>7}")
+        else:
+            print(f"  {f'{lo:.1f}~{hi:.1f}':>14}{'—':>12}{0:>7}")
+    print("\n  读法：覆盖率单调地抬可达 ⇒ 词面是闸门（触发成立）；"
+          "各档差不多 ⇒ 卡的不是词面，那条改成休眠")
+
+
+def _bigrams(s):
+    import re
+    s = re.sub(r"\s+", "", s)
+    return {s[i:i + 2] for i in range(len(s) - 1)}
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
@@ -248,6 +307,8 @@ def main():
         cmd_gate()
     elif cmd == "seg":
         cmd_seg(rest)
+    elif cmd == "vocab":
+        cmd_vocab(rest)
     else:
         raise SystemExit(f"不认识：{cmd}\n\n{__doc__}")
 
