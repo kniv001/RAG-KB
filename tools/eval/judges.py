@@ -78,7 +78,11 @@ def numbers_grounded(answer, context):
     （如「三个方向」这种模型自己数的），所以只报比例，让人看得见异常。
     """
     ctx = _norm(context)
-    nums = [n for n in _NUM.findall(_norm(answer)) if len(n) >= 2]   # 单位数太容易碰巧
+    # **先把引用编号剥掉**：`[12]` 是出处标注，不是"答案里的数字"。
+    # 第一版没剥，于是把 `[11]`[12]` 当成了两个数字，判出一堆假失败
+    # （实测那道 AOF 题的"未落地数字"就是这个）。
+    body = _CITE.sub(" ", answer or "")
+    nums = [n for n in _NUM.findall(_norm(body)) if len(n) >= 2]   # 单位数太容易碰巧
     if not nums:
         return 0, 0, []
     bad = [n for n in nums if n not in ctx]

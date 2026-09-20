@@ -29,7 +29,7 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
     /** 向量召回。{@code #{q}::vector} 的显式转型是必须的 —— 参数是字符串。 */
     @Select("""
             <script>
-            SELECT c.id, c.doc_id, c.seq, c.content, d.name AS doc_name,
+            SELECT c.id, c.doc_id, c.seq, c.content, c.ctx, d.name AS doc_name,
                    d.source_kind, d.source_url, d.fetched_at,
                    (c.embedding &lt;=&gt; #{q}::vector) AS distance
             FROM chunks c
@@ -55,7 +55,7 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
      */
     @Select("""
             <script>
-            SELECT c.id, c.doc_id, c.seq, c.content, d.name AS doc_name,
+            SELECT c.id, c.doc_id, c.seq, c.content, c.ctx, d.name AS doc_name,
                    d.source_kind, d.source_url, d.fetched_at,
                    (SELECT count(*) FROM unnest(ARRAY[
                        <foreach collection="terms" item="t" separator=",">#{t}</foreach>

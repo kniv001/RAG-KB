@@ -40,7 +40,7 @@ const results = [];
 for (const cs of cases) {
   const body = { question: cs.q, strategy: 'agent', model: modelRef };
   const t0 = Date.now();
-  let answer = '', ttft = 0, sources = [], err = null;
+  let answer = '', thinking = '', ttft = 0, sources = [], err = null;
   try {
     const st = await c.openStream('POST', '/api/chat/stream', body, { token: TOKEN });
     await readSse(st.response, (name, raw) => {
@@ -51,6 +51,10 @@ for (const cs of cases) {
         answer += String(dec.t ?? '');
       } else if (name === 'thinking') {
         if (!ttft) ttft = Date.now() - t0;
+        // **把思考也存下来**：它是 decode 的 84~86%，不存就没法回答"它在想什么"，
+        // 只能靠字数猜。第一版只拿它记 TTFT，正文丢掉了 —— 于是"少想"这条线
+        // 一直在盲改（改了提示词，但看不到思考本身变没变）。
+        thinking += String(dec.t ?? '');
       } else if (name === 'done') {
         sources = dec.sources || [];
       } else if (name === 'error') {
@@ -61,9 +65,10 @@ for (const cs of cases) {
     err = String(e.message || e);
   }
   const ms = Date.now() - t0;
-  results.push({ ...cs, answer, ttftMs: ttft, ms, sources, error: err });
-  console.log(`  ${err ? '✗' : '✔'} ${(ms / 1000).toFixed(1)}s  ${answer.length} 字  `
-    + `来源 ${sources.length}  ${cs.q.slice(0, 34)}${err ? '  ' + err.slice(0, 40) : ''}`);
+  results.push({ ...cs, answer, thinking, ttftMs: ttft, ms, sources, error: err });
+  console.log(`  ${err ? '✗' : '✔'} ${(ms / 1000).toFixed(1)}s  正文 ${answer.length} 字`
+    + ` / 思考 ${thinking.length} 字  `
+    + `来源 ${sources.length}  ${cs.q.slice(0, 30)}${err ? '  ' + err.slice(0, 40) : ''}`);
 }
 
 fs.writeFileSync(OUT, JSON.stringify({

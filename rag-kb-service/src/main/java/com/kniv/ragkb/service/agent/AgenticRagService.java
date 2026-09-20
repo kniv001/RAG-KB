@@ -153,6 +153,13 @@ public class AgenticRagService {
             回出「知识库中没有与『你是谁』相关的信息」再标注「以下为通用知识」，
             既绕又莫名其妙。
 
+            **判断属于哪一类，一律以【参考资料】为准。**
+            【知识库主题概览】只是「没资料时告诉用户库里还有哪些方向」的参考，
+            它**被字数预算截断过、不是完整清单** —— 某方向不在概览里，不等于知识库没有。
+            实测踩过：一道 G1 Mixed GC 的题**已经召回了四段 G1 资料**，
+            模型却因为概览里没列 JVM 就判成【丙】、把有据可查的答案降级成「通用知识」。
+            **资料在手就按【乙】答**，别让概览推翻参考资料。
+
             通用要求：
             - 用中文，简洁准确；涉及要点时用条目列出。
             - 引用【参考资料】的地方用 [编号] 标注；通用知识部分不要标 [编号]，
@@ -575,8 +582,19 @@ public class AgenticRagService {
             for (int i = 0; i < contexts.size(); i++) {
                 ChunkHit h = contexts.get(i);
                 user.append('[').append(i + 1).append("] 来源：").append(h.getDocName())
-                        .append("（第 ").append(h.getSeq()).append(" 块）\n")
-                        .append(h.getContent()).append("\n\n");
+                        .append("（第 ").append(h.getSeq()).append(" 块）");
+                // **带上语境行**（开关，默认关）：思考的大头是「逐条扫描这些块」
+                // （实测原文：「[1] 提到了…但没有…[2] 提到了…」，15 段扫一遍 ≈ 700 token）。
+                // 把「这段能回答什么」直接给出来，它就不必自己扫 —— 而代价从
+                // **decode**（75 token/秒）挪到 **prefill**（3800 token/秒），差约 50 倍。
+                //
+                // 措辞要注意：语境行本身是**问句**（「为什么令牌桶算法的桶容量是2？」），
+                // 所以必须标明它是「本段可回答的问题」，否则 15 个问句摆在用户问题旁边
+                // 会把模型带偏。
+                if (props.getAgent().isCtxInPrompt() && h.getCtx() != null && !h.getCtx().isBlank()) {
+                    user.append("｜本段可回答：").append(h.getCtx());
+                }
+                user.append('\n').append(h.getContent()).append("\n\n");
             }
         }
         user.append("【问题】\n").append(question);

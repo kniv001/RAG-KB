@@ -247,6 +247,22 @@ public class RagProperties {
         private boolean shapeThinking = false;
 
         /**
+         * **把语境行随资料一起给模型**（默认关）。
+         *
+         * <p>语境行（每块一句「这段能回答什么问题」）此前**只进检索索引、不进提示词** ——
+         * 2026-09-18 的决定，理由是"查询侧零开销"。而 2026-09-20 用 `latency-probe`
+         * 拆开计时后看到：decode 里 84~86% 的 token 是思考，思考的大头是
+         * **逐条扫描全部召回块**（实测原文：「[1] 提到了…但没有…」× 15 段 ≈ 700 token）。
+         *
+         * <p>给出来就不必自己扫，而代价从 **decode**（~75 token/秒）挪到
+         * **prefill**（~3800 token/秒）——**差约 50 倍**。
+         *
+         * <p>默认关：还没量过它对质量的影响，而"改模型看到的东西"必须两把尺子一起量
+         * （`tools/eval.py` 的质量 + `tools/latency-probe.mjs` 的速度）。
+         */
+        private boolean ctxInPrompt = false;
+
+        /**
          * 检索不到任何资料时，是否仍让模型作答。
          *
          * <p>默认 <b>true</b>：知识库没覆盖的问题，先说明知识库没有、再用通用知识回答，

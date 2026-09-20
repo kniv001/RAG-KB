@@ -126,6 +126,10 @@ ragkb:
       # （think:false 会把推理转进正文污染输出）—— 所以只能约束形状。
       # 开之前必须先有答案侧的质量对照（tools/eval.py），不能只看速度。
       shape-thinking: ${KB_SHAPE_THINKING:false}
+      # 把语境行随资料一起给模型（每块一句「本段可回答：…」）。
+      # 思考的大头是逐条扫描召回块（15 段 ≈ 700 token decode），
+      # 而语境行本来就在库里、只差没给模型 —— 代价是 prefill（快 50 倍）。
+      ctx-in-prompt: ${KB_CTX_IN_PROMPT:false}
       # 检索不到资料时仍让模型作答：先说明知识库没有、再用通用知识回答并标注清楚。
       # 关掉则退回「不调模型、直接回一句资料中没有相关内容」，秒回但毫无帮助。
       answer-without-context: true
