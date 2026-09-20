@@ -171,6 +171,7 @@ def cmd_gate():
     for nm, a in [("single-hop-15", {"k": "8,24", "cap": "same", "source": "raw"}),
                   ("hard-query-15", {"k": "8,24", "cap": "same", "source": "raw"}),
                   ("multihop-25", {"k": "8,12,24", "cap": "same", "source": "raw"}),
+                  ("xdoc-8", {"k": "8,24", "cap": "same", "source": "raw"}),
                   ("selfretrieval-23", {"k": "1,10", "cap": "same", "source": "raw"})]:
         print(f"\n######## {nm}")
         cs = cases.load(nm, C, strict=True)
