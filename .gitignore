@@ -37,3 +37,5 @@ tools/_tq.sql
 tools/_mh.sql
 tools/_fresh.sql
 tools/eval/_runs/
+__pycache__/
+*.pyc
