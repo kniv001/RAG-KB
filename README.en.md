@@ -619,10 +619,24 @@ python tools\eval.py compare answer-quality qwen3:4b qwen3:8b
 ```
 
 **The platform measures two dimensions, and one `--model` switch moves both**:
-quality (`run` / `score`) and speed (`speed`). Speed baseline (qwen3:4b): 24.6s total
-= plan 1.1 + retrieve 0.1 + assess 1.8 + ~1.7 prefill before TTFT + **generate 19.4**;
-median answer 433 chars ⇒ 22 chars/s — **the model is already at line speed**, so the
-only big lever is answer length.
+quality (`run` / `score`) and speed (`speed`). **Speed, layered** (qwen3:4b, q4 KV) — `ChatStats` now captures the timings Ollama
+already reports in its final chunk and that used to be thrown away:
+
+| Layer | Number |
+|---|---|
+| plan / retrieve / assess | 0.9 / 0.1 / 1.8s |
+| **prefill** | 1.1–1.9s for **4139–7163 tokens** ⇒ **~3850 tok/s** (parallel, scales with what you load) |
+| **decode** | 19.6–43s ⇒ **~77 tok/s** (serial, scales with what you generate) |
+
+**The bottleneck is entirely decode — and 79–87% of those tokens are "thinking"**
+(sample: answer 322 chars ≈ 198 tokens vs thinking 2093 chars ≈ 1286 tokens).
+Thinking goes out on its own channel and is folded in the UI, but it is generated
+**serially in the same decode stream as the answer** — thinking longer means waiting longer.
+
+⇒ **the one big speed lever is thinking less, not writing less** (the earlier
+"answer length is the only lever" was derived from a total and is now superseded).
+The answer path's `think` **cannot simply be disabled** (measured: `think:false` is a net
+loss — the reasoning leaks into the answer and pollutes it).
 
 The first bench, **`answer-quality`** (15 cases), judges exactly the three branches of
 `ANSWER_SYSTEM`, using **mechanical judges only — no judge model** (when the judge itself
