@@ -1,0 +1,24 @@
+{
+ "schema": "eval/bench@1",
+ "name": "answer-quality",
+ "note": "答案侧尺子：**它判的是模型，不是检索**。三类题各自对应 ANSWER_SYSTEM 的一段契约 —— grounded 有资料（须引用 [编号] 且编号有效）、ungrounded 语料里确实没有（须声明 + 标注通用知识）、chitchat 与知识库无关（**不许**误报「知识库中没有」）。负样本全部核过：主题词在同一块里凑不齐（不是只看单词出现次数 —— 「事务」出现 191 次全是 MySQL 的）。",
+ "cases": [
+  {"id": "aq-g1", "kind": "grounded", "q": "漏桶和令牌桶，哪个允许突发？为什么两者实现一样效果却相反？"},
+  {"id": "aq-g2", "kind": "grounded", "q": "AOF 的刷盘策略有哪几种？最坏情况下会丢多少数据？"},
+  {"id": "aq-g3", "kind": "grounded", "q": "G1 的 Mixed GC 靠什么决定回收哪些老年代 Region？"},
+  {"id": "aq-g4", "kind": "grounded", "q": "节点亲和里的硬策略和软策略分别对应哪两个长字段名？"},
+  {"id": "aq-g5", "kind": "grounded", "q": "布隆过滤器为什么会有误判？误判率能调吗？"},
+  {"id": "aq-g6", "kind": "grounded", "q": "MySQL 的 MVCC 是怎么实现事务隔离的？"},
+
+  {"id": "aq-u1", "kind": "ungrounded", "q": "Kubernetes Operator 的 Reconcile 循环是怎么写的？"},
+  {"id": "aq-u2", "kind": "ungrounded", "q": "怎么给 Kafka 做 exactly-once 语义？"},
+  {"id": "aq-u3", "kind": "ungrounded", "q": "PostgreSQL 的 WAL 归档和 PITR 怎么做？"},
+  {"id": "aq-u4", "kind": "ungrounded", "q": "Rust 的 async/await 运行时是怎么实现的？"},
+  {"id": "aq-u5", "kind": "ungrounded", "q": "怎么用 Prometheus 配置告警规则？"},
+  {"id": "aq-u6", "kind": "ungrounded", "q": "JVM 的 ZGC 和 Shenandoah 有什么区别？"},
+
+  {"id": "aq-c1", "kind": "chitchat", "q": "你是谁？"},
+  {"id": "aq-c2", "kind": "chitchat", "q": "谢谢，辛苦了。"},
+  {"id": "aq-c3", "kind": "chitchat", "q": "用一句话解释一下什么是限流，别查资料。"}
+ ]
+}
