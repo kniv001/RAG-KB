@@ -68,27 +68,47 @@ console.log('上传:', JSON.stringify(up).slice(0, 200), '\n');
 const docs = (await c.call('GET', '/api/docs', undefined, { token: TOKEN })).body.data.docs || [];
 const doc = docs.filter(d => d.name.includes('_探针页')).sort((a, b) => (b.id > a.id ? 1 : -1))[0];
 if (!doc) { console.log('没找到刚上传的文档'); process.exit(1); }
-console.log(`docId=${doc.id}  状态=${doc.indexState}  块数=${doc.chunkCount}\n`);
+const stateOf = d => d?.indexState ?? d?.status ?? d?.state ?? '?';   // 接口字段名换过，别写死
+console.log(`docId=${doc.id}  状态=${stateOf(doc)}  块数=${doc.chunkCount}\n`);
 
-if (doc.indexState !== 'indexed') {
+if (stateOf(doc) !== 'indexed') {
   const t = await c.call('POST', `/api/docs/${doc.id}/index`, undefined, { token: TOKEN });
   console.log('触发建索引:', JSON.stringify(t.body).slice(0, 120));
   for (let i = 0; i < 90; i++) {
     await new Promise(r => setTimeout(r, 2000));
     const d2 = (await c.call('GET', '/api/docs', undefined, { token: TOKEN })).body.data.docs
       .find(d => d.id === doc.id);
-    if (d2?.indexState === 'indexed') break;
+    if (stateOf(d2) === 'indexed') break;
   }
 }
 const d3 = (await c.call('GET', '/api/docs', undefined, { token: TOKEN })).body.data.docs
   .find(d => d.id === doc.id);
-console.log(`索引状态: ${d3?.indexState}　块数 ${d3?.chunkCount}\n`);
+console.log(`索引状态: ${stateOf(d3)}　块数 ${d3?.chunkCount}\n`);
 
 const ch = await c.call('GET', `/api/docs/${doc.id}/chunks`, undefined, { token: TOKEN });
 const list = ch.body.data?.chunks || ch.body.data || [];
 console.log(`—— 入库后的 ${list.length} 个块 ——\n`);
+let blank = 0;
 list.forEach((x, i) => {
-  const text = String(x.content || x.text || '').replace(/\s+/g, ' ').trim();
-  console.log(`[${i}] ${text.length} 字：${text.slice(0, 160)}`);
+  // /chunks 返回的是 {seq, chars, preview}（**preview 是截断的**，不是全文）
+  const text = String(x.preview || x.content || x.text || x.body || '').replace(/\s+/g, ' ').trim();
+  if (!text) blank++;
+  console.log(`[${i}] 共 ${x.chars ?? text.length} 字（下面是 preview）：${text.slice(0, 200)}`);
 });
-console.log('\n看三件事：① 表格有没有被拍平/串行 ② 导航与页脚有没有进来 ③ 代码块有没有被切碎');
+// **块内容取不到就当场喊**：以前字段名变了会静默打印"0 字"，看起来像"解析出空文档"，
+// 其实是探针自己过期了（2026-09-20 踩过）。
+if (blank && blank === list.length) {
+  console.log('\n！所有块都取不到正文 —— 多半是接口字段名变了，不是解析坏了。原始响应：');
+  console.log(JSON.stringify(ch.body).slice(0, 600));
+}
+console.log('\n看三件事：① 表格有没有被拍平/串行 ② 导航与页脚有没有进来 ③ 代码块有没有被切碎')
+
+// **跑完自己删掉** —— 以前靠人记着删，忘了就把探针页留在语料里（改语料就不是"探针"了）。
+// 要留着看就 `node tools/ingest-shape-probe.mjs --keep`。
+if (!process.argv.includes('--keep')) {
+  const del = await c.call('DELETE', `/api/docs/${doc.id}`, undefined, { token: TOKEN });
+  console.log(`\n已删除探针文档（docId=${doc.id}）：${JSON.stringify(del.body).slice(0, 80)}`);
+  console.log('（要留着看就加 --keep）');
+} else {
+  console.log(`\n--keep：探针文档留在库里，docId=${doc.id}，**记得自己删**`);
+};

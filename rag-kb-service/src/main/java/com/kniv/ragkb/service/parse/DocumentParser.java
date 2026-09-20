@@ -30,11 +30,18 @@ import java.util.regex.Pattern;
 @Component
 public class DocumentParser {
 
-    private static final Pattern SCRIPT_OR_STYLE =
-            Pattern.compile("<script.*?</script>|<style.*?</style>", Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
-    private static final Pattern HTML_TAG = Pattern.compile("<[^>]+>");
     private static final Pattern BLANK_RUN = Pattern.compile("\n{3,}");
-    private static final Pattern SPACE_RUN = Pattern.compile("[ \t]{2,}");
+
+    /**
+     * **解析器版本** —— 改了解析逻辑就把它加一。
+     *
+     * <p>解析结果按「文件内容哈希 + 本版本」缓存在库里，只按内容哈希的话，
+     * 换了解析器之后重新索引**仍会拿到旧解析**（2026-09-20 改 HTML 转换器时踩过：
+     * 新代码确实在运行的 jar 里，入库形状却是旧的；查了半天才发现是缓存命中）。
+     *
+     * <p>版本史：{@code v2} = HTML 走 {@link HtmlToText}（剥导航页脚 / 标题层级 / 表格线性化）。
+     */
+    public static final String VERSION = "v2";
 
     public static class ParseException extends RuntimeException {
         public ParseException(String message) {
@@ -92,12 +99,13 @@ public class DocumentParser {
         }
     }
 
+    /**
+     * HTML → 自然文档语言。**别再改回正则剥标签**：那样会留下 nav/footer 的文本、
+     * 丢掉标题层级、把表格拍平成"列义只由位置隐含"（2026-09-20 用合成靶子页实测过三条）。
+     * 实现与抓取那条路（{@code WebSearchService}）共用同一份 {@link HtmlToText}。
+     */
     private String fromHtml(String raw) {
-        String text = SCRIPT_OR_STYLE.matcher(raw).replaceAll(" ");
-        text = HTML_TAG.matcher(text).replaceAll(" ");
-        text = text.replace("&nbsp;", " ").replace("&amp;", "&")
-                .replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"");
-        return SPACE_RUN.matcher(text).replaceAll(" ");
+        return HtmlToText.convert(raw);
     }
 
     /** CSV 拼成「表头 | 值 | 值」的行文本 —— 保留列语义，切分后模型才看得懂上下文。 */

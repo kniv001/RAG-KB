@@ -76,9 +76,12 @@ public class IndexService {
             throw new IndexException("文件缺失：" + path);
         }
 
-        // ---- 1) 解析（按文件内容哈希缓存）----
+        // ---- 1) 解析（按「文件内容哈希 + 解析器版本」缓存）----
+        // 版本要进键：只按内容哈希的话，**换了解析器之后同一份文件仍会命中旧解析**
+        // —— 2026-09-20 改 HTML 转换器时就被这个骗过一次：新代码明明在运行的 jar 里，
+        // 入库形状却还是旧的。缓存落在数据库表里，跨重启也在。
         report(progress, 0, 0, "计算文件指纹");
-        String fileHash = sha256File(path);
+        String fileHash = sha256File(path) + ":" + DocumentParser.VERSION;
         String text = cache.getParse(fileHash);
         if (text == null) {
             report(progress, 0, 0, "解析文档");

@@ -103,17 +103,19 @@ def _arms(C, cs, a):
     ks = _nums(a["k"]) if a.get("k") else [None]
     pairstyle = a.get("cap") == "same"       # cap 跟着 k 走（单查询尺子就是这样：取 k 就是看 k）
     caps = _nums(a["cap"]) if (a.get("cap") and not pairstyle) else [None]
+    kinds = _nums(a["kind"]) if a.get("kind") else [None]      # 可多值：--kind ctx+body,body
     arms = []
     pairs = list(zip(ks, ks)) if pairstyle else \
         [(k, c) for k in ks for c in caps]
     for k, cap in pairs:
+      for kd in kinds:
         cfg = {}
         if k is not None:
             cfg["k"] = int(k)
         if cap is not None:
             cfg["cap"] = int(cap)
-        if a.get("kind"):
-            cfg["kind"] = a["kind"]
+        if kd:
+            cfg["kind"] = kd
         if a.get("thresh"):
             cfg["thresh"] = float(a["thresh"])
         if a.get("mmr"):

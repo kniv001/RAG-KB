@@ -370,52 +370,13 @@ public class WebSearchService {
      *
      * <p>代码块用围栏原样保留：缩进与换行在那里是内容的一部分，压平就废了。
      */
+    /**
+     * 正文子树 → 自然文档语言。**实现搬到了 {@link com.kniv.ragkb.service.parse.HtmlToText}**，
+     * 与上传那条路共用一份 —— 两条路各写一份的代价是：同一份 HTML 走两条路进库会得到两种形状
+     * （抓取那条会挑 <main> 剥掉导航，上传那条不会；2026-09-20 实测）。
+     */
     private static String toMarkdown(Element root) {
-        StringBuilder sb = new StringBuilder();
-        appendMarkdown(root, sb);
-        return sb.toString().replace(' ', ' ')
-                .replaceAll("[ \\t\\x0B\\f]+\\n", "\n")   // 行尾空白
-                .replaceAll("\\n{3,}", "\n\n")            // 连续空行压成一个
-                .strip();
-    }
-
-    private static void appendMarkdown(org.jsoup.nodes.Node node, StringBuilder sb) {
-        if (node instanceof org.jsoup.nodes.TextNode t) {
-            sb.append(t.getWholeText());
-            return;
-        }
-        if (!(node instanceof Element el)) {
-            return;
-        }
-        switch (el.tagName().toLowerCase()) {
-            case "h1", "h2", "h3", "h4", "h5", "h6" -> {
-                int level = el.tagName().charAt(1) - '0';
-                sb.append("\n\n").append("#".repeat(level)).append(' ');
-                el.childNodes().forEach(c -> appendMarkdown(c, sb));
-                sb.append("\n\n");
-            }
-            case "p", "div", "section", "article", "blockquote", "figure", "figcaption",
-                 "ul", "ol", "table", "thead", "tbody" -> {
-                sb.append("\n\n");
-                el.childNodes().forEach(c -> appendMarkdown(c, sb));
-                sb.append("\n\n");
-            }
-            case "li" -> {
-                sb.append("\n- ");
-                el.childNodes().forEach(c -> appendMarkdown(c, sb));
-            }
-            case "tr" -> {
-                sb.append("\n| ");
-                el.childNodes().forEach(c -> appendMarkdown(c, sb));
-            }
-            case "td", "th" -> {
-                el.childNodes().forEach(c -> appendMarkdown(c, sb));
-                sb.append(" | ");
-            }
-            case "br" -> sb.append('\n');
-            case "pre" -> sb.append("\n\n```\n").append(el.wholeText().strip()).append("\n```\n\n");
-            default -> el.childNodes().forEach(c -> appendMarkdown(c, sb));
-        }
+        return com.kniv.ragkb.service.parse.HtmlToText.convert(root);
     }
 
     private void requireEnabled() {
