@@ -26,6 +26,17 @@ import sys
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import _veccache                                              # noqa: E402
+
+
+def _emb_batched(embed, texts, batch=8):
+    """把「一次全塞」包成带批的 —— 661 条一次性发出去太大。"""
+    out = []
+    for i in range(0, len(texts), batch):
+        out += embed(texts[i:i + batch])
+    return out
+
 OLLAMA = "http://127.0.0.1:11434"
 CHAT = os.environ.get("KB_JUDGE_MODEL", "qwen3:4b")
 
@@ -191,7 +202,7 @@ def sanity():
     print(f"\n判对 {ok}/{len(items)}")
 
 
-def rerank(topk_pool=16, take=12):
+def rerank(topk_pool=16, take=12, pool_only=False, pool_sizes=None):
     """把判断器当精排器：池子里逐候选问「这段能回答这个问题吗」，按 P(是) 排序取前 take。"""
     cfg = json.load(io.open(os.path.join(HERE, "multihop-questions.json"), encoding="utf-8"))
     live = json.load(io.open(os.path.join(HERE, "_multihop-live.json"), encoding="utf-8"))
@@ -201,7 +212,9 @@ def rerank(topk_pool=16, take=12):
     texts = [(r[1] + "\n" + r[2]) if r[1] else r[2] for r in rows]
     bodies = [r[2] for r in rows]
     meta = [(r[3], r[4]) for r in rows]
-    vecs = json.load(io.open(os.path.join(HERE, "_corpus_vecs.json"), encoding="utf-8"))["vecs"]
+    # **别直接读 ["vecs"]**：缓存可能是旧语料留下的，位置映射会静默错位。
+    # 2026-09-20 实测 661 条里 438 条对不上，所有指标被一起拉低，看起来像"检索不行"。
+    vecs = _veccache.load("_corpus_vecs.json", ids, texts, lambda ts: _emb_batched(emb, ts))
     norm = lambda s: re.sub(r"\s+", "", s)
 
     def groups(case):
@@ -234,7 +247,33 @@ def rerank(topk_pool=16, take=12):
         for q, v in zip(allq[i:i + 8], emb(allq[i:i + 8])):
             qv[q] = v
 
-    base_ok = rr_ok = 0
+    if pool_only and pool_sizes:
+        # 天花板扫描：把三件事分开 —— **召回**（靶子在不在并集里）、
+        # **RRF 截断**（在并集里但被 RRF 排到池外）、**"全中"合取**（组覆盖率 <100% 即判失）。
+        print(f"—— 候选池天花板（n={len(cfg['cases'])} 题）——")
+        caps = [12, 24, 48, 96]
+        for ps in pool_sizes:
+            per = []
+            for case, rec in zip(cfg["cases"], live):
+                gs = groups(case)
+                scored = {}
+                for q in (rec.get("queries") or [rec["q"]]):
+                    for rank, (c, j) in enumerate(sorted(((cos(qv[q], v), j) for j, v in enumerate(vecs)),
+                                                         reverse=True)[:ps]):
+                        scored[j] = scored.get(j, 0) + 1 / (60 + rank)
+                per.append((gs, [j for j, _ in sorted(scored.items(), key=lambda x: -x[1])]))
+            gr = (sum(sum(1 for g in gs if any(j in set(order) for j in g)) / max(1, len(gs))
+                      for gs, order in per) / len(per))
+            cells = []
+            for cap in caps:
+                ok = sum(all(any(j in set(order[:cap]) for j in g) for g in gs) for gs, order in per)
+                cells.append(f"池{cap}→{100*ok/len(per):>3.0f}%")
+            print(f"  每查询取 {ps:>3}　组级召回 {100*gr:>3.0f}%　" + "　".join(cells))
+        print("  读法：组级召回 = 靶子组出现在并集里的比例（纯召回）；")
+        print("        池N = 再按 RRF 排前 N 之后「所有组都在」的比例（把召回/RRF/合取叠起来的结果）")
+        return
+
+    base_ok = rr_ok = ceil_ok = 0
     n = 0
     for case, rec in zip(cfg["cases"], live):
         gs = groups(case)
@@ -246,25 +285,34 @@ def rerank(topk_pool=16, take=12):
         pool = [j for j, _ in sorted(scored.items(), key=lambda x: -x[1])][:24]
         base = set(pool[:take])
         base_ok += all(any(j in base for j in g) for g in gs)
+        # **天花板**：靶子是否全在候选池里。不在，就是再好的精排器也拿不到分 ——
+        # 这一行把「判断器不行」和「池子不行」分开，两者的修法完全不同。
+        poolset = set(pool)
+        ceil_ok += all(any(j in poolset for j in g) for g in gs)
 
         rated = []
-        for j in pool:
-            if MODE == "choice":
-                p = judge_choice(case["q"], bodies[j])
-            elif SCORED:
-                p = judge_scored(case["q"], bodies[j])
-            else:
-                p = judge_relevance(case["q"], bodies[j])
-            rated.append((p if p is not None else 0.0, j))
+        if not pool_only:
+            for j in pool:
+                if MODE == "choice":
+                    p = judge_choice(case["q"], bodies[j])
+                elif SCORED:
+                    p = judge_scored(case["q"], bodies[j])
+                else:
+                    p = judge_relevance(case["q"], bodies[j])
+                rated.append((p if p is not None else 0.0, j))
         rated.sort(key=lambda x: -x[0])
         r12 = {j for _, j in rated[:take]}
         rr_ok += all(any(j in r12 for j in g) for g in gs)
         n += 1
+        ceil = all(any(j in poolset for j in g) for g in gs)
         print(f"  {'✅' if all(any(j in r12 for j in g) for g in gs) else '◐' if any(any(j in r12 for j in g) for g in gs) else '❌'}"
+              f"{'　天花板✅' if ceil else '　天花板❌'}"
               f"　池 {len(pool)} 个候选　{case['q'][:34]}", flush=True)
     print(f"\n—— 多跳全中率（n={n}）——")
     print(f"  不精排（向量序取前 {take}）：{base_ok}/{n} = {100*base_ok/n:.0f}%")
-    print(f"  **本地判断器精排**：{rr_ok}/{n} = {100*rr_ok/n:.0f}%")
+    if not pool_only:
+        print(f"  **本地判断器精排**：{rr_ok}/{n} = {100*rr_ok/n:.0f}%")
+    print(f"  ── 候选池天花板（靶子全在池里 = 理论上限）：{ceil_ok}/{n} = {100*ceil_ok/n:.0f}%")
     print(f"  对照：4b 生成式 listwise 精排是 42%、不精排 50%（12 题那批）")
 
 
@@ -300,9 +348,16 @@ if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else "sanity"
     if mode == "sanity":
         sanity()
+    elif mode == "pool":
+        # 只算候选池天花板，**不调判断器** —— 把「池子不行」和「判断器不行」分开
+        # 带参数则是扫描：python tools/logprob-judge.py pool 16 32 64 128 300
+        rest = [int(x) for x in sys.argv[2:] if x.isdigit()]
+        if rest:
+            rerank(pool_only=True, pool_sizes=rest)
+        else:
+            rerank(pool_only=True)
     else:
         MODE = {"rerank-score": "score", "rerank-choice": "choice"}.get(mode, "noul")
         SCORED = MODE == "score"
-        print(f"精排形态：{{'noul': 'Noul(是/否概率)', 'score': 'Score(0~9 期望)', "
-              f"'choice': 'Choice(四选一关系)'}}[MODE]\n")
+        print(f"精排形态：{ {'noul': 'Noul(是/否概率)', 'score': 'Score(0~9 期望)', 'choice': 'Choice(四选一关系)'}[MODE] }\n")
         rerank()

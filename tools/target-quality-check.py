@@ -21,6 +21,8 @@ import sys
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import _veccache                                              # noqa: E402
 OLLAMA = "http://127.0.0.1:11434"
 PSQL = r"D:\vs\rag-kb\pgsql\bin\psql.exe"
 PGPASS = r"D:\vs\rag-kb\data\pgapp.txt"
@@ -63,8 +65,7 @@ def main():
                      "JOIN documents d ON d.id=c.doc_id ORDER BY c.id")
     meta = [(r[1], r[3]) for r in rows]                       # seq, doc
     bodies = [r[2] for r in rows]
-    vcache = os.path.join(HERE, "_corpus_vecs.json")
-    vecs = json.load(io.open(vcache, encoding="utf-8"))["vecs"]
+    vecs = _veccache.load("_corpus_vecs.json", [r[0] for r in rows], rebuild=False)
     norm = lambda s: re.sub(r"\s+", "", s)
 
     def embed(q):

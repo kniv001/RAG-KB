@@ -22,6 +22,8 @@ import sys
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import _veccache                                              # noqa: E402
 OLLAMA = "http://127.0.0.1:11434"
 PSQL = r"D:\vs\rag-kb\pgsql\bin\psql.exe"
 PGPASS = r"D:\vs\rag-kb\data\pgapp.txt"
@@ -87,8 +89,7 @@ def main():
     texts = [(r[1] + "\n" + r[2]) if r[1] else r[2] for r in rows]
     bodies = [r[2] for r in rows]
     meta = [(r[3], r[4]) for r in rows]                     # seq, doc_name
-    cache = os.path.join(HERE, "_corpus_vecs.json")
-    vecs = json.load(io.open(cache, encoding="utf-8"))["vecs"]
+    vecs = _veccache.load("_corpus_vecs.json", [r[0] for r in rows], rebuild=False)
     norm = lambda s: re.sub(r"\s+", "", s)
 
     def groups(case):

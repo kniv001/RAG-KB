@@ -21,6 +21,8 @@ import sys
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import _veccache                                              # noqa: E402
 OLLAMA = "http://127.0.0.1:11434"
 PSQL = r"D:\vs\rag-kb\pgsql\bin\psql.exe"
 PGPASS = r"D:\vs\rag-kb\data\pgapp.txt"
@@ -58,13 +60,13 @@ def main():
     K = int(sys.argv[1]) if len(sys.argv) > 1 else 8
     live = json.load(io.open(os.path.join(HERE, "_multihop-live.json"), encoding="utf-8"))
     cfg = json.load(io.open(os.path.join(HERE, "multihop-questions.json"), encoding="utf-8"))
-    rows = psql_rows("SELECT c.content, c.seq, c.ctx, d.name FROM chunks c "
+    rows = psql_rows("SELECT c.content, c.seq, c.ctx, d.name, c.id FROM chunks c "
                      "JOIN documents d ON d.id=c.doc_id ORDER BY c.id")
     bodies = [r[0] for r in rows]
     meta = [(r[1], r[3]) for r in rows]
     import re
     norm = lambda s: re.sub(r"\s+", "", s)
-    vecs = json.load(io.open(os.path.join(HERE, "_corpus_vecs.json"), encoding="utf-8"))["vecs"]
+    vecs = _veccache.load("_corpus_vecs.json", [r[4] for r in rows], rebuild=False)
 
     def groups(case):
         gs = []
