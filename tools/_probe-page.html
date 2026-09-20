@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>限流方案选型速查</title></head>
+<body>
+<nav class="site-nav">
+  <a href="/">首页</a> | <a href="/arch">架构</a> | <a href="/about">关于</a> | <a href="/rss">RSS</a>
+</nav>
+<article>
+  <h1>限流方案选型速查</h1>
+  <p>本文给出一份可直接照抄的选型对照，覆盖四种常见限流方案的适用场景与代价。</p>
+
+  <h2>一、四种方案对照</h2>
+  <table>
+    <thead>
+      <tr><th>方案</th><th>突发流量</th><th>实现复杂度</th><th>典型场景</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>计数器</td><td>不支持</td><td>低</td><td>内部接口兜底</td></tr>
+      <tr><td>滑动窗口</td><td>不支持</td><td>中</td><td>对精度要求高的公开接口</td></tr>
+      <tr><td>漏桶</td><td>不支持（强行平滑）</td><td>低</td><td>下游处理能力恒定</td></tr>
+      <tr><td>令牌桶</td><td>支持</td><td>低</td><td>抢购、秒杀类突发流量</td></tr>
+    </tbody>
+  </table>
+
+  <h2>二、参数怎么定</h2>
+  <p>令牌桶的两个参数是速率 r 与桶容量 b。突发量等于 b，平均速率等于 r。
+     例如 r = 2r/s、b = 3 时，桶最多攒 3 个令牌，瞬时最多放 3 个请求进来。</p>
+
+  <h3>2.1 一个坑</h3>
+  <p>桶容量不是越大越好：b 太大等于没有限流，b = 0 则退化成固定速率。</p>
+
+  <pre><code>RateLimiter limiter = RateLimiter.create(2);
+limiter.acquire();   // 立即返回
+limiter.acquire();   // 需要等待约 500ms
+</code></pre>
+</article>
+<footer class="site-footer">
+  <p>© 2026 某某技术博客　京ICP备00000000号　Powered by Hexo</p>
+</footer>
+</body>
+</html>
