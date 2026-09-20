@@ -85,12 +85,13 @@ public class SummaryService {
             3. 保留具体信息：讨论的主题、得出的结论、用户明确表达过的偏好或约束、尚未解决的问题。
                用户明确要求记住的任何内容必须原样保留 —— 名字、代号、数字、约定、日期。
                这类信息一旦丢掉就再也找不回来，比主题概括重要得多。
-            4. **没有变化的事实照样要写**，左边写「—」（如「偏好：— → 表格而非选项式」）。
+            4. **本次没被改变的事实照样要写**，左边写「—」（如「偏好：— → 表格而非选项式」）。
                会话记忆里大部分本来就没变 —— 只写变化会把这些整段丢掉。
-            5. 同一主题只留一条：已有条目被新增对话改变时**并进同一条**，写成「最初的值 → 现在的值」，
-               不要层层叠加，也不要直接删掉（为什么变本身是有用的）。
+            5. 同一主题只留一条。**本次被改变时，把上一个值写到左边**（不是写「—」），
+               右边是现在的值。不要只写新值，不要层层叠加，也不要直接删掉
+               —— 为什么变本身是有用的。
             6. **代价、限制、反面结论要单独写出来**，不要跟好处挤在同一行。
-            7. 最多 12 条，每条不超过 40 字。
+            7. 输出不超过 20 条，每条不超过 40 字。
 
             只输出 JSON：{"items":["主题：曾经 → 现在"]}""";
 
@@ -249,6 +250,20 @@ public class SummaryService {
                     oldCount, best.size());
         }
 
+        // 覆盖边：**机械补**，不问模型。
+        //
+        // 依据 2026-09-20 的实测（tools/supersede-probe.py）：
+        //   给「旧条目 K：— → 600」+「新增对话把 600 改成 450」，
+        //   模型输出 `K：— → 450` —— **旧值一律被丢掉**，12/12，覆盖边根本没形成。
+        //   提示词里明写「本次被改变时，把上一个值写到左边」之后**照旧 12/12 丢旧**
+        //   （那一改只把「没变也要写」的对照组从 8/12 抬到 12/12）。
+        // ⇒ 模型做不了这个操作，但它是**纯字符串操作**：上一条的右值就是这一条的左值。
+        //   补完之后 12/12 全落进「✅覆盖」。这与 missingOld（只增不删）是同一类补丁。
+        //
+        // 放在 missingOld **之前**：补出的 `K：600 → 450` 含旧值，于是它会被认作
+        // 「旧条目已着落」，不会再把 `K：— → 600` 原样补进来造成两条并存。
+        best = addCoverageEdges(oldItems, best);
+
         // 只增不删：三次重试都没着落的旧条目**原样补回**。
         //
         // 依据 2026-09-19 的四臂对照（tools/summary-loss-probe.py，各 2 链 × 5 轮增量合并）：
@@ -369,6 +384,49 @@ public class SummaryService {
             }
         }
         return items;
+    }
+
+    /** 「曾经」那一侧的空写法 —— 见到这些就说明模型没写历史。 */
+    private static final java.util.Set<String> NO_HISTORY =
+            java.util.Set.of("—", "-", "", "无", "？", "?");
+
+    /**
+     * **覆盖边（机械补）**：同一主题、新条目左边是「—」而上一条有值时，把上一条的右值搬到左边。
+     *
+     * <p>形状要求是 `主题：曾经 → 现在`。解析不出这个形状的条目**原样放过**（不猜）。
+     */
+    private List<String> addCoverageEdges(List<String> oldItems, List<String> items) {
+        java.util.Map<String, String> prev = new java.util.HashMap<>();
+        for (String it : oldItems) {
+            String[] p = splitItem(it);
+            if (p != null) {
+                prev.put(p[0], p[2]);
+            }
+        }
+        List<String> out = new ArrayList<>(items.size());
+        for (String it : items) {
+            String[] p = splitItem(it);
+            if (p != null && NO_HISTORY.contains(p[1])) {
+                String was = prev.get(p[0]);
+                if (was != null && !was.isBlank() && !was.equals(p[2])) {
+                    log.debug("补覆盖边：{}（{} → {}）", p[0], was, p[2]);
+                    it = p[0] + "：" + was + " → " + p[2];
+                }
+            }
+            out.add(it);
+        }
+        return out;
+    }
+
+    /** `主题：曾经 → 现在` → [主题, 曾经, 现在]；不是这个形状返回 null。 */
+    private static String[] splitItem(String it) {
+        int a = it.indexOf('：');
+        int b = it.indexOf('→');
+        if (a <= 0 || b <= a) {
+            return null;
+        }
+        return new String[]{it.substring(0, a).strip(),
+                it.substring(a + 1, b).strip(), it.substring(b + 1).strip()};
     }
 
     /**
