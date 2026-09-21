@@ -158,15 +158,19 @@ def score(bench_name, model, paths=None, quiet=False, tag=""):
     return per
 
 
-def run(bench_name, model, limit=0, repeat=1):
-    """采集 N 次 → 判分（N>1 时取「全部通过」）。"""
+def run(bench_name, model, limit=0, repeat=1, tag=""):
+    """采集 N 次 → 判分（N>1 时取「全部通过」）。
+
+    `tag` 用来区分**同一模型的不同条件**（如两个开关臂）—— 不留 tag 的话
+    第二臂会**覆盖**第一臂的落盘结果，A/B 就只剩后一臂（实测踩过）。
+    """
     paths = []
     for r in range(repeat):
-        tag = f"__r{r+1}" if repeat > 1 else ""
-        print(f"—— 采集 {bench_name} × {model}" + (f"（第 {r+1}/{repeat} 次）" if repeat > 1 else "") + " ——")
-        paths.append(collect(bench_name, model, limit, tag))
+        t = (f"__r{r+1}" if repeat > 1 else "") + tag
+        print(f"—— 采集 {bench_name} × {model}{tag}" + (f"（第 {r+1}/{repeat} 次）" if repeat > 1 else "") + " ——")
+        paths.append(collect(bench_name, model, limit, t))
         print()
-    return score(bench_name, model, paths)
+    return score(bench_name, model, paths, tag=tag)
 
 
 def speed(model, n=5, bench="multihop-25"):

@@ -48,7 +48,7 @@ def cmd_audit():
 
 def cmd_run(argv):
     if not argv:
-        raise SystemExit("用法：python tools/eval.py run <基准> --model <模型名> [--limit N] [--repeat N]")
+        raise SystemExit("用法：python tools/eval.py run <基准> --model <模型名> [--limit N] [--repeat N] [--tag 后缀]")
     name, argv = argv[0], argv[1:]
     a = {}
     i = 0
@@ -60,7 +60,8 @@ def cmd_run(argv):
             i += 1
     runner.run(name, a.get("model", "qwen3:4b"),
                limit=int(a.get("limit", 0) or 0),
-               repeat=int(a.get("repeat", 1) or 1))
+               repeat=int(a.get("repeat", 1) or 1),
+               tag=a.get("tag", ""))
 
 
 def cmd_collect(argv):

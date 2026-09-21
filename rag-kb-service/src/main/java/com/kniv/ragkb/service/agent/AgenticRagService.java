@@ -60,6 +60,19 @@ public class AgenticRagService {
      * 理解成了「必须有权威出处」—— 明明资料里的实测证据足以回答问题，它却因为
      * 「文档没有写明政策文件名称」判了不够，于是白跑两轮、多花 120 秒。
      * 所以这里显式禁止那类标准。
+     *
+     * <p><b>2026-09-21 实测：宽容到它再也不判「不够」了 —— 三轮检索实际上从未发生过。</b>
+     * 75 条真身记录（多跳 25 × 3 轮对照）**轮数全是 1**；
+     * 另一次 21 题的采集里 {@code enough} **全是 true**。
+     * 而 {@code maxRounds=2}、这条分支的全部意义就是"不够 → 换查询再来一轮"。
+     *
+     * <p>更麻烦的是**理由与判定会自相矛盾** —— 实测原文：
+     * 「资料中<b>没有任何一条与 Prometheus 相关</b>…」⇒ {@code enough=true}。
+     *
+     * <p>⇒ 于是这一步**每题花一次模型调用（实测分段 ~1.8s），却从未改变过任何结果**。
+     * 它现在等于纯开销。要留就得先让它判得准（难点见
+     * {@code RagProperties.Agent.contractInCode} 的注释：难在"提到了主题"与
+     * "能回答问题"这两件事的区分），要省就直接砍掉。
      */
     private static final String ASSESS_PROMPT = """
             你是资料充分性评估器。判断给出的资料能否支撑回答用户的问题。
@@ -127,7 +140,8 @@ public class AgenticRagService {
     private String answerPathTag() {
         return "2s=" + props.getAgent().isTwoStage()
                 + ",ctx=" + props.getAgent().isCtxInPrompt()
-                + ",shape=" + props.getAgent().isShapeThinking();
+                + ",shape=" + props.getAgent().isShapeThinking()
+                + ",cic=" + props.getAgent().isContractInCode();
     }
 
     /** 回答用的系统提示：开关打开时拼上「思考形状」那一段。
@@ -138,6 +152,20 @@ public class AgenticRagService {
      */
     private String answerSystem() {
         return props.getAgent().isShapeThinking() ? ANSWER_SYSTEM + THINK_SHAPE : ANSWER_SYSTEM;
+    }
+
+    /** 真正要发出去的那份系统提示。{@code hasContext} 为资料有无，只在开关打开时参与。
+     *
+     *  <p>**判定的依据就是"有没有资料"** —— 这正是代码能算、而模型每题要重推一遍的东西。
+     *  没资料就是【丙】，有资料就是【乙】；【甲】代码判不了（应用没有闲聊检测），
+     *  所以在【乙】那块里留了一句极短的例外。
+     */
+    private String answerSystem(boolean enough) {
+        if (!props.getAgent().isContractInCode()) {
+            return answerSystem();
+        }
+        return (enough ? CONTRACT_YI : CONTRACT_BING)
+                + (props.getAgent().isShapeThinking() ? THINK_SHAPE : "");
     }
 
     private static final String ANSWER_SYSTEM = """
@@ -183,6 +211,50 @@ public class AgenticRagService {
               实测不特意要求时，模型会把余弦相似度写成「(A · B) / (||A|| × ...)」
               这种纯文本，那在前端只是一串字符，排版全乱。
             - 代码用围栏代码块并标注语言。""";
+
+    /**
+     * 「类型由代码给」版系统提示的两块 —— 见 {@code RagProperties.Agent.contractInCode}。
+     *
+     * <p>**与 {@code ANSWER_SYSTEM} 的差别只有一处：不再要求模型判断类别。**
+     * 规则本身一条没删（引用标注、不得编造、丙的三段结构、LaTeX、代码块全都保留），
+     * 所以两个臂的差别是**要不要做判定这件事**，不是"约束松了"。
+     *
+     * <p>通用要求单独抽出来，两块共用。
+     */
+    private static final String CONTRACT_COMMON = """
+            通用要求：
+            - 用中文，简洁准确；涉及要点时用条目列出。
+            - 引用【参考资料】的地方用 [编号] 标注；通用知识部分不要标 [编号]，否则会让人误以为有出处。
+            - 数学公式一律用 LaTeX：行内用 $...$ 包起来，独立成行的用 $$...$$。前端会用 KaTeX 渲染。
+            - 代码用围栏代码块并标注语言。""";
+
+    /** 代码判定为【乙】（**有**资料）。甲只能留一句极短例外 —— 应用没有闲聊检测。 */
+    private static final String CONTRACT_YI = """
+            你是个人知识库助手。
+
+            **本次类型已由系统判定，直接照做，不要再去分析、判断或复述类别：**
+            【乙】知识性问题，且【参考资料】里有内容。
+            ⇒ 严格依据资料回答，不得编造资料里没有的内容。引用处用 [编号] 标注来源。
+            ⇒ 资料里确实没给的具体值，直说资料没给，不要拿别处的值顶上。
+            ⇒ **不要**提「知识库中没有」。
+              （唯一例外：问题若与知识库无关 —— 闲聊、问你的身份、问本次对话之前说过什么 ——
+               那就直接正常回答，同样不要提「知识库中没有」。）
+            """ + CONTRACT_COMMON;
+
+    /** 代码判定为【丙】（**没有**资料）。 */
+    private static final String CONTRACT_BING = """
+            你是个人知识库助手。
+
+            **本次类型已由系统判定，直接照做，不要再去分析、判断或复述类别：**
+            【丙】知识性问题，但知识库没有相关资料。
+            ⇒ 不要只回一句「资料中没有相关内容」就结束，那样对用户毫无帮助。按这个结构回答：
+              ① 第一句先说明知识库中没有这方面的资料。若上面给了【知识库主题概览】，
+                 顺便点出库里**确实覆盖**的相关方向（「没有 X，但有 Y 和 Z 两个方向」）。
+              ② 然后基于你自己的通用知识作答，尽量具体、有条理。
+              ③ 明确标注这部分是通用知识、并非来自用户的知识库（例如另起一行写
+                 「以下为通用知识，未引用你的知识库」）。
+              通用知识里没有把握的内容直说不知道，不要为了显得完整而编。
+            """ + CONTRACT_COMMON;
 
     /**
      * 规划输出的形状。交给提供方做语法约束，模型便无法产出这个形状之外的任何东西 ——
@@ -365,7 +437,7 @@ public class AgenticRagService {
         }
 
         List<ChunkHit> contexts = rank(collected.values());
-        String answer = answer(ref, question, contexts, hist, onEvent);
+        String answer = answer(ref, question, contexts, hist, enough, onEvent);
         return new AgentResult(answer, contexts, round, tried);
     }
 
@@ -535,6 +607,20 @@ public class AgenticRagService {
 
     private String answer(ProviderRegistry.Ref ref, String question, List<ChunkHit> contexts,
                           HistoryContext hist, Consumer<AgentEvent> onEvent) {
+        return answer(ref, question, contexts, hist, true, onEvent);
+    }
+
+    /** {@code enough} = 上面的 ③ 评估判定「资料够不够」。
+     *
+     *  <p>**它才是"乙还是丙"的机械信号** —— 而不是 {@code contexts.isEmpty()}。
+     *  2026-09-21 实测踩过：检索**几乎从不返回空**（那一轮 21 题里，
+     *  连知识库根本答不了的 6 题也召回了 8~15 段），所以"有没有资料"永远为真、
+     *  判出来永远是【乙】，于是模型被明确告知「资料里有内容、不要提知识库中没有」——
+     *  ungrounded 那一类 **6/6 全挂**（都挂在"没标注通用知识"）。
+     *  **召回到了东西，和资料能回答这个问题，是两件事。**
+     */
+    private String answer(ProviderRegistry.Ref ref, String question, List<ChunkHit> contexts,
+                          HistoryContext hist, boolean enough, Consumer<AgentEvent> onEvent) {
         List<ChatMessage> history = hist.turns();
         String historyExcerpt = hist.excerpt();
         String convSummary = hist.summary();
@@ -718,7 +804,7 @@ public class AgenticRagService {
                 ref.providerId(), ref.model(), TEMPERATURE,
                 // 系统提示的哈希进键 —— 改提示词（含"思考形状"这类开关）自动失效，
                 // 而不是继续拿旧提示词跑出来的答案。见 CacheService.answerKey。
-                CacheService.hash(answerSystem() + "|" + answerPathTag()));
+                CacheService.hash(answerSystem(enough) + "|" + answerPathTag()));
 
         CachedAnswer hit = cache.getAnswer(cacheKey);
         if (hit != null && hit.getAnswer() != null && !hit.getAnswer().isBlank()) {
@@ -730,7 +816,7 @@ public class AgenticRagService {
         }
 
         List<ChatMessage> messages = new ArrayList<>();
-        messages.add(ChatMessage.system(answerSystem()));
+        messages.add(ChatMessage.system(answerSystem(enough)));
         // 历史放在资料之前：事实依据仍来自资料，历史只用来理解指代
         if (history != null) {
             messages.addAll(history);

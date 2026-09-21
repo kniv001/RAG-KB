@@ -53,10 +53,11 @@ function Reset-Prod {
     $env:KB_TWO_STAGE = 'false'
     $env:KB_CTX_IN_PROMPT = 'false'
     $env:KB_SHAPE_THINKING = 'false'
+    $env:KB_CONTRACT_IN_CODE = 'false'
     Start-Process -FilePath $java -ArgumentList '-jar', $jar `
         -WorkingDirectory $repo -WindowStyle Hidden
     Start-Sleep -Seconds 25
-    Write-Host "`n（已按**三个开关全关**把应用起回来）"
+    Write-Host "`n（已按**四个开关全关**把应用起回来）"
 }
 
 try {
@@ -68,7 +69,8 @@ try {
         Push-Location $repo
         if (-not $SkipQuality) {
             Write-Host "`n--- 质量 ---"
-            python tools\eval.py run answer-quality --model qwen3:4b
+            # **每臂留 tag**：不然第二臂会覆盖第一臂的落盘结果，A/B 只剩后一臂
+            python tools\eval.py run answer-quality --model qwen3:4b --tag "__arm$($arm.n)"
         }
         Write-Host "`n--- 速度 ---"
         node tools\latency-probe.mjs --n $SpeedN --offset $Offset

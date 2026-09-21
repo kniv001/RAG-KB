@@ -41,6 +41,10 @@ for (const cs of cases) {
   const body = { question: cs.q, strategy: 'agent', model: modelRef };
   const t0 = Date.now();
   let answer = '', thinking = '', ttft = 0, sources = [], err = null;
+  // **把 ③ 评估的判定也存下来**：`enough` 是"资料够不够"的机械信号，
+  // 而 2026-09-21 那个开关（类型判定交给代码）正是拿它当依据 ——
+  // 它准不准，直接决定那条路成不成立。不存就只能靠答案反推。
+  let enough = null, assessReason = null;
   try {
     const st = await c.openStream('POST', '/api/chat/stream', body, { token: TOKEN });
     await readSse(st.response, (name, raw) => {
@@ -55,6 +59,10 @@ for (const cs of cases) {
         // 只能靠字数猜。第一版只拿它记 TTFT，正文丢掉了 —— 于是"少想"这条线
         // 一直在盲改（改了提示词，但看不到思考本身变没变）。
         thinking += String(dec.t ?? '');
+      } else if (name === 'assess') {
+        // 多轮时会有多条，取**最后一轮**的（那才是决定要不要继续找的那次）
+        enough = dec.enough;
+        assessReason = dec.reason ?? null;
       } else if (name === 'done') {
         sources = dec.sources || [];
       } else if (name === 'error') {
@@ -65,7 +73,7 @@ for (const cs of cases) {
     err = String(e.message || e);
   }
   const ms = Date.now() - t0;
-  results.push({ ...cs, answer, thinking, ttftMs: ttft, ms, sources, error: err });
+  results.push({ ...cs, answer, thinking, ttftMs: ttft, ms, sources, enough, assessReason, error: err });
   console.log(`  ${err ? '✗' : '✔'} ${(ms / 1000).toFixed(1)}s  正文 ${answer.length} 字`
     + ` / 思考 ${thinking.length} 字  `
     + `来源 ${sources.length}  ${cs.q.slice(0, 30)}${err ? '  ' + err.slice(0, 40) : ''}`);
