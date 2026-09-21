@@ -47,6 +47,12 @@ SCHEMAS = {
            "properties": {"answer": {"type": "string"},
                           "general": {"type": "array", "items": {"type": "string"}}},
            "required": ["answer"]},
+    # v3 = 复活条件③：**材料先由代码压到几段**
+    # （探针的条件是 6 段 / ~600 字，那是唯一能让这条路工作的条件）
+    "v3": {"type": "object",
+           "properties": {"answer": {"type": "string", "minLength": 100},
+                          "general": {"type": "array", "items": {"type": "string"}}},
+           "required": ["answer", "general"]},
 }
 SCHEMA = SCHEMAS[VARIANT]
 
@@ -69,6 +75,48 @@ def answer_system():
     m = re.search(r'ANSWER_SYSTEM\s*=\s*"""(.*?)"""', s, re.S)
     return "\n".join(l.strip() for l in m.group(1).splitlines()) if m else ""
 
+
+
+# ── v3：**材料由代码压缩** ────────────────────────────────────────────────
+# 探针的条件（6 段 / ~600 字）唯一能让 no-think 工作的原因，很可能是**材料短**。
+# 那就用代码把它压短 —— 而**不是删内容**：压成信息密度高的形式。
+#   · 每段保留：**语境行**（「本段可回答什么」，库里本来就有）+ **关键句**（代码抽取）
+#   · 段数封顶（取检索序前 N 段）
+# 关键句的取法是纯机械的：块内与问题词重叠最高的那一句（不调模型）。
+STOP = set("的了吗呢和与及或在是有为对从把被这那你我他它一个如何什么怎么哪些为什么"
+           "么样可以需要应该会能要不")
+
+
+def key_sentence(text, question, maxlen=80):
+    qs = {c for c in re.sub(r"\s+", "", question) if c not in STOP}
+    sents = [x.strip() for x in re.split(r"[。；\n]]", text) if len(x.strip()) >= 8]
+    if not sents:
+        return text[:maxlen]
+    best = max(sents, key=lambda x: len({c for c in re.sub(r"\s+", "", x) if c not in STOP} & qs))
+    return best[:maxlen]
+
+
+def compress(corpus, srcs, question, topn=6):
+    """→ (压缩后的材料文本, 保留的那几条 source)。**返回的 sources 要用在判分里** ——
+    否则判据会以为模型看到了 24 段，而它只看到 6 段（cites_valid 会松掉）。"""
+    keep = srcs[:topn]
+    lines = [f"【资料（系统已按问题筛选压缩，共 {len(keep)} 段；引用用这些编号）】"]
+    for k, s in enumerate(keep, 1):
+        body = corpus_body(corpus, s)
+        # **ctx 要从语料里查**：客户端拿到的 sources 里没有它（那是库里的一列）
+        i = next((j for j in range(corpus.n)
+                  if corpus.doc[j] == s.get("docName") and corpus.seq[j] == str(s.get("seq"))), None)
+        ctx = corpus.ctx[i] if i is not None else ""
+        lines.append(f"[{k}] {s['docName']}（第 {s['seq']} 块）"
+                     + (f"｜本段可回答：{ctx}" if ctx else ""))
+        lines.append(f"    关键句：{key_sentence(body, question)}")
+    return "\n".join(lines) + "\n", keep
+
+
+def corpus_body(C, s):
+    i = next((k for k in range(C.n)
+              if C.doc[k] == s.get("docName") and C.seq[k] == str(s.get("seq"))), None)
+    return C.body[i] if i is not None else (s.get("preview") or "")
 
 def full_text(src):
     sys.path.insert(0, TOOLS)
