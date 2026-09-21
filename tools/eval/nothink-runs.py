@@ -30,12 +30,25 @@ TOOLS = os.path.dirname(HERE)
 OLLAMA = "http://127.0.0.1:11434"
 MODEL = "qwen3:4b"
 BASE_RUN = os.path.join(HERE, "_runs", "answer-quality__qwen3-4b.json")
-OUT = os.path.join(HERE, "_runs", "answer-quality__qwen3-4b-nothink.json")
+VARIANT = os.environ.get("KB_NOTHINK_VARIANT", "v1")
+OUT = os.path.join(HERE, "_runs",
+                   f"answer-quality__qwen3-4b-nothink-{VARIANT}.json")
 
-SCHEMA = {"type": "object",
-          "properties": {"answer": {"type": "string", "minLength": 100},
-                         "general": {"type": "array", "items": {"type": "string"}}},
-          "required": ["answer", "general"]}
+# **两种取答形态**（用户 2026-09-21 要试第 2 种）：
+#   v1 有 `minLength: 100` —— 逼它凑字数 ⇒ 实测**把系统提示词抄进答案**（4/21 = 19%）
+#   v2 **不约束长度** —— 探针里这样会交最省力的合法输出（26 字抄回问题），
+#      但那是 **6 段短材料**上的读数；**真实是 24 段**，不能外推，所以要在全套上重测
+SCHEMAS = {
+    "v1": {"type": "object",
+           "properties": {"answer": {"type": "string", "minLength": 100},
+                          "general": {"type": "array", "items": {"type": "string"}}},
+           "required": ["answer", "general"]},
+    "v2": {"type": "object",
+           "properties": {"answer": {"type": "string"},
+                          "general": {"type": "array", "items": {"type": "string"}}},
+           "required": ["answer"]},
+}
+SCHEMA = SCHEMAS[VARIANT]
 
 SPLIT_SYS = """你是个人知识库助手。严格依据【参考资料】回答问题。
 
@@ -111,12 +124,12 @@ def main():
             results.append({**{k: r[k] for k in ("id", "kind", "q") if k in r},
                             "answer": "", "thinking": "", "ttftMs": 0, "ms": 0,
                             "sources": srcs, "error": str(e)[:80]})
-            json.dump({"bench": "answer-quality", "model": MODEL + " (no-think+split)",
+            json.dump({"bench": "answer-quality", "model": MODEL + f" (no-think+split {VARIANT})",
                        "at": "no-think", "results": results},
                       io.open(OUT, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
             continue
         toks.append(tk)
-        json.dump({"bench": "answer-quality", "model": MODEL + " (no-think+split)",
+        json.dump({"bench": "answer-quality", "model": MODEL + f" (no-think+split {VARIANT})",
                    "at": "no-think", "results": results},
                   io.open(OUT, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
         ans = j.get("answer", "")
@@ -131,7 +144,7 @@ def main():
         print(f"  {i:>2}. {tk:>5} tok　answer {len(ans):>4} 字　general {len(gen)} 条　{r['q'][:26]}",
               flush=True)
 
-    json.dump({"bench": "answer-quality", "model": MODEL + " (no-think+split)",
+    json.dump({"bench": "answer-quality", "model": MODEL + f" (no-think+split {VARIANT})",
                "at": "no-think", "results": results},
               io.open(OUT, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     print(f"\ntoken 中位 {sorted(toks)[len(toks)//2]}　→ {OUT}")
