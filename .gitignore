@@ -41,3 +41,6 @@ __pycache__/
 *.pyc
 tools/eval/_runs/
 data/_nothink.log
+
+# 逐块判定探针的缓存（可重生成，21 题 × ~10 块）
+tools/eval/_cache-chunkp.json
