@@ -67,6 +67,10 @@ try {
         if (-not (Start-App $arm.on)) { Write-Host "！应用没起来，跳过这臂"; continue }
 
         Push-Location $repo
+        # **每臂开跑前清空答案缓存** —— 否则第二次跑同一个臂键完全相同、全命中，
+        # 报出来的耗时是回放（实测：臂 A 21 题里 14 题命中，耗时中位 2.6s 毫无意义）。
+        # 它**只污染速度不污染质量**（命中的是同一份提示词的答案），所以最容易漏。
+        node tools\clear-answers.mjs
         if (-not $SkipQuality) {
             Write-Host "`n--- 质量 ---"
             # **每臂留 tag**：不然第二臂会覆盖第一臂的落盘结果，A/B 只剩后一臂

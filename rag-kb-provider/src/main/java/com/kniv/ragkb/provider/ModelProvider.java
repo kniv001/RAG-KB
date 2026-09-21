@@ -80,6 +80,26 @@ public interface ModelProvider {
         chatStream(model, messages, temperature, onToken, onThinking);
     }
 
+    /**
+     * **不生成，只读首 token 的概率分布**（Jev 式判断器）。
+     *
+     * <p><b>为什么单开一条路</b>：判断类任务的失败（抄示例值 / 空数组 /
+     * <b>恒选一侧</b> / 拒答填 0）**全长在"生成"这条路上** —— 一旦要吐 token，
+     * 采样器就会挑一个最安全的合法输出。读概率则让模型只做一次前向，
+     * 答案就是那个 token 本身，**没有"挑一个最安全输出"的余地**。
+     *
+     * <p>成败边界（本项目实测两次）：**离散分类行、连续程度不行** ——
+     * 「这句讲的是 X 吗」8/8、逐块「这段能回答这个问题吗」把 乙/丙 判到 18/18；
+     * 而精排 / 分段 / 当第二标注者全败。
+     *
+     * <p>调用方要自己拼**与任务同形状**的 few-shot —— 形状不匹配时靶子会掉到十几名
+     * （实测）。返回 token → 概率；不具备该能力的提供方返回空表，
+     * 调用方据此判定"信号不可用"并退回原路。
+     */
+    default java.util.Map<String, Double> rawTokenProbs(String model, String prompt, int topN) {
+        return java.util.Map.of();
+    }
+
     /** 批量向量化。返回顺序与入参一致。 */
     List<float[]> embed(String model, List<String> texts);
 

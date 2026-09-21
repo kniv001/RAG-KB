@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kniv.ragkb.domain.dto.CachedAnswer;
 import com.kniv.ragkb.domain.dto.ChunkHit;
+import com.kniv.ragkb.provider.ModelProvider;
 import com.kniv.ragkb.provider.ProviderRegistry;
 import com.kniv.ragkb.provider.model.ChatMessage;
 import com.kniv.ragkb.service.cache.CacheService;
@@ -154,18 +155,22 @@ public class AgenticRagService {
         return props.getAgent().isShapeThinking() ? ANSWER_SYSTEM + THINK_SHAPE : ANSWER_SYSTEM;
     }
 
-    /** 真正要发出去的那份系统提示。{@code hasContext} 为资料有无，只在开关打开时参与。
+    /** 真正要发出去的那份系统提示。{@code category} 由 {@link #jevCategory} 判出。
      *
-     *  <p>**判定的依据就是"有没有资料"** —— 这正是代码能算、而模型每题要重推一遍的东西。
-     *  没资料就是【丙】，有资料就是【乙】；【甲】代码判不了（应用没有闲聊检测），
-     *  所以在【乙】那块里留了一句极短的例外。
+     *  <p>{@code null} = 没判定（开关关着、或 Jev 信号不可用）⇒ 原样返回，
+     *  **行为与从前一字不差**。
      */
-    private String answerSystem(boolean enough) {
-        if (!props.getAgent().isContractInCode()) {
+    private String answerSystem(String category) {
+        // category == null ⇒ 没判定（开关关着，或 Jev 信号不可用）⇒ 走原来的提示词
+        if (!props.getAgent().isContractInCode() || category == null) {
             return answerSystem();
         }
-        return (enough ? CONTRACT_YI : CONTRACT_BING)
-                + (props.getAgent().isShapeThinking() ? THINK_SHAPE : "");
+        String rule = switch (category) {
+            case "甲" -> CONTRACT_JIA;
+            case "乙" -> CONTRACT_YI;
+            default -> CONTRACT_BING;
+        };
+        return rule + (props.getAgent().isShapeThinking() ? THINK_SHAPE : "");
     }
 
     private static final String ANSWER_SYSTEM = """
@@ -240,6 +245,101 @@ public class AgenticRagService {
               （唯一例外：问题若与知识库无关 —— 闲聊、问你的身份、问本次对话之前说过什么 ——
                那就直接正常回答，同样不要提「知识库中没有」。）
             """ + CONTRACT_COMMON;
+
+    // **这两段的形状必须与 `tools/eval/category-jev-probe.py` 逐字相同** ——
+    // few-shot 形状不匹配时靶子会掉到十几名（实测过），那时量出来的结论就不适用了。
+    private static final String JEV_CHITCHAT_TAIL =
+            "这是闲聊、问身份、或问本次对话之前说过什么的问题吗？\n答：";
+    private static final String JEV_CHITCHAT_FEWSHOT =
+            "问：你是谁？\n" + JEV_CHITCHAT_TAIL + "是\n"
+          + "问：Redis 挂了重启后数据还在吗？\n" + JEV_CHITCHAT_TAIL + "否\n";
+    private static final String JEV_RELEVANCE_TAIL = "这段能直接回答上面的问题吗？\n答：";
+    private static final String JEV_RELEVANCE_FEWSHOT =
+            "问：Redis 挂了重启后数据还在吗？\n片段：RDB 是某一时刻的全量快照，AOF 记录每一条写命令。\n"
+          + JEV_RELEVANCE_TAIL + "是\n"
+          + "问：Redis 挂了重启后数据还在吗？\n片段：Kubernetes 调度器先过滤节点再打分。\n"
+          + JEV_RELEVANCE_TAIL + "否\n";
+
+    /** 代码判定为【甲】（与知识库无关）。 */
+    private static final String CONTRACT_JIA = """
+            你是个人知识库助手。
+
+            **本次类型已由系统判定，直接照做，不要再去分析、判断或复述类别：**
+            【甲】与知识库无关（闲聊 / 问你的身份 / 问本次对话之前说过什么）。
+            ⇒ 直接正常回答即可，**不要**提「知识库中没有」，也**不要**加「以下为通用知识」这类标注。
+            ⇒ 被问身份时，说你是这个个人知识库的助手（底层由本地模型驱动）就够了，
+              不必展开讲底层模型是哪家厂商的哪个型号。
+            """ + CONTRACT_COMMON;
+
+    /**
+     * **Jev 式类型判定**：不生成、读首 token 概率（见 {@link ModelProvider#rawTokenProbs}）。
+     *
+     * <p>为什么要走这条路：生成式在这个任务上量到 **76%**，而且**错误方向完全一致**
+     * （把答不了的问题一律判【乙】）—— 那就是台账点名的退化解「恒选一侧」。
+     * 而读概率让模型只做一次前向，**没有"挑一个最安全输出"的余地**。
+     * 实测同样 21 题：**乙/丙 那一档 18/18 全对**，总 19/21，
+     * 概率还是两级的（grounded 最高块 0.889~0.998 / ungrounded 0.002~0.268）。
+     *
+     * <p>**few-shot 的形状必须与任务一致** —— 形状不匹配时靶子会掉到十几名（实测）。
+     * 这里用的两段与 `tools/eval/category-jev-probe.py` 逐字相同，
+     * 否则量出来的结论就不适用了。
+     *
+     * <p><b>已知的弱处：甲只有 1/3。</b>两处挂的都在这一档 ——
+     * 一处是「谢谢，辛苦了」（P(甲)=0.432，本来就是掷硬币），
+     * 一处是「用一句话解释限流，**别查资料**」（资料确实讲限流，但用户明令不许查，
+     * 是道故意设的对抗样本）。{@link #CONTRACT_YI} 里那句极短的甲例外就是为这种漏判留的。
+     */
+    private String jevCategory(ProviderRegistry.Ref ref, String question, List<ChunkHit> contexts) {
+        ModelProvider p = providers.get(ref.providerId());
+        long t0 = System.currentTimeMillis();
+
+        // ① 甲？ —— 与 few-shot 同形状：`问：<真问题>\n这是闲聊…吗？\n答：`
+        double chat = binProb(p, ref.model(), JEV_CHITCHAT_FEWSHOT
+                + "问：" + question + "\n" + JEV_CHITCHAT_TAIL);
+
+        String cat;
+        double best = 0;
+        int asked = 0;
+        if (chat > 0.5) {
+            cat = "甲";
+        } else {
+            // ② 乙/丙？ —— **逐块**问"这段能直接回答上面的问题吗"，**取或**。
+            //    "判定之后"这部分是代码做的：单块过 0.5 就是乙，一块都不过就是丙。
+            for (ChunkHit h : contexts) {
+                String snip = h.getContent() == null ? "" : h.getContent();
+                if (snip.length() > 300) {       // 与探针一致：只看开头 300 字
+                    snip = snip.substring(0, 300);
+                }
+                asked++;
+                double v = binProb(p, ref.model(), JEV_RELEVANCE_FEWSHOT
+                        + "问：" + question + "\n片段：" + snip + "\n" + JEV_RELEVANCE_TAIL);
+                if (v > best) {
+                    best = v;
+                }
+                if (best > 0.5) {
+                    break;  // 取或 —— 已经够了，不必把剩下的块问完（白省下一次前向）
+                }
+            }
+            cat = best > 0.5 ? "乙" : "丙";
+        }
+        // **必须记**：这个判定只在开关打开时跑，而它判错时代价是全面性的
+        // （实测：给错判定 ⇒ ungrounded 6/6 全崩）。不记的话事后只能靠答案反推。
+        log.info("Jev 类型判定 = 【{}】　P(甲)={}　最高块 P(能答)={}　问了 {}/{} 块　耗时 {}ms",
+                cat, String.format("%.3f", chat), String.format("%.3f", best),
+                asked, contexts.size(), System.currentTimeMillis() - t0);
+        return cat;
+    }
+
+    /** 读「是/否」两个 token 的 logprob 归一化。**未归一化到 1 才是对的** —— 只比较这两个。 */
+    private double binProb(ModelProvider p, String model, String prompt) {
+        java.util.Map<String, Double> m = p.rawTokenProbs(model, prompt, 20);
+        Double a = m.get("是");
+        Double b = m.get("否");
+        if (a == null || b == null || a + b <= 0) {
+            return 0;       // 信号不可用 ⇒ 由调用方退回原路
+        }
+        return a / (a + b);
+    }
 
     /** 代码判定为【丙】（**没有**资料）。 */
     private static final String CONTRACT_BING = """
@@ -437,7 +537,10 @@ public class AgenticRagService {
         }
 
         List<ChunkHit> contexts = rank(collected.values());
-        String answer = answer(ref, question, contexts, hist, enough, onEvent);
+        // 开关关着 ⇒ 不判定（category=null，answerSystem 走原提示词），**一次额外调用都不发**
+        String category = props.getAgent().isContractInCode()
+                ? jevCategory(ref, question, contexts) : null;
+        String answer = answer(ref, question, contexts, hist, category, onEvent);
         return new AgentResult(answer, contexts, round, tried);
     }
 
@@ -607,20 +710,21 @@ public class AgenticRagService {
 
     private String answer(ProviderRegistry.Ref ref, String question, List<ChunkHit> contexts,
                           HistoryContext hist, Consumer<AgentEvent> onEvent) {
-        return answer(ref, question, contexts, hist, true, onEvent);
+        return answer(ref, question, contexts, hist, null, onEvent);
     }
 
-    /** {@code enough} = 上面的 ③ 评估判定「资料够不够」。
+    /** {@code category} = Jev 判出来的甲/乙/丙；{@code null} 表示未判定（走原提示词）。
      *
-     *  <p>**它才是"乙还是丙"的机械信号** —— 而不是 {@code contexts.isEmpty()}。
-     *  2026-09-21 实测踩过：检索**几乎从不返回空**（那一轮 21 题里，
-     *  连知识库根本答不了的 6 题也召回了 8~15 段），所以"有没有资料"永远为真、
-     *  判出来永远是【乙】，于是模型被明确告知「资料里有内容、不要提知识库中没有」——
-     *  ungrounded 那一类 **6/6 全挂**（都挂在"没标注通用知识"）。
-     *  **召回到了东西，和资料能回答这个问题，是两件事。**
+     *  <p>**别再用 {@code contexts.isEmpty()} 当"乙还是丙"的信号** —— 2026-09-21 实测踩过：
+     *  检索**几乎从不返回空**（那一轮 21 题里，连知识库根本答不了的 6 题也召回了 8~15 段），
+     *  于是判出来永远是【乙】，模型被明确告知「资料里有内容、不要提知识库中没有」——
+     *  ungrounded 那一类 **6/6 全挂**。
+     *  也别用 ③ 评估的 {@code enough}：它**恒为 true**。
+     *  **召回到了东西，和资料能回答这个问题，是两件事** —— 后者只能靠
+     *  {@link #jevCategory} 那种逐块读概率来判。
      */
     private String answer(ProviderRegistry.Ref ref, String question, List<ChunkHit> contexts,
-                          HistoryContext hist, boolean enough, Consumer<AgentEvent> onEvent) {
+                          HistoryContext hist, String category, Consumer<AgentEvent> onEvent) {
         List<ChatMessage> history = hist.turns();
         String historyExcerpt = hist.excerpt();
         String convSummary = hist.summary();
@@ -804,7 +908,7 @@ public class AgenticRagService {
                 ref.providerId(), ref.model(), TEMPERATURE,
                 // 系统提示的哈希进键 —— 改提示词（含"思考形状"这类开关）自动失效，
                 // 而不是继续拿旧提示词跑出来的答案。见 CacheService.answerKey。
-                CacheService.hash(answerSystem(enough) + "|" + answerPathTag()));
+                CacheService.hash(answerSystem(category) + "|" + answerPathTag()));
 
         CachedAnswer hit = cache.getAnswer(cacheKey);
         if (hit != null && hit.getAnswer() != null && !hit.getAnswer().isBlank()) {
@@ -816,7 +920,7 @@ public class AgenticRagService {
         }
 
         List<ChatMessage> messages = new ArrayList<>();
-        messages.add(ChatMessage.system(answerSystem(enough)));
+        messages.add(ChatMessage.system(answerSystem(category)));
         // 历史放在资料之前：事实依据仍来自资料，历史只用来理解指代
         if (history != null) {
             messages.addAll(history);

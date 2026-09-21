@@ -56,6 +56,52 @@ public class OllamaProvider extends AbstractProvider {
         return resp.path("message").path("content").asText("").strip();
     }
 
+    /**
+     * Jev 式判断器：{@code /api/generate} + {@code raw:true} + {@code logprobs}，只取首 token 的分布。
+     *
+     * <p><b>三个参数缺一不可</b>（见 `tools/logprob-judge.py` 的实测）：
+     * <ul>
+     *   <li>{@code raw:true} —— 不加它，Ollama 会套聊天模板，首 token 变成闲聊开场白
+     *       （「首先」「嗯」），前 20 名里**根本没有**「是」「否」</li>
+     *   <li>{@code num_predict:1} —— 只要那一个 token，不生成</li>
+     *   <li>{@code temperature:0} —— 判断要可复现</li>
+     * </ul>
+     *
+     * <p>键要**同时收 token 原形与 strip 后的形**并取最大 logprob：
+     * `'是'` 与 `' 是'`（带空格）会撞进同一个键，后写入的低概率变体把真值覆盖掉
+     * —— 实测踩过（top1 明明是「是」，算出来 P(是) 却是 0.166）。
+     */
+    @Override
+    public java.util.Map<String, Double> rawTokenProbs(String model, String prompt, int topN) {
+        ObjectNode body = mapper.createObjectNode();
+        body.put("model", model);
+        body.put("prompt", prompt);
+        body.put("raw", true);
+        body.put("stream", false);
+        body.put("think", false);
+        body.put("logprobs", true);
+        body.put("top_logprobs", topN);
+        ObjectNode options = body.putObject("options");
+        options.put("temperature", 0);
+        options.put("num_predict", 1);
+        // **必须与对话路径同一个 num_ctx**（见 chatBody 里那条注释）——
+        // 第一版这里硬写了 8192，而对话路径是 cfg.numCtx（16384）⇒
+        // **每问一块就重载一次模型**：实测 6.8 秒/题，改对之后回到 0.1 秒级。
+        // 这个坑这个文件早就记过（4-8 秒 → 0.03 秒），我还是踩了第二次。
+        options.put("num_ctx", cfg == null ? 8192 : cfg.getNumCtx());
+
+        JsonNode resp = postJson("/api/generate", body);
+        java.util.Map<String, Double> probs = new java.util.HashMap<>();
+        for (JsonNode t : resp.path("logprobs").path(0).path("top_logprobs")) {
+            double p = Math.exp(t.path("logprob").asDouble(-60));
+            for (String key : List.of(t.path("token").asText(""),
+                                      t.path("token").asText("").strip())) {
+                probs.merge(key, p, Math::max);
+            }
+        }
+        return probs;
+    }
+
     /** schema 为空时退化为纯 {@code "json"} —— 仍是语法约束，只是形状不设限。 */
     private JsonNode schemaNode(String jsonSchema) {
         if (jsonSchema == null || jsonSchema.isBlank()) {
