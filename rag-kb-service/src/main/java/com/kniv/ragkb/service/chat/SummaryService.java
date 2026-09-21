@@ -120,6 +120,22 @@ public class SummaryService {
     private static final java.util.regex.Pattern ANY_NUMBER =
             java.util.regex.Pattern.compile("\\d+");
 
+    /**
+     * **第二种糊法：「首位之后插冒号」**（{@code 24576 → 2:4576}）。
+     *
+     * <p>上面那条**两条排除条件同时把它挡在外面**：冒号前只有 1 位（{@code \d{2,}} 不匹配）、
+     * 冒号后正是数字（{@code (?!\d)} 也不匹配）。所以另起一条，**故意写得很窄**：
+     * <ul>
+     *   <li>冒号前**恰好 1 位** —— 时间的小时是 2 位（{@code 12:30}），天然排除</li>
+     *   <li>冒号后**≥4 位** —— 时间的分钟是 2 位（{@code 2:30}），天然排除</li>
+     *   <li>而且**拼起来必须真在输入里出现** —— 否则不动</li>
+     * </ul>
+     * 三条合起来，能误伤的只剩「1 位数 : 4 位数」这种罕见写法。
+     * 规则已在 {@code tools/digit-repair-rule-probe.py} 上验过 18/18（含 4 条误伤防线）。
+     */
+    private static final java.util.regex.Pattern DIGIT_INNER_COLON =
+            java.util.regex.Pattern.compile("(?<![\\d:])(\\d)\\s*[:：](\\d{4,})(?![\\d])");
+
     private final MessageMapper messages;
     private final ConversationMapper conversations;
     private final ProviderRegistry providers;
@@ -464,6 +480,20 @@ public class SummaryService {
                 if (prefixOfLonger) {
                     log.warn("摘要里的数字可能被吃掉了末位：「{}」—— 输入里有更长的同前缀数字。条目：{}",
                             digits + ":", it);
+                }
+            }
+            // **影子模式：把「会修成什么」也记下来**（仍然不改内容）。
+            //
+            // 为什么先记不修：规则本身已经补齐并验过误伤（`tools/digit-repair-rule-probe.py`
+            // 18/18 通过，含 4 条误伤防线：`12:30` / `2:30` / 不在输入里的拼接 / 版本号）。
+            // **但生产上还没机会响过** —— 日志覆盖的 2.5 小时里跑的全是单轮问答，
+            // 摘要那条路根本没跑过。**为一场没机会发生的病开药，风险是无法评估的。**
+            // 记下影子输出，等真出现多轮会话就有真实案例可判。
+            java.util.regex.Matcher ic = DIGIT_INNER_COLON.matcher(it);
+            while (ic.find()) {
+                String joined = ic.group(1) + ic.group(2);
+                if (srcNums.contains(joined)) {
+                    log.warn("【影子·若启用会改成】「{}」→「{}」　条目：{}", ic.group(0), joined, it);
                 }
             }
         }
