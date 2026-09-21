@@ -31,8 +31,11 @@ OLLAMA = "http://127.0.0.1:11434"
 MODEL = "qwen3:4b"
 BASE_RUN = os.path.join(HERE, "_runs", "answer-quality__qwen3-4b.json")
 VARIANT = os.environ.get("KB_NOTHINK_VARIANT", "v1")
-OUT = os.path.join(HERE, "_runs",
-                   f"answer-quality__qwen3-4b-nothink-{VARIANT}.json")
+# **文件名交给平台的 `run_path`** —— 自己拼会拼成另一个名字，
+# 于是 `python tools/eval.py score` 找不到落盘结果（实测踩过）。
+sys.path.insert(0, os.path.dirname(HERE))
+from eval import runner as _runner                      # noqa: E402
+OUT = _runner.run_path("answer-quality", "qwen3:4b", tag=f"-nothink-{VARIANT}")
 
 # **两种取答形态**（用户 2026-09-21 要试第 2 种）：
 #   v1 有 `minLength: 100` —— 逼它凑字数 ⇒ 实测**把系统提示词抄进答案**（4/21 = 19%）

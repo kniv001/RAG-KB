@@ -99,12 +99,12 @@ def collect(bench, model, limit=0, tag=""):
     return out
 
 
-def score(bench_name, model, paths=None, quiet=False):
+def score(bench_name, model, paths=None, quiet=False, tag=""):
     """判分：在**已落盘的结果**上跑判据，不碰模型。paths 给多个时取「全部通过」。"""
     b = load_bench(bench_name)
     if not quiet:
         print(audit_bench(b), "\n")
-    paths = paths or [run_path(bench_name, model)]
+    paths = paths or [run_path(bench_name, model, tag)]
     for p in paths:
         if not os.path.exists(p):
             raise SystemExit(f"没有落盘结果：{p}\n先跑：python tools/eval.py collect {bench_name} --model {model}")

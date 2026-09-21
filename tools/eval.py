@@ -66,13 +66,14 @@ def cmd_run(argv):
 def cmd_collect(argv):
     name, argv = argv[0], argv[1:]
     a = _flags(argv)
-    runner.collect(name, a.get("model", "qwen3:4b"), int(a.get("limit", 0) or 0))
+    runner.collect(name, a.get("model", "qwen3:4b"), int(a.get("limit", 0) or 0),
+                   tag=a.get("tag", ""))
 
 
 def cmd_score(argv):
     name, argv = argv[0], argv[1:]
     a = _flags(argv)
-    runner.score(name, a.get("model", "qwen3:4b"))
+    runner.score(name, a.get("model", "qwen3:4b"), tag=a.get("tag", ""))
 
 
 def _flags(argv):
