@@ -89,6 +89,130 @@ def numbers_grounded(answer, context):
     return len(nums) - len(bad), len(nums), bad
 
 
+# ── 组织度：答案是在"组织"还是在"复读" ──────────────────────────────────
+# 为什么需要它（2026-09-21）：`think:false` 那条路把 decode 从 ~2358 token 压到 ~56，
+# 但答案退化成**资料摘抄** —— 而引用有效 / 数字落地 / 无标签泄漏**全都过**，
+# 两把尺子在它眼里一片合格。**这个维度此前没有任何仪器。**
+#
+# 判据是**逐字重合率**：把答案切成 12 字滑窗，看有多大比例能在**完整资料正文**里找到。
+#   · 实测标定（同一道题、同一批资料，各 4 次）：
+#       分工版（只许写资料里的） **86%**（4/4 全是 86%）
+#       不分工版（可自由组织）   **19~44%，中位 21%**
+#     ⇒ 分布不重叠，阈值取 **60%**
+#   · 仪器自检：拿资料原文当答案 ⇒ 100%；取资料首 150 字 ⇒ 100%（这两条必须成立）
+#
+# **用完整正文，不能用 preview** —— preview 只覆盖正文的 ~38%，
+# 会让重合率被系统性低估（第一版就是这么错的）。
+VERBATIM_FLAG = 0.60
+
+
+def _full_sources(sources):
+    """把 sources 里的 docName+seq 回查成**完整块正文**。查不到就退回 preview。"""
+    try:
+        import os
+        import sys
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from ruler import corpus
+        C = corpus.load()
+    except Exception:
+        return "\n".join((s.get("preview") or "") for s in sources)
+    out = []
+    for s in sources:
+        i = next((k for k in range(C.n)
+                  if C.doc[k] == s.get("docName") and C.seq[k] == str(s.get("seq"))), None)
+        out.append(C.body[i] if i is not None else (s.get("preview") or ""))
+    return "\n".join(out)
+
+
+def _shingles(s, n=12):
+    s = re.sub(r"\s+", "", s or "")
+    return {s[i:i + n] for i in range(len(s) - n + 1)}
+
+
+def verbatim_ratio(answer, sources, n=12):
+    """答案逐字来自资料的比例。None = 资料取不到（不适用）。"""
+    src = _shingles(_full_sources(sources), n)
+    a = _shingles(answer, n)
+    if not a or not src:
+        return None
+    return len(a & src) / len(a)
+
+
+# ── 引用局部性：结论与它所引的**那一块**对得上吗 ──────────────────────────
+# 为什么需要它（2026-09-21）：no-think 那条路把「AOF 最坏丢多少」答成 **1 秒** ——
+# 而资料里 `everysec` 那条才是 1 秒，`no` 那条写的是「持久化没保证」、**根本没给数字**。
+# 它把两块的结论混成了一个。
+#
+# 已有的判据全都看不见这种错：
+#   · 数字落地 —— "1秒" 在**整批资料**里找得到（只是不在它引的那块里）✅
+#   · 引用有效 —— 编号 1~N 合法 ✅
+#   · 逐字重合 —— 逐字像不像，与对不对无关 ✅
+#
+# 判据是**机械的**：把答案切成带 [n] 的子句，子句里的**具体值**（数字 / 英文标识符）
+# 必须出现在**第 n 块**里。它量的不是"有没有出处"，而是**出处的指向对不对**。
+_CLAUSE = re.compile(r"[^。；;\n]*?\[\d{1,2}\][^。；;\n]*")
+# **只查数字，不查英文术语** —— 实测（2026-09-21）：把英文词也算进来之后，
+# 三条报警**全是假阳性**，成因都是**中英术语差异**：
+#   资料写「内存区域 / 内存分段」，答案写 `Region`；资料写 `Cset`，答案写 `Collection Set`。
+# 数字是硬事实、中英无差异，所以收窄到数字（带单位或 ≥2 位）。
+_VALUE = re.compile(r"\d+(?:\.\d+)?\s*[^\s\d，。；、）)】\]]{0,3}")
+
+
+def _values(clause):
+    """子句里的**具体值**：带单位的数字（1 秒 / 500ms / 64mb）与英文标识符。
+
+    **单位数必须带单位才算** —— "3" 这种太容易碰巧；而 "1秒" 恰恰是最要紧的那类值
+    （第一版把个位数一律滤掉，于是"no 最坏丢 1 秒"这种错**抓不到**）。
+    """
+    out = []
+    # **先把引用编号剥掉**：`第[1][2][5][14]条` 里的 "14" 是编号不是值
+    # （实测报过一次假阳性）。
+    clause = re.sub(r"\[\d{1,2}\]", " ", clause)
+    for v in _VALUE.findall(clause):
+        v = re.sub(r"\s+", "", v)
+        head = re.match(r"\d+", v)
+        if head and len(head.group()) < 2 and len(v) < 2:
+            continue                      # 裸的个位数，丢弃
+        out.append(v)
+    return out
+
+
+def citation_local(answer, sources, min_len=6):
+    """逐子句查「结论里的具体值在不在它所引的那块里」。
+
+    返回 (查过的子句数, 对不上的子句列表)。**对不上 ≠ 一定错** ——
+    概括性表述本来就不含具体值；所以只报数，由人看。
+    """
+    texts = {}
+    for i, s in enumerate(sources or [], 1):
+        t = s.get("_full")
+        if t is None:
+            try:
+                import os
+                import sys
+                sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                from ruler import corpus
+                C = corpus.load()
+                k = next((j for j in range(C.n)
+                          if C.doc[j] == s.get("docName") and C.seq[j] == str(s.get("seq"))), None)
+                t = C.body[k] if k is not None else (s.get("preview") or "")
+            except Exception:
+                t = s.get("preview") or ""
+        texts[i] = re.sub(r"\s+", "", t)
+    checked, bad = 0, []
+    for m in _CLAUSE.finditer(answer or ""):
+        clause = m.group(0)
+        ids = [int(x) for x in re.findall(r"\[(\d{1,2})\]", clause)]
+        vals = _values(clause)
+        if not ids or not vals:
+            continue
+        checked += 1
+        miss = [v for v in vals if not any(v in texts.get(i, "") for i in ids)]
+        if miss:
+            bad.append((clause.strip()[:60], ids, miss[:3]))
+    return checked, bad
+
+
 # ── 按题型给判据 ────────────────────────────────────────────────────────
 def judge(kind, answer, sources, question):
     """返回 {判据名: True/False/None}，None = 该题不适用这一条。"""
@@ -98,6 +222,16 @@ def judge(kind, answer, sources, question):
     r["数字落地"] = f"{grounded}/{total}" if total else "—"
     r["_数字未落地"] = bad[:6]
     r["无标签泄漏"] = not label_leak(answer)
+    nc, badc = citation_local(answer, sources)
+    if nc:
+        r["引用对得上"] = f"{nc - len(badc)}/{nc}"
+        r["_引用对不上"] = badc[:3]
+    vr = verbatim_ratio(answer, sources)
+    if vr is not None:
+        r["逐字重合"] = f"{100*vr:.0f}%"
+        # **不是 pass/fail，是诊断维度** —— 摘抄本身不算"错"（用户可能就要原文），
+        # 但它必须**看得见**：分工版 86% / 组织版 21% 是两件完全不同的东西。
+        r["_复读"] = vr >= VERBATIM_FLAG
 
     if kind == "grounded":                      # 【乙】有资料
         r["有引用"] = has_cite(answer)
