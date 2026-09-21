@@ -39,3 +39,5 @@ tools/_fresh.sql
 tools/eval/_runs/
 __pycache__/
 *.pyc
+tools/eval/_runs/
+data/_nothink.log
