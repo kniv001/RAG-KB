@@ -44,3 +44,6 @@ data/_nothink.log
 
 # 逐块判定探针的缓存（可重生成，21 题 × ~10 块）
 tools/eval/_cache-chunkp.json
+
+# 运行记录（每次跑的完整日志 + meta）—— 量可能大，不进仓库
+tools/_runs/
