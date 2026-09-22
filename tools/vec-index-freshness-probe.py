@@ -82,12 +82,21 @@ def rebuild(rows):
         "_corpus_vecs-noctx.json": [r[2] for r in rows],                              # body
         "_corpus_vecs-ctxtonly.json": [r[1] for r in rows],                           # ctx
     }
+    # **语料戳要写进每一个变体**（2026-09-22 修：重建时只有主缓存带戳，
+    # 两个变体被写掉了戳 —— 而"每个数字带尺子名 + 语料戳"正是这个项目的纪律，
+    # 缺了它事后回溯"这批向量是哪版语料的"就答不上来）。
+    try:
+        sys.path.insert(0, HERE)
+        from ruler import corpus as _c
+        stamp = _c.load().stamp
+    except Exception:
+        stamp = None
     for name, texts in variants.items():
         print(f"嵌入 {name}（{len(texts)} 条）…", flush=True)
         vecs = emb(texts)
         io.open(os.path.join(HERE, name), "w", encoding="utf-8").write(
-            json.dumps({"ids": ids, "vecs": vecs}))
-        print(f"  写好 {name}（ids {ids[0]}~{ids[-1]}）", flush=True)
+            json.dumps({"stamp": stamp, "ids": ids, "vecs": vecs}))
+        print(f"  写好 {name}（ids {ids[0]}~{ids[-1]}，戳 {stamp}）", flush=True)
 
 
 def main():
