@@ -151,7 +151,11 @@ def main():
         f.write(banner)
         f.flush()
         # 子进程自己也吐 utf-8，别让父进程的代码页把它截断
-        env = dict(os.environ, PYTHONIOENCODING="utf-8")
+        # **把运行目录交给子进程** —— 探针想留完整产物（整段思考、整份答案、
+        # 中间 JSON）就往这里写。日志里通常只打**节选**（`[:120]` 那种），
+        # 而"节选"正是事后回溯时最缺的东西：想知道那次的完整思考长什么样，
+        # 光有前 120 字没用。
+        env = dict(os.environ, PYTHONIOENCODING="utf-8", KB_RUN_DIR=d)
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                              env=env, bufsize=1, text=True,
                              encoding="utf-8", errors="replace")
