@@ -52,6 +52,10 @@ def norm(s):
 
 
 def psql_rows(sql, tag="corpus"):
+    # **结尾分号要剥掉**：本函数把查询包进 `COPY (...)`，而 `COPY (SELECT ...;)` 是语法错误。
+    # 2026-09-22 踩到：调用方带了个分号 ⇒ 每条查询都报错，而**报错信息只进 stderr**，
+    # 函数返回空列表 ⇒ 被读成"表里没有"。（那次我以为"非零退出"就是判据，见下。）
+    sql = sql.strip().rstrip(";")
     f = os.path.join(TOOLS, f"_ruler_{tag}.sql")
     io.open(f, "w", encoding="utf-8").write(f"COPY ({sql}) TO STDOUT;")
     env = dict(os.environ)
@@ -59,11 +63,13 @@ def psql_rows(sql, tag="corpus"):
     env["PGCLIENTENCODING"] = "UTF8"
     r = subprocess.run([PSQL, "-h", "127.0.0.1", "-U", "ragkb", "-d", "ragkb", "-f", f],
                        capture_output=True, env=env)
-    # **失败要喊，不能静默返回空** —— 2026-09-22 踩到：连接失败时这里返回 []，
-    # 调用方看到的是"查出来 0 行"，于是把「查不到」读成了「表里没有」。
-    # 这与「尺子坏掉时不报错，只让结果悄悄变空」是同一族 —— 而这次我自己被骗了一次。
-    if r.returncode != 0:
-        raise RuntimeError(f"psql 失败（{r.returncode}）：{r.stderr.decode('utf-8', 'replace')[:400]}")
+    # **判据是 stderr，不是退出码** —— 2026-09-22 实测：SQL 语法错误时
+    # **psql 的退出码仍然是 0**，所以"非零才喊"那一版完全抓不住。
+    # 这正是「尺子坏掉时不报错，只让结果悄悄变空」的又一例 —— 而且是我自己修了一次
+    # 还没修对的那种。
+    err = r.stderr.decode("utf-8", "replace")
+    if r.returncode != 0 or "ERROR" in err.upper():
+        raise RuntimeError(f"psql 失败（退出码 {r.returncode}）：{err[:400]}")
     raw = r.stdout.decode("utf-8", "replace")
     # `\r` 不去掉的话，每行最后一个字段永远比不中（2026-09-20 踩过：全场 0 命中）
     return [[unescape(x) for x in ln.rstrip("\r").split("\t")]
