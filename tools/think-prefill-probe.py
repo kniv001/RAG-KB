@@ -16,8 +16,12 @@
 """
 import io
 import json
+import os
 import sys
 import urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _artifact import save                                    # noqa: E402
 
 OLLAMA = "http://127.0.0.1:11434"
 MODEL = "qwen3:4b"
@@ -57,6 +61,7 @@ def main():
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
+    seen = []
     for name, msgs in CASES:
         print(f"===== {name}")
         try:
@@ -66,8 +71,16 @@ def main():
             continue
         m = d.get("message", {})
         th, ct = m.get("thinking", "") or "", m.get("content", "") or ""
+        # **屏幕上只打节选，完整的两份另存** —— 这道探针的全部意义就是"续写落在哪个
+        # 通道、续了什么"，而 120 字的节选答不了后半句。节选是给终端看的，
+        # 回溯要的是全文。（没走 `tools/run.py` 包时会写到临时目录并把路径打出来。）
+        n = len(seen)
+        seen.append(name)
+        save(f"{n:02d}-thinking.txt", th)
+        save(f"{n:02d}-content.txt", ct)
         print(f"  thinking 通道 {len(th):>5} 字：{th[:120]!r}")
         print(f"  content  通道 {len(ct):>5} 字：{ct[:160]!r}")
+        print(f"  （全文已存：{n:02d}-thinking.txt / {n:02d}-content.txt，见本次运行目录）")
         print(f"  ⇒ 续写落在：{'**thinking** ✅' if len(th) > len(ct) else 'content'}"
               f"　（prompt {d.get('prompt_eval_count')} tok / gen {d.get('eval_count')} tok）\n")
 
