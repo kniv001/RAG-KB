@@ -10,6 +10,9 @@
 所以：**新内容一律新名字**，合并时把每题标上来源。
 
 用法：python tools/ruler/merge_cases.py <输出名> <题目集1> <题目集2> ...
+
+（`multihop-103` 是合并途中的中间产物，已被 `multihop-113` 取代 —— 删了，
+免得两个名字看着像两把尺子。）
 """
 import io
 import json
