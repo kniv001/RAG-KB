@@ -85,13 +85,66 @@ def run_path(bench, model, tag=""):
     return os.path.join(_RUNS, f"{bench}__{model.replace(':', '-').replace('/', '-')}{tag}.json")
 
 
-def collect(bench, model, limit=0, tag=""):
-    """采集：跑模型，落盘。"""
+_BASE = os.environ.get("KB_BASE", "http://127.0.0.1:8080")
+_JAR = os.path.join(os.path.dirname(TOOLS), "rag-kb-web", "target", "rag-kb.jar")
+
+
+def app_up(timeout=3):
+    import urllib.request
+    try:
+        with urllib.request.urlopen(_BASE + "/actuator/health", timeout=timeout) as r:
+            return b'"status":"UP"' in r.read()
+    except Exception:
+        return False
+
+
+def ensure_app(wait=120):
+    """应用没起来就**自己起**，起来了就直接返回。
+
+    <p>为什么要它：`collect` 假定应用已经在跑，而"手动启动 + 盯着 health 转 20 秒"
+    是每次评测都要付的一遍，且**忘了起就直接连接被拒** —— 失败信息还长得像网络问题。
+    分段跑（`--only` / 续跑）本来就是为了少等，这一步不自动化就白省了。
+
+    起不来的原因就那几类（没打包 / 密码读不到 / 端口占用），所以失败时把三条都打出来。
+    """
+    import subprocess
+    import time
+    if app_up():
+        return True
+    if not os.path.exists(_JAR):
+        raise SystemExit(f"应用没在跑，而且没有 {_JAR} —— 先打包："
+                         f"mvn -pl rag-kb-web -am -DskipTests package")
+    env = dict(os.environ)
+    # 库密码与其它脚本同一个来源
+    pw = os.path.join(os.path.dirname(TOOLS), "..", "rag-kb", "data", "pgapp.txt")
+    if os.path.exists(pw):
+        env.setdefault("KB_DB_PASSWORD", open(pw, encoding="utf-8").read().strip())
+    print("（应用没在跑，正在起……）", flush=True)
+    subprocess.Popen(["java", "-jar", _JAR], cwd=os.path.dirname(TOOLS), env=env,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    for _ in range(wait // 2):
+        time.sleep(2)
+        if app_up():
+            print("（起来了）", flush=True)
+            return True
+    raise SystemExit(f"起了 {wait}s 还没 UP —— 查：① 有没有打包 ② KB_DB_PASSWORD 读没读到 "
+                     f"③ 8080 是不是被别的进程占了。日志：{os.path.dirname(TOOLS)}/data/app.log")
+
+
+def collect(bench, model, limit=0, tag="", only=""):
+    ensure_app()
+    """采集：跑模型，落盘。
+
+    `only` 按 id 或 kind 过滤 ⇒ **不必每次全量测试**（只复验几道题、或只跑某一类）。
+    采集端本身**逐题落盘 + 断点续跑**，所以中断了重跑就是接着跑。
+    """
     out = run_path(bench, model, tag)
     cmd = ["node", os.path.join(HERE, "collect.mjs"),
            "--bench", bench, "--model", model, "--out", out]
     if limit:
         cmd += ["--limit", str(limit)]
+    if only:
+        cmd += ["--only", only]
     # 与其它探针一致：从仓库根跑（探针里的路径都是仓库根相对的）
     subprocess.run(cmd, cwd=os.path.dirname(TOOLS), check=False)
     if not os.path.exists(out):
@@ -158,7 +211,7 @@ def score(bench_name, model, paths=None, quiet=False, tag=""):
     return per
 
 
-def run(bench_name, model, limit=0, repeat=1, tag=""):
+def run(bench_name, model, limit=0, repeat=1, tag="", only=""):
     """采集 N 次 → 判分（N>1 时取「全部通过」）。
 
     `tag` 用来区分**同一模型的不同条件**（如两个开关臂）—— 不留 tag 的话
@@ -168,7 +221,9 @@ def run(bench_name, model, limit=0, repeat=1, tag=""):
     for r in range(repeat):
         t = (f"__r{r+1}" if repeat > 1 else "") + tag
         print(f"—— 采集 {bench_name} × {model}{tag}" + (f"（第 {r+1}/{repeat} 次）" if repeat > 1 else "") + " ——")
-        paths.append(collect(bench_name, model, limit, t))
+        paths.append(collect(bench_name, model, limit, t, only=only))
+        # **每跑完一次就判一次**：分段式输出 —— 不等全部跑完才知道结果
+        score(bench_name, model, [paths[-1]], quiet=True)
         print()
     return score(bench_name, model, paths, tag=tag)
 

@@ -26,17 +26,48 @@ const login = await c.call('POST', '/api/auth/login',
   { username: cred.user, password: cred.password });
 const TOKEN = `Bearer ${login.body.data.accessToken}`;
 
-const bench = JSON.parse(fs.readFileSync(`tools/eval/benches/${BENCH}.json`, 'utf8'));
+let bench = JSON.parse(fs.readFileSync(`tools/eval/benches/${BENCH}.json`, 'utf8'));
 let cases = bench.cases;
 if (LIMIT) cases = cases.slice(0, LIMIT);
 
 const OUT = arg('out', `tools/eval/_runs/${BENCH}__${MODEL.replace(/[:/]/g, '-')}.json`);
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 
+// ── 断点续跑 ─────────────────────────────────────────────────────────────
+// 为什么必须有：一次全量是 21 题 × ~25s ≈ 9 分钟，**题集扩到百题就是 40+ 分钟** ——
+// 中途任何一次超时/重启/手滑，前面的全白跑（实测踩过：报错在最后才写盘，前面跑的全丢）。
+// 所以：**每题落盘 + 开跑时跳过已经做过的题**。重跑 = 接着跑，不是从头跑。
+//
+// `--only` 按 id 或 kind 过滤 ⇒ 想只复验几道题、或只跑某一类，不必全量。
+const ONLY = arg('only', '');
+if (ONLY) {
+  const keys = ONLY.split(',').map((s) => s.trim()).filter(Boolean);
+  cases = cases.filter((c) => keys.some((k) => c.id === k || c.kind === k));
+  console.log(`（--only ${ONLY} ⇒ 选中 ${cases.length} 题）`);
+}
+
+let results = [];
+if (fs.existsSync(OUT)) {
+  try {
+    const prev = JSON.parse(fs.readFileSync(OUT, 'utf8'));
+    results = (prev.results || []).filter((r) => !r.error);
+    const done = new Set(results.map((r) => r.id));
+    const skipped = cases.filter((c) => done.has(c.id)).length;
+    if (skipped) console.log(`（续跑：已有 ${skipped} 题，跳过）`);
+    cases = cases.filter((c) => !done.has(c.id));
+  } catch (e) {
+    console.log(`（旧文件读不出来，重头跑：${e.message}）`);
+  }
+}
+
+// **每题就写一次**：崩了也只丢当前这题，不是整批
+const flush = () => fs.writeFileSync(OUT, JSON.stringify({
+  bench: BENCH, model: modelRef, at: new Date().toISOString(), results,
+}, null, 1));
+
 const modelRef = MODEL.includes('/') ? MODEL : `local/${MODEL}`;
 console.log(`基准 ${BENCH}（${cases.length} 题）× 模型 ${modelRef}\n`);
 
-const results = [];
 for (const cs of cases) {
   const body = { question: cs.q, strategy: 'agent', model: modelRef };
   const t0 = Date.now();
@@ -74,12 +105,10 @@ for (const cs of cases) {
   }
   const ms = Date.now() - t0;
   results.push({ ...cs, answer, thinking, ttftMs: ttft, ms, sources, enough, assessReason, error: err });
+  flush();      // **每题落盘** —— 崩了只丢当前这题
   console.log(`  ${err ? '✗' : '✔'} ${(ms / 1000).toFixed(1)}s  正文 ${answer.length} 字`
     + ` / 思考 ${thinking.length} 字  `
     + `来源 ${sources.length}  ${cs.q.slice(0, 30)}${err ? '  ' + err.slice(0, 40) : ''}`);
 }
 
-fs.writeFileSync(OUT, JSON.stringify({
-  bench: BENCH, model: modelRef, at: new Date().toISOString(), results,
-}, null, 1));
-console.log(`\n原始结果 → ${OUT}`);
+console.log(`\n原始结果 → ${OUT}（共 ${results.length} 题）`);
