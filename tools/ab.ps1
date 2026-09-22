@@ -17,6 +17,7 @@ param(
     [Parameter(Mandatory = $true)][string]$Switch,
     [int]$Offset = 3,          # 速度那段的题目起点（错开，避开答案缓存）
     [int]$SpeedN = 5,
+    [int]$Repeat = 1,          # 质量采集重复几次（>1 时「全部通过」才算过）
     [switch]$SkipQuality
 )
 
@@ -74,7 +75,7 @@ try {
         if (-not $SkipQuality) {
             Write-Host "`n--- 质量 ---"
             # **每臂留 tag**：不然第二臂会覆盖第一臂的落盘结果，A/B 只剩后一臂
-            python tools\eval.py run answer-quality --model qwen3:4b --tag "__arm$($arm.n)"
+            python tools\eval.py run answer-quality --model qwen3:4b --repeat $Repeat --tag "__arm$($arm.n)"
         }
         Write-Host "`n--- 速度 ---"
         node tools\latency-probe.mjs --n $SpeedN --offset $Offset

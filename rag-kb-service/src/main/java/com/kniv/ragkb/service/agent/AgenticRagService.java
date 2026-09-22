@@ -505,6 +505,8 @@ public class AgenticRagService {
 
         int round = 0;
         boolean enough = false;
+        // 开关关着 ⇒ 不判定（null ⇒ answerSystem 走原提示词），**一次额外调用都不发**
+        String category = null;
         for (round = 1; round <= cfg.getMaxRounds(); round++) {
             // ① 规划
             onEvent.accept(AgentEvent.plan(round, queries));
@@ -522,8 +524,25 @@ public class AgenticRagService {
             List<ChunkHit> contexts = rank(collected.values());
 
             // ③ 评估
-            Assess assess = assess(utility, question, contexts);
-            enough = assess.enough;
+            Assess assess;
+            if (props.getAgent().isContractInCode()) {
+                // **新路：③ 评估这一步被 Jev 判定取代。**
+                //
+                // 为什么能取代：那一步**每题花一次模型调用（实测分段 ~1.8s），
+                // 却从未改变过任何结果** —— 75 条真身记录（多跳 25 × 3 次对照）
+                // 轮数全是 1，另 21 题 enough 全是 true。它现在是纯开销。
+                //
+                // **`enough` 仍然按 true 走** —— 也就是说**循环行为一字不改**
+                // （永远第一轮就 break）。理由是"该不该多跑一轮检索"是**另一件事**，
+                // 拿 Jev 结果去触发它会把两个改动捆在一起，那就量不清了。
+                // 要复活多轮检索是**单独的**一个决定。
+                category = jevCategory(ref, question, contexts);
+                enough = true;
+                assess = new Assess(true, "Jev 判定：" + category, "");
+            } else {
+                assess = assess(utility, question, contexts);
+                enough = assess.enough;
+            }
             onEvent.accept(AgentEvent.assess(round, enough, assess.reason, assess.missing));
             if (enough || round == cfg.getMaxRounds()) {
                 break;
@@ -537,9 +556,6 @@ public class AgenticRagService {
         }
 
         List<ChunkHit> contexts = rank(collected.values());
-        // 开关关着 ⇒ 不判定（category=null，answerSystem 走原提示词），**一次额外调用都不发**
-        String category = props.getAgent().isContractInCode()
-                ? jevCategory(ref, question, contexts) : null;
         String answer = answer(ref, question, contexts, hist, category, onEvent);
         return new AgentResult(answer, contexts, round, tried);
     }
