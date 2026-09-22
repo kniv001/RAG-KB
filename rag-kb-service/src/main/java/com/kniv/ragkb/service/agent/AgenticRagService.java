@@ -447,6 +447,7 @@ public class AgenticRagService {
 
     private final ProviderRegistry providers;
     private final Retriever retriever;
+    private final com.kniv.ragkb.service.chat.MemoryService memory;
     private final RagProperties props;
     private final ObjectMapper mapper;
     private final CacheService cache;
@@ -730,6 +731,7 @@ public class AgenticRagService {
     }
 
     private Assess assess(ProviderRegistry.Ref ref, String question, List<ChunkHit> contexts) {
+        // 【长期记忆】：跨会话攒下来的事实与约定。排在这里是因为下面那段
         if (contexts.isEmpty()) {
             return new Assess(false, "没有检索到任何资料", "知识库中缺少该主题的内容");
         }
@@ -890,6 +892,16 @@ public class AgenticRagService {
                             + "问题若能用它回答，就依据它回答，并说明这是本次对话之前提到的；"
                             + "只有当它也回答不了时，才说知识库没有、再给通用知识。）\n\n");
         }
+        // **长期记忆**：跨会话攒下来的事实与约定。
+        //
+        // 排在这里有两个理由：① 它在【参考资料】之前 —— 参考资料是事实依据，
+        // 必须紧挨着【问题】（见上方注释）；② 它**不在 `contexts.isEmpty()` 分支里** ——
+        // 记忆与"这次检索到没有"无关，没资料时它反而更有用
+        //（"库里没有 X" 与"我记得你说过 Y"是两回事）。
+        String mem = memory.render();
+        if (mem != null && !mem.isBlank()) {
+            user.append(mem).append(System.lineSeparator());
+        }
         if (contexts.isEmpty()) {
             // 不在这里给处置指令 —— 该怎么答由 ANSWER_SYSTEM 的三段式统一决定。
             // 之前这里写死了「若问的是知识内容，回答『资料中没有相关内容』」，
@@ -958,7 +970,13 @@ public class AgenticRagService {
                 ref.providerId(), ref.model(), TEMPERATURE,
                 // 系统提示的哈希进键 —— 改提示词（含"思考形状"这类开关）自动失效，
                 // 而不是继续拿旧提示词跑出来的答案。见 CacheService.answerKey。
-                CacheService.hash(answerSystem(category) + "|" + answerPathTag()));
+                CacheService.hash(answerSystem(category) + "|" + answerPathTag()
+                        // **长期记忆必须进键** —— 它变了答案就可能变。
+                        // 不进键的症状是"记忆明明更新了，回答却还是旧的"，
+                        // 而且因为缓存命中不报错，**看起来像记忆没生效**。
+                        // 这与"改提示词不失效""改开关不失效"是同一类坑，
+                        // 本项目一天内踩过三次。
+                        + "|mem=" + CacheService.hash(memory.list().toString())));
 
         CachedAnswer hit = cache.getAnswer(cacheKey);
         if (hit != null && hit.getAnswer() != null && !hit.getAnswer().isBlank()) {

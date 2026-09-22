@@ -142,6 +142,7 @@ public class SummaryService {
     private final RagProperties props;
     private final ObjectMapper mapper;
     private final com.kniv.ragkb.service.config.GpuGate gpuGate;
+    private final MemoryService memory;
 
     private final ExecutorService pool = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "conv-summary");
@@ -207,6 +208,21 @@ public class SummaryService {
                     if (merged != null && !merged.isBlank()) {
                         conversations.updateSummary(convId, merged, newUpto);
                         log.debug("会话 {} 摘要已更新到消息 {}（{} 字）", convId, newUpto, merged.length());
+                        // **顺带并进长期记忆** —— 见 MemoryService 的类注释。
+                        // 放在这里是因为这是唯一一个"已经提纯过的一行一条"的产出点：
+                        // 在此之前模型面对的是原始对话，要判断"哪句是持久事实"；
+                        // 到这里判断已经做完了，剩下两件（同主题吗、值变了吗）都是机械的。
+                        // **不额外调模型**，所以它不占推理槽、也不必再等 gpuGate。
+                        try {
+                            // **用 lines() 而不是 split("\n")** —— 后者要写转义，
+                            // 而这次改代码时转义被工具链吃掉了一次（写成真换行 ⇒ 编译不过）。
+                            // 不依赖转义的写法就没有这个面。
+                            memory.absorb(merged.lines()
+                                            .map(String::strip).filter(x -> !x.isEmpty()).toList(),
+                                    convId);
+                        } catch (Exception e) {
+                            log.warn("长期记忆合并失败（不影响问答）：{}", e.getMessage());
+                        }
                     }
                 } catch (Exception e) {
                     log.warn("摘要更新失败（不影响问答）：{}", e.getMessage());

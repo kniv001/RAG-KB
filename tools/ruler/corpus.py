@@ -57,8 +57,14 @@ def psql_rows(sql, tag="corpus"):
     env = dict(os.environ)
     env["PGPASSWORD"] = io.open(PGPASS, encoding="utf-8").read().strip()
     env["PGCLIENTENCODING"] = "UTF8"
-    raw = subprocess.run([PSQL, "-h", "127.0.0.1", "-U", "ragkb", "-d", "ragkb", "-f", f],
-                         capture_output=True, env=env).stdout.decode("utf-8", "replace")
+    r = subprocess.run([PSQL, "-h", "127.0.0.1", "-U", "ragkb", "-d", "ragkb", "-f", f],
+                       capture_output=True, env=env)
+    # **失败要喊，不能静默返回空** —— 2026-09-22 踩到：连接失败时这里返回 []，
+    # 调用方看到的是"查出来 0 行"，于是把「查不到」读成了「表里没有」。
+    # 这与「尺子坏掉时不报错，只让结果悄悄变空」是同一族 —— 而这次我自己被骗了一次。
+    if r.returncode != 0:
+        raise RuntimeError(f"psql 失败（{r.returncode}）：{r.stderr.decode('utf-8', 'replace')[:400]}")
+    raw = r.stdout.decode("utf-8", "replace")
     # `\r` 不去掉的话，每行最后一个字段永远比不中（2026-09-20 踩过：全场 0 命中）
     return [[unescape(x) for x in ln.rstrip("\r").split("\t")]
             for ln in raw.split("\n") if ln.strip()]

@@ -197,3 +197,22 @@ CREATE TABLE IF NOT EXISTS cache_parses (
     created_at  timestamptz NOT NULL DEFAULT now(),
     last_hit_at timestamptz
 );
+
+-- 长期记忆：跨会话存活的事实（偏好、约定、已定下来的决定）。
+--
+-- 为什么需要它：在此之前"记忆"只有 conversations.summary —— 按会话隔离，
+-- 这次对话里说定的约定，换个会话就没了。
+-- 形状**沿用摘要那一套**（`主题：曾经 → 现在`），于是摘要服务的机械件
+-- （解析 / 着落判据 / 覆盖边 / 只增不删）原样可用，不是另起一套。
+--
+-- **topic 是主键** —— 一条主题只留一行，覆盖时改这一行而不是追加：
+-- 追加会让同一个主题堆出十几行，而"当前值"要靠时间戳去猜。
+CREATE TABLE IF NOT EXISTS memory_items (
+    topic      text PRIMARY KEY,
+    item       text NOT NULL,
+    src_conv   text,
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE memory_items IS '跨会话的长期记忆，一行一条（主题：曾经 → 现在）';
+COMMENT ON COLUMN memory_items.src_conv IS '最早写下这条的会话，便于追溯';
