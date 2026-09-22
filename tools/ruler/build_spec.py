@@ -58,17 +58,26 @@ def main():
     cases = []
     for f in files:
         spec = json.load(io.open(os.path.join(SPEC_DIR, f), encoding="utf-8"))
-        doc, pre = spec["doc"], spec.get("prefix", f[:2])
-        if doc not in index:
+        doc, pre = spec.get("doc", ""), spec.get("prefix", f[:2])
+        # `multi` 批次的顶层 doc 是空的（每题自带），所以这个检查要跳过它
+        if not spec.get("multi") and doc not in index:
             raise SystemExit(f"！{f}：语料里没有这篇文档 —— {doc[:40]}")
-        for n, seqs, q in spec["cases"]:
+        # **两种格式**：整篇同一文档（默认），或每题自带文档（`"multi": true`，
+        # 用于跨主题的批次 —— 例如"按同一条诊断写的硬题"来自好几个文档）。
+        for item in spec["cases"]:
+            if spec.get("multi"):
+                d, n, seqs, q = item
+            else:
+                d, (n, seqs, q) = doc, item
+            if d not in index:
+                raise SystemExit(f"！{f}：语料里没有这篇文档 —— {d[:40]}")
             targets = []
             for s in seqs:
-                i = index[doc].get(str(s))
+                i = index[d].get(str(s))
                 if i is None:
-                    raise SystemExit(f"！{pre}{n}：{doc[:20]} 里没有第 {s} 块")
+                    raise SystemExit(f"！{pre}{n}：{d[:20]} 里没有第 {s} 块")
                 targets.append({"excerpt": C.head(i), "seq_hint": int(s)})
-            cases.append({"id": f"{pre}{n:02d}", "doc": doc, "q": q, "targets": targets})
+            cases.append({"id": f"{pre}{n:02d}", "doc": d, "q": q, "targets": targets})
         print(f"  {f[:-5]:<12} {len(spec['cases']):>3} 题")
 
     out = {

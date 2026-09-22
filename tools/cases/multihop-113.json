@@ -1,0 +1,1817 @@
+{
+ "schema": "ruler/cases@1",
+ "name": "multihop-113",
+ "kind": "retrieval",
+ "judge": "all-hit",
+ "note": "合并自 multihop-25(25/25) + multihop-new(63/63) + batch1(7/7) + batch2(8/8) + hard(10/10)。**新名字 = 新身份** —— 历史数字只对旧名字成立，别混用。",
+ "cases": [
+  {
+   "id": "mult-mh01",
+   "doc": "高并发系统限流-漏桶算法和令牌桶算法 - 陶朱公Boy - 博客园.md",
+   "q": "接入层想限制单个 IP 每秒最多处理 2 个请求，同时允许短时间的突发，配置里要写哪几个参数？",
+   "targets": [
+    {
+     "excerpt": "场景2.3测试首先定义IP维度的限流区域：limit_req_zone$bina",
+     "seq_hint": "75"
+    },
+    {
+     "excerpt": "limit_conn_status：配置被限流后返回的状态码，默认返回503；l",
+     "seq_hint": "57"
+    }
+   ],
+   "src": "multihop-25"
+  },
+  {
+   "id": "mult-mh02",
+   "doc": "高并发系统限流-漏桶算法和令牌桶算法 - 陶朱公Boy - 博客园.md",
+   "q": "我配了每秒 2 个请求，为什么桶里最多能攒下 3 个？这个数是怎么算出来的？",
+   "targets": [
+    {
+     "excerpt": "桶计算时间窗口（1.5秒）=速率（2r/s）/桶容量(3)，也就是说在这个时间窗",
+     "seq_hint": "72"
+    },
+    {
+     "excerpt": "为了方便测试设置速率为每秒2个请求，即固定平均速率是500毫秒一个请求。接着在要",
+     "seq_hint": "68"
+    }
+   ],
+   "src": "multihop-25"
+  },
+  {
+   "id": "mult-mh03",
+   "doc": "高并发系统限流-漏桶算法和令牌桶算法 - 陶朱公Boy - 博客园.md",
+   "q": "不想引第三方限流库，接口级别的并发控制用 Java 自己怎么实现？要按时间窗统计又怎么做？",
+   "targets": [
+    {
+     "excerpt": "maxThreads：Tomcat能启动用来处理请求的最大线程数，如果请求处理量",
+     "seq_hint": "37"
+    },
+    {
+     "excerpt": "}适合对业务无损的服务或者需要过载保护的服务进行限流，如抢购业务，超出了大小要么",
+     "seq_hint": "38"
+    }
+   ],
+   "src": "multihop-25"
+  },
+  {
+   "id": "mult-mh04",
+   "doc": "高并发系统限流-漏桶算法和令牌桶算法 - 陶朱公Boy - 博客园.md",
+   "q": "同一个限流需求，用 Java 代码、用 Redis 脚本、用 Nginx 配置，文档里分别在哪一块讲？",
+   "targets": [
+    {
+     "excerpt": "maxThreads：Tomcat能启动用来处理请求的最大线程数，如果请求处理量",
+     "seq_hint": "37"
+    },
+    {
+     "excerpt": "首先我们来使用redis+lua实现时间窗内某个接口的请求数限流，实现了该功能后",
+     "seq_hint": "48"
+    },
+    {
+     "excerpt": "如果被限流了，则在error.log中会看到类似如下的内容：2016/06/08",
+     "seq_hint": "60"
+    }
+   ],
+   "src": "multihop-25"
+  },
+  {
+   "id": "mult-mh05",
+   "doc": "高并发系统限流-漏桶算法和令牌桶算法 - 陶朱公Boy - 博客园.md",
+   "q": "我们的限流是按 IP 做的，如果接入层有好几台 Nginx，同一个 IP 的请求会被算成几份？怎么解决？",
+   "targets": [
+    {
+     "excerpt": "桶计算时间窗口（1.5秒）=速率（2r/s）/桶容量(3)，也就是说在这个时间窗",
+     "seq_hint": "72"
+    },
+    {
+     "excerpt": "limit_conn_zone/limit_req_zone定义的内存不足，则后",
+     "seq_hint": "81"
+    }
+   ],
+   "src": "multihop-25"
+  },
+  {
+   "id": "mult-mh06",
+   "doc": "高并发系统限流-漏桶算法和令牌桶算法 - 陶朱公Boy - 博客园.md",
+   "q": "漏桶和令牌桶，哪个允许突发？为什么两者实现一样效果却相反？",
+   "targets": [
+    {
+     "excerpt": "如果令牌不被消耗，或者被消耗的速度小于产生的速度，令牌就会不断地增多，直到把桶填",
+     "seq_hint": "22"
+    },
+    {
+     "excerpt": "漏桶算法漏桶作为计量工具（TheLeakyBucketAlgorithmasaM",
+     "seq_hint": "35"
+    }
+   ],
+   "src": "multihop-25"
+  },
+  {
+   "id": "mult-mh07",
+   "doc": "高并发系统限流-漏桶算法和令牌桶算法 - 陶朱公Boy - 博客园.md",
+   "q": "用 RateLimiter 时，为什么有时候第一次不等、紧接着的请求却要等一秒？",
+   "targets": [
+    {
+     "excerpt": "再看一个突发示例：RateLimiterlimiter=RateLimiter.",
+     "seq_hint": "42"
+    },
+    {
+     "excerpt": "此处可以看到我们设置的桶容量为2（即允许的突发量），这是因为SmoothBurs",
+     "seq_hint": "45"
+    }
+   ],
+   "src": "multihop-25"
+  },
+  {
+   "id": "mult-mh08",
+   "doc": "高并发系统限流-漏桶算法和令牌桶算法 - 陶朱公Boy - 博客园.md",
+   "q": "Nginx 自带的两个限流模块各管什么？一个管连接数、一个管请求速率，关键参数分别是什么？",
+   "targets": [
+    {
+     "excerpt": "对于Nginx接入层限流可以使用Nginx自带了两个模块：连接数限流模块ngx_",
+     "seq_hint": "55"
+    },
+    {
+     "excerpt": "如果被限流了，则在error.log中会看到类似如下的内容：2016/06/08",
+     "seq_hint": "60"
+    }
+   ],
+   "src": "multihop-25"
+  },
+  {
+   "id": "mult-mh09",
+   "doc": "高并发系统限流-漏桶算法和令牌桶算法 - 陶朱公Boy - 博客园.md",
+   "q": "被限流之后返回 503，怎么改成跳转到自己的错误页面？",
+   "targets": [
+    {
+     "excerpt": "桶计算时间窗口（1.5秒）=速率（2r/s）/桶容量(3)，也就是说在这个时间窗",
+     "seq_hint": "72"
+    }
+   ],
+   "src": "multihop-25"
+  },
+  {
+   "id": "mult-mh10",
+   "doc": "高并发系统限流-漏桶算法和令牌桶算法 - 陶朱公Boy - 博客园.md",
+   "q": "最简单的那种计数器限流，在时间窗口边界上有什么漏洞？后来用什么办法补的？",
+   "targets": [
+    {
+     "excerpt": "publicbooleangrant(){longnow=getNowTime(",
+     "seq_hint": "26"
+    },
+    {
+     "excerpt": "滑动窗口滑动窗口，又称rollingwindow。为了解决这个问题，我们引入了滑",
+     "seq_hint": "27"
+    }
+   ],
+   "src": "multihop-25"
+  },
+  {
+   "id": "mult-mh11",
+   "doc": "高并发系统限流-漏桶算法和令牌桶算法 - 陶朱公Boy - 博客园.md",
+   "q": "单机限流、多机协同限流、入口层限流，这三层在文档里是分开讲的吗？各在哪？",
+   "targets": [
+    {
+     "excerpt": "两个算法实现可以一样，但是方向是相反的，对于相同的参数得到的限流效果是一样的。另",
+     "seq_hint": "36"
+    },
+    {
+     "excerpt": "}Thread.sleep(1000L);for(inti=1;i<5;i++)",
+     "seq_hint": "47"
+    },
+    {
+     "excerpt": "如果需要限流则返回0，否则返回1。使用时需要先定义两个共享字典（分别用来存放锁和",
+     "seq_hint": "55"
+    }
+   ],
+   "src": "multihop-25"
+  },
+  {
+   "id": "mult-mh12",
+   "doc": "高并发系统限流-漏桶算法和令牌桶算法 - 陶朱公Boy - 博客园.md",
+   "q": "令牌桶里令牌按什么节奏补？CIR 和 Tc 是什么意思？",
+   "targets": [
+    {
+     "excerpt": "下面详细介绍令牌桶算法机制：当网络设备衡量流量是否超过额定带宽时，需要查看令牌桶",
+     "seq_hint": "7"
+    },
+    {
+     "excerpt": "3、举例：将CIR设置为8000bit/s，那么就必须每秒将8000个令牌放入桶",
+     "seq_hint": "8"
+    }
+   ],
+   "src": "multihop-25"
+  },
+  {
+   "id": "mult-mh13",
+   "doc": "Redis持久化之RDB&AOF - Margaery - 博客园.md",
+   "q": "Redis 重启时如果 RDB 和 AOF 同时开着，它会用哪个文件恢复？为什么这么选？",
+   "targets": [
+    {
+     "excerpt": "Redis没有专门的RDB文件载入命令，只要Redis服务器开启，就会检测RDB",
+     "seq_hint": "7"
+    },
+    {
+     "excerpt": "AOF相对可靠，它和MySQL中bin.log、apache.log、zooke",
+     "seq_hint": "13"
+    }
+   ],
+   "src": "multihop-25"
+  },
+  {
+   "id": "mult-mh14",
+   "doc": "Redis持久化之RDB&AOF - Margaery - 博客园.md",
+   "q": "bgsave 号称不阻塞，为什么数据集一大还是会卡顿一下？它靠什么保证快照的一致性？",
+   "targets": [
+    {
+     "excerpt": "bgsave命令不会阻塞服务器，而是通过派生出一个子进程，然后由子进程负责创建R",
+     "seq_hint": "5"
+    },
+    {
+     "excerpt": "RDB操作借用copyonwrite机制进行写时复制，父进程fork一个子进程，",
+     "seq_hint": "6"
+    }
+   ],
+   "src": "multihop-25"
+  },
+  {
+   "id": "mult-mh15",
+   "doc": "Redis持久化之RDB&AOF - Margaery - 博客园.md",
+   "q": "AOF 的刷盘策略有哪几种？最坏情况下会丢多少数据？",
+   "targets": [
+    {
+     "excerpt": "理由如下：Redis使用单线程响应命令，如果每次写AOF文件命令都直接追加到硬盘",
+     "seq_hint": "14"
+    },
+    {
+     "excerpt": "事实上，每秒同步也是异步完成的，其效率也是非常高的，所差的是一旦系统出现宕机现象",
+     "seq_hint": "17"
+    }
+   ],
+   "src": "multihop-25"
+  },
+  {
+   "id": "mult-mh16",
+   "doc": "Redis持久化之RDB&AOF - Margaery - 博客园.md",
+   "q": "生产环境里主库和从库分别该配哪种持久化？判断依据是什么？",
+   "targets": [
+    {
+     "excerpt": "可以通过配置文件来指定它们中的一种，或者同时使用它们(不建议同时使用)，或者全部",
+     "seq_hint": "20"
+    },
+    {
+     "excerpt": "如果你的环境一切非常良好，且服务需要接收密集性的write操作，那么建议mast",
+     "seq_hint": "21"
+    }
+   ],
+   "src": "multihop-25"
+  },
+  {
+   "id": "mult-mh17",
+   "doc": "Redis持久化原理 — RDB与AOF详细解释 - jstarseven - 博客园.md",
+   "q": "save 和 bgsave 有什么区别？阻塞具体发生在哪一步？",
+   "targets": [
+    {
+     "excerpt": "（同步数据到磁盘上）save命令执行一个同步操作，以RDB文件的方式保存所有数据",
+     "seq_hint": "1"
+    },
+    {
+     "excerpt": "||IO类型|同步|异步||阻塞？|是|是（阻塞发生在fock()，通常非常快）",
+     "seq_hint": "2"
+    }
+   ],
+   "src": "multihop-25"
+  },
+  {
+   "id": "mult-mh18",
+   "doc": "Redis持久化原理 — RDB与AOF详细解释 - jstarseven - 博客园.md",
+   "q": "appendfsync 三个取值分别意味着什么？最坏丢多少数据？哪个是默认？",
+   "targets": [
+    {
+     "excerpt": "TA磁盘只有几百TPS||everysec|每秒进行与fsync，最多丢失1秒数",
+     "seq_hint": "7"
+    },
+    {
+     "excerpt": "c。使用默认的每秒fsync策略，Redis的性能依然很好(fsync是由后台线",
+     "seq_hint": "11"
+    }
+   ],
+   "src": "multihop-25"
+  },
+  {
+   "id": "mult-mh19",
+   "doc": "Redis持久化原理 — RDB与AOF详细解释 - jstarseven - 博客园.md",
+   "q": "AOF 文件越来越大怎么办？什么条件会自动触发重写？",
+   "targets": [
+    {
+     "excerpt": "2.4则可以通过配置自动触发AOF重写。####AOF重写的作用-减少磁盘占用量",
+     "seq_hint": "8"
+    },
+    {
+     "excerpt": "OF文件执行重写的最小尺寸||auto-aof-rewrite-percenta",
+     "seq_hint": "9"
+    }
+   ],
+   "src": "multihop-25"
+  },
+  {
+   "id": "mult-mh20",
+   "doc": "Redis持久化原理 — RDB与AOF详细解释 - jstarseven - 博客园.md",
+   "q": "RDB 和 AOF 的启动优先级谁高？这个对比表里还列了哪些维度？",
+   "targets": [
+    {
+     "excerpt": "保证的最大延迟时间（latency）。##四、RDB和AOF的抉择###1.RD",
+     "seq_hint": "13"
+    }
+   ],
+   "src": "multihop-25"
+  },
+  {
+   "id": "mult-mh21",
+   "doc": "Redis持久化原理 — RDB与AOF详细解释 - jstarseven - 博客园.md",
+   "q": "AOF 重写期间的新写命令会丢吗？重写是怎么切换文件的？",
+   "targets": [
+    {
+     "excerpt": "有的AOF文件也不会丢失。而一旦新AOF文件创建完毕，Redis就会从旧AOF文",
+     "seq_hint": "12"
+    },
+    {
+     "excerpt": "riteaof命令进行重写。####AOF重写的流程###3.AOF相关配置``",
+     "seq_hint": "10"
+    }
+   ],
+   "src": "multihop-25"
+  },
+  {
+   "id": "mult-mh22",
+   "doc": "Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md",
+   "q": "调度器把 Pod 放到节点上分哪两大步？每步各自的算法叫什么？",
+   "targets": [
+    {
+     "excerpt": "Predicate有一系列的算法可以使用：PodFitsResources：节点",
+     "seq_hint": "2"
+    },
+    {
+     "excerpt": "ory使用率非常及接近，权重就越高，这个要和上边的一起使用，不可单独使用Imag",
+     "seq_hint": "2"
+    }
+   ],
+   "src": "multihop-25"
+  },
+  {
+   "id": "mult-mh23",
+   "doc": "Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md",
+   "q": "想让 Pod 尽量落在某个节点但不强制，YAML 用哪个字段？如果那个节点根本不存在会怎样？",
+   "targets": [
+    {
+     "excerpt": "apiVersion:v1kind:Podmetadata:name:affin",
+     "seq_hint": "6"
+    },
+    {
+     "excerpt": "##创建后，同样是落在了testcentos7节点上，虽然它更想落在kube-n",
+     "seq_hint": "14"
+    }
+   ],
+   "src": "multihop-25"
+  },
+  {
+   "id": "mult-mh24",
+   "doc": "Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md",
+   "q": "节点亲和里的硬策略和软策略分别对应哪两个长字段名？行为差别是什么？",
+   "targets": [
+    {
+     "excerpt": "iredDuringSchedulingIgnoredDuringExecuti",
+     "seq_hint": "5"
+    },
+    {
+     "excerpt": "-weight:1preference:matchExpressions:-ke",
+     "seq_hint": "15"
+    }
+   ],
+   "src": "multihop-25"
+  },
+  {
+   "id": "mult-mh25",
+   "doc": "Kubernetes Pod调度说明1-亲和性 - TonyBen2018 - 博客园.md",
+   "q": "怎么表达「这个 Pod 要和某个 Pod 待在一起」？它和「落在某类节点上」用的字段有什么不同？",
+   "targets": [
+    {
+     "excerpt": "apiVersion:v1kind:Podmetadata:name:pod-1",
+     "seq_hint": "18"
+    },
+    {
+     "excerpt": "podAffinityTerm:labelSelector:matchExpre",
+     "seq_hint": "23"
+    }
+   ],
+   "src": "multihop-25"
+  },
+  {
+   "id": "mult-gil01",
+   "doc": "python全局解释器GIL锁(-死锁） - AlexEvans - 博客园.md",
+   "q": "GIL 是 Python 语言的特性吗、只在哪个解释器上存在？文档说线程必须拿到什么才能执行？",
+   "targets": [
+    {
+     "excerpt": "GIL并不是Python语言的特性，它是在实现Python解释器时引用的一个概念",
+     "seq_hint": "1"
+    },
+    {
+     "excerpt": "GIL锁：全局解释器锁，在解释器之上的一把大锁，线程必须获得这把锁，才能执行，只",
+     "seq_hint": "3"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-gil02",
+   "doc": "python全局解释器GIL锁(-死锁） - AlexEvans - 博客园.md",
+   "q": "为什么 Python 的多线程被称为「伪多线程」？解释器在程序执行什么操作时会释放 GIL、目的是什么？",
+   "targets": [
+    {
+     "excerpt": "GIL锁：全局解释器锁，在解释器之上的一把大锁，线程必须获得这把锁，才能执行，只",
+     "seq_hint": "3"
+    },
+    {
+     "excerpt": "任何工作，程序执行效率非常低。为了提高CPU的使用率，Python解释在程序执行",
+     "seq_hint": "3"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-gil03",
+   "doc": "python全局解释器GIL锁(-死锁） - AlexEvans - 博客园.md",
+   "q": "GIL 的存在让垃圾回收变得安全 —— 文档是怎么解释的（垃圾回收线程运行时其他线程处于什么状态）？",
+   "targets": [
+    {
+     "excerpt": "任何工作，程序执行效率非常低。为了提高CPU的使用率，Python解释在程序执行",
+     "seq_hint": "3"
+    },
+    {
+     "excerpt": "之后，其他线程就不能运行，那么在回收变量的时候就不会出现并发安全问题。垃圾回收线",
+     "seq_hint": "4"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-gil04",
+   "doc": "python全局解释器GIL锁(-死锁） - AlexEvans - 博客园.md",
+   "q": "在多核机器上开四条线程会发生什么？文档据此说 Python 适合哪一类程序、为什么？",
+   "targets": [
+    {
+     "excerpt": "核，一个进程四条线程，理论一个线程一核，但是Python不行，在一个线程中开四条",
+     "seq_hint": "5"
+    },
+    {
+     "excerpt": "这样的程序称为IO密集型程序。IO密集型程序在运行时，需要大量的时间进行等待，如",
+     "seq_hint": "3"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-gil05",
+   "doc": "python全局解释器GIL锁(-死锁） - AlexEvans - 博客园.md",
+   "q": "文档给「死锁」下的定义是什么？解决死锁它推荐用什么锁、那个锁的特点是什么（acquire 几次就要 release 几次）？",
+   "targets": [
+    {
+     "excerpt": "夺资源而造成的一种互相等待的现象，若无外力作用，它们都将无法推进下去。此时称系统",
+     "seq_hint": "8"
+    },
+    {
+     "excerpt": "了僵局，线程2想要线程1手里的B锁，线程1想要线程2里的A锁。2.解决死锁解决死",
+     "seq_hint": "10"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-q801",
+   "doc": "部署系列——神经网络INT8量化教程第一讲！ - 小kk_p - 博客园.md",
+   "q": "FP32 与 FP16 各自用多少 bit 表示指数和小数？文档说 FP16 的精度下降对任务影响如何，NVIDIA 为它准备了什么硬件、吞吐量相比 FP32 提升多少？",
+   "targets": [
+    {
+     "excerpt": "当然也会有FP64、FP16、BF16、TF32等更多的精度：FP32是单精度浮",
+     "seq_hint": "2"
+    },
+    {
+     "excerpt": "而且FP16的精度下降对于大部分任务影响不是很大，甚至有些任务会提升。NVIDI",
+     "seq_hint": "3"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-q802",
+   "doc": "部署系列——神经网络INT8量化教程第一讲！ - 小kk_p - 博客园.md",
+   "q": "把浮点范围映射到 INT8 时超出范围的部分怎么办？文档说对称量化与非对称量化为什么都算「线性（均匀）量化」？",
+   "targets": [
+    {
+     "excerpt": "怎么办，当然是要截断了，假设我们的INT8范围是，因为我们使用的是INT8，所以",
+     "seq_hint": "7"
+    },
+    {
+     "excerpt": "这样就明白了刚才的问题：如果是呢？貌似直接带入算出来也是0，如果我们采用的是对称",
+     "seq_hint": "8"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-q803",
+   "doc": "部署系列——神经网络INT8量化教程第一讲！ - 小kk_p - 博客园.md",
+   "q": "对称量化的公式比非对称简化在哪（哪个量变成零）？文档说权重为什么必须做成 per-channel，而不是每个权重值都有自己的 scale？",
+   "targets": [
+    {
+     "excerpt": "可以对比下非对称和对称的量化公式，对称量化因为，所以公式简化了很多。对于对称量化",
+     "seq_hint": "9"
+    },
+    {
+     "excerpt": "那为什么权重必须是pre-channel呢？不能是每个权重值都有自己的scale",
+     "seq_hint": "10"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-q804",
+   "doc": "部署系列——神经网络INT8量化教程第一讲！ - 小kk_p - 博客园.md",
+   "q": "把矩阵乘拆成逐元素相乘再求和之后，文档说输入的每一行和权重的每一列必须各自共享什么？这样做的依据是什么？",
+   "targets": [
+    {
+     "excerpt": "而对应的INT8精度的输入和权重为，q下标就代表quantize也就是量化：接下",
+     "seq_hint": "11"
+    },
+    {
+     "excerpt": "当把k去除将s取出来之后，我们发现和分别代表输入的第行的scale和权重的第列的",
+     "seq_hint": "12"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-q805",
+   "doc": "部署系列——神经网络INT8量化教程第一讲！ - 小kk_p - 博客园.md",
+   "q": "文档在讲 INT8 量化对精度的影响时，引的是 NVIDIA 哪份研究的结论？它提到 TensorFlow 与 TFLite 分别在什么时候支持了量化？",
+   "targets": [
+    {
+     "excerpt": "如果你担心INT8量化对于精度的影响，我们可以看下NVIDIA量化研究的一些结论",
+     "seq_hint": "4"
+    },
+    {
+     "excerpt": "TensorFlow很早就支持了量化训练，而TFLite也很早就支持了后训练量化",
+     "seq_hint": "5"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-q806",
+   "doc": "部署系列——神经网络INT8量化教程第一讲！ - 小kk_p - 博客园.md",
+   "q": "文档里那个「ViT-int8 on TVM」的提速是多少、比 TRT 快多少倍？这篇教程属于什么系列、作者说自己是抱着什么态度写的？",
+   "targets": [
+    {
+     "excerpt": "比较有参考意义的一篇：ViT-int8onTVM：提速4.6倍，比TRT快1.5",
+     "seq_hint": "6"
+    },
+    {
+     "excerpt": "部署系列——神经网络INT8量化教程第一讲！https://zhuanlan.z",
+     "seq_hint": "1"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-g101",
+   "doc": "JVM基础系列：G1垃圾回收器 - 梅晓煜 - 博客园.md",
+   "q": "G1 把整个 Java 堆划分成多少个大小相同的 Region？划分的目标依据是什么？",
+   "targets": [
+    {
+     "excerpt": "二、分区Region使用G1收集器时，他将整个Java推划分成2048个大小相同",
+     "seq_hint": "1"
+    },
+    {
+     "excerpt": "目标是根据最小的JAVA堆大小划分出约2048个区域。-XX:ParallelG",
+     "seq_hint": "24"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-g102",
+   "doc": "JVM基础系列：G1垃圾回收器 - 梅晓煜 - 博客园.md",
+   "q": "回收新生代时为了不全堆扫描，G1 用了哪个数据结构？它又靠什么机制知道某个引用跨了 Region？",
+   "targets": [
+    {
+     "excerpt": "（而G1更突出）回收新生代也不得不同时扫描老年代？这些都会降低YoungGC的效",
+     "seq_hint": "7"
+    },
+    {
+     "excerpt": "G1在每次引用类型数据写操作时，都会产生一个WriteBarrrier(写屏障)",
+     "seq_hint": "8"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-g103",
+   "doc": "JVM基础系列：G1垃圾回收器 - 梅晓煜 - 博客园.md",
+   "q": "年轻时回收时 G1 会对 dirty card queue 做什么？文档说这个结果最终会被加到什么地方、从而避免全局扫描？",
+   "targets": [
+    {
+     "excerpt": "在年轻代回收的时候，G1会对dirtycardqueue所有的carf进行处理，",
+     "seq_hint": "10"
+    },
+    {
+     "excerpt": "当进行垃圾回收时，在GC根节点的枚举范围加入RememberedSet，就可以保",
+     "seq_hint": "9"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-g104",
+   "doc": "JVM基础系列：G1垃圾回收器 - 梅晓煜 - 博客园.md",
+   "q": "并发标记结束后，「部分为垃圾」的老年代分段默认分几次被回收、由哪个参数控制？而混合回收并不一定要做满这个次数，提前停下来的那个阈值参数叫什么、默认多少？",
+   "targets": [
+    {
+     "excerpt": "并发标记结束以后，老年代中百分百为垃圾的内存区域被回收，部分为垃圾的内存分段被计",
+     "seq_hint": "13"
+    },
+    {
+     "excerpt": "混合回收并不一定要进行8次，有一个阈值-XX:G1HeapWastePercen",
+     "seq_hint": "14"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-g105",
+   "doc": "JVM基础系列：G1垃圾回收器 - 梅晓煜 - 博客园.md",
+   "q": "文档说触发 Full GC 的原因有哪两个？另外那种「巨型对象找不到合适空间」的情形叫什么、会引发什么？",
+   "targets": [
+    {
+     "excerpt": "发生FullGC的原因可能有两个：1.回收的时候没有足够的区域来存放晋升的对象2",
+     "seq_hint": "15"
+    },
+    {
+     "excerpt": "4.巨型对象分配失败当巨型Humongous对象找不到合适的空间进行分配时，就会",
+     "seq_hint": "19"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-g106",
+   "doc": "JVM基础系列：G1垃圾回收器 - 梅晓煜 - 博客园.md",
+   "q": "触发并发标记周期的堆占用比率由哪个参数设定、默认值多少？而决定一个 Region 是否值得纳入回收集的「活跃度阈值」是哪个参数、文档说它的默认值有哪两个版本？",
+   "targets": [
+    {
+     "excerpt": "G1收集器通常在堆占用达到某个比率（通过参数XX:InitiatingHeapO",
+     "seq_hint": "21"
+    },
+    {
+     "excerpt": "-XX:G1MixedGCLiveThresholdbeiPercent=85为",
+     "seq_hint": "25"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-g107",
+   "doc": "JVM基础系列：G1垃圾回收器 - 梅晓煜 - 博客园.md",
+   "q": "文档怎么区分 G1 的「并行性」与「并发性」？而在内存占用与额外执行负载上，它跟 CMS 比是高还是低？",
+   "targets": [
+    {
+     "excerpt": "三、G1垃圾收集器的特点、缺点并发和并行并行性：G1在回收期间，可以有多个GC线",
+     "seq_hint": "2"
+    },
+    {
+     "excerpt": "比如在用户程序运行过程中，G1无论是为了垃圾回收产生的内存占用还是程序运行时的额",
+     "seq_hint": "4"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-g108",
+   "doc": "JVM基础系列：G1垃圾回收器 - 梅晓煜 - 博客园.md",
+   "q": "文档说的 Cset（回收集）是什么？每轮 Mixed GC 附加进 Cset 的老年代 Region 最多能占全部 Region 的多少？",
+   "targets": [
+    {
+     "excerpt": "它的意思是在一次垃圾收集器中将被收集的区域集合。在YoungGC的时候，选定所有",
+     "seq_hint": "23"
+    },
+    {
+     "excerpt": "默认是10%，也就是每轮MixedGC附加的Cset的Region不超过全部Re",
+     "seq_hint": "26"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-g109",
+   "doc": "JVM基础系列：G1垃圾回收器 - 梅晓煜 - 博客园.md",
+   "q": "并发标记周期里，第一阶段和第二阶段各是不是 STW？G1 用什么算法解决并发标记中的「漏标」问题？",
+   "targets": [
+    {
+     "excerpt": "这个阶段是STW的，并且会触发一次年轻代GC第二阶段：根区域扫描G1GC在初始标",
+     "seq_hint": "11"
+    },
+    {
+     "excerpt": "（G1采用了初始快照算法：snapshot-at-the-begining来解决",
+     "seq_hint": "12"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-g110",
+   "doc": "JVM基础系列：G1垃圾回收器 - 梅晓煜 - 博客园.md",
+   "q": "G1 面向的是什么类型的应用（对内存和处理器的要求）？文档说它在普通大小的堆里表现如何？",
+   "targets": [
+    {
+     "excerpt": "五、G1的使用场景面向服务端应用，针对具有大内存、多处理器的机器（在普通大小的堆",
+     "seq_hint": "5"
+    },
+    {
+     "excerpt": "JVM基础系列：G1垃圾回收器一、G1垃圾收集器G1(Garbage-First",
+     "seq_hint": "1"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-mv01",
+   "doc": "mysql事务隔离级别及MVCC 原理 - 一只阿木木 - 博客园.md",
+   "q": "文档给「脏读」和「不可重复读」各下了什么定义？而幻读与不可重复读，文档说快照读是用什么机制避免的？",
+   "targets": [
+    {
+     "excerpt": "脏读：如果一个事务成功的读到了另一个未提交事务所修改过的数据，就是脏读。不可重复",
+     "seq_hint": "1"
+    },
+    {
+     "excerpt": "（对于快照读，避免不可重复读和幻读都是使用MVCC）。如果对这两段话的一些名词看",
+     "seq_hint": "2"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-mv02",
+   "doc": "mysql事务隔离级别及MVCC 原理 - 一只阿木木 - 博客园.md",
+   "q": "MVCC 设计出来是为了解决哪两个问题、换来了什么好处？在读未提交这个级别下，事务 B 直接读的是版本链上的哪一部分？",
+   "targets": [
+    {
+     "excerpt": "二、MVCC原理MVCC（多版本并发控制）设计出来的目的是为了在不加锁的情况下，",
+     "seq_hint": "4"
+    },
+    {
+     "excerpt": "对于读未提交readuncommit隔离级别，它允许出现脏读和不可重复读，所以可",
+     "seq_hint": "5"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-mv03",
+   "doc": "mysql事务隔离级别及MVCC 原理 - 一只阿木木 - 博客园.md",
+   "q": "ReadView 里的 min_trx_id 和 max_trx_id 分别是什么？文档给的可见性判断里，第一步比的是当前版本的 trx_id 与哪个字段？",
+   "targets": [
+    {
+     "excerpt": "min_trx_id：在生成本ReadView时，当前系统未提交的读写事务中的最",
+     "seq_hint": "6"
+    },
+    {
+     "excerpt": "1、如果当前版本的trx_id（不是当前事务的trx_id，别搞混了）==Rea",
+     "seq_hint": "7"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-mv04",
+   "doc": "mysql事务隔离级别及MVCC 原理 - 一只阿木木 - 博客园.md",
+   "q": "某个版本对当前事务不可见时，下一步怎么走？如果命中的是二级索引页，文档说可以拿哪个字段做一次快速判断、判断出什么？",
+   "targets": [
+    {
+     "excerpt": "如果某个版本对当前事务不可见（不可访问），则顺着版本链找到下一个更早的版本，并继",
+     "seq_hint": "8"
+    },
+    {
+     "excerpt": "执行select时命中该页，如果ReadView的min_trx_id比该页的p",
+     "seq_hint": "11"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-mv05",
+   "doc": "mysql事务隔离级别及MVCC 原理 - 一只阿木木 - 博客园.md",
+   "q": "读已提交与可重复读在「什么时候生成 ReadView」上有什么差别？文档用事务 300 举的例子说明了这一点吗？",
+   "targets": [
+    {
+     "excerpt": "#select1：transaction100,200未提交select*fro",
+     "seq_hint": "10"
+    },
+    {
+     "excerpt": "我们模拟上面一模一样的场景，但换成可重复读的隔离级别，那么可重复读的事务300只",
+     "seq_hint": "10"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-mv06",
+   "doc": "mysql事务隔离级别及MVCC 原理 - 一只阿木木 - 博客园.md",
+   "q": "update 语句改的是主键或索引字段时，文档说会先做什么动作？而 undo 日志会不会永远不释放、释放的时机由什么决定？",
+   "targets": [
+    {
+     "excerpt": "其实前面介绍undo日志时说过这种情况，如果update语句修改的是主键或者索引",
+     "seq_hint": "12"
+    },
+    {
+     "excerpt": "问题来了：updateundo日志是否会永远存在，一直不释放？如果释放，那么释放",
+     "seq_hint": "13"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-mv07",
+   "doc": "mysql事务隔离级别及MVCC 原理 - 一只阿木木 - 博客园.md",
+   "q": "在读已提交级别下，事务 1 的 ReadView1 什么时候不再是活跃的？ReadView 上的「事务 no」属性和活跃 ReadView 链是用来做什么的？",
+   "targets": [
+    {
+     "excerpt": "例如，对于readcommitted级别，事务1执行了第一次查询，会生成一个Re",
+     "seq_hint": "14"
+    },
+    {
+     "excerpt": "Readview也会包含一个事务no属性，在创建的ReadView时候会保存当前",
+     "seq_hint": "15"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-rs01",
+   "doc": "Rust——所有权【四】 - 。思索 - 博客园.md",
+   "q": "在堆上分配内存比在栈上多做了哪些工作？文档说所有权要解决的是哪几件事？",
+   "targets": [
+    {
+     "excerpt": "内存空间；其位置总是在栈顶。相比之下，在堆上分配内存则需要更多的工作，这是因为分",
+     "seq_hint": "3"
+    },
+    {
+     "excerpt": "跟踪代码的哪些部分正在使用堆上的哪些数据，最大程度地减少堆上的重复数据量，以及清",
+     "seq_hint": "5"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-rs02",
+   "doc": "Rust——所有权【四】 - 。思索 - 博客园.md",
+   "q": "`let s2 = s1;` 之后为什么 s1 不能再用？如果两个指针都试图释放同一块内存，会发生什么错误？",
+   "targets": [
+    {
+     "excerpt": "lets2=s1;这看起来与上面的代码非常类似，所以我们可能会假设他们的运行方式",
+     "seq_hint": "10"
+    },
+    {
+     "excerpt": "但图2显示了指向同一位置的两个数据指针。这就会产生一个问题：当s1和s2都离开作",
+     "seq_hint": "11"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-rs03",
+   "doc": "Rust——所有权【四】 - 。思索 - 博客园.md",
+   "q": "文档说 `let s2 = s1` 这种「不复制数据、只复制指针长度容量」的做法为什么不叫浅拷贝？而为什么 `let y = x`（两个整数）之后 x 仍然有效？",
+   "targets": [
+    {
+     "excerpt": "如果您在使用其他语言时听说过浅拷贝和深拷贝这两个术语，那么在不复制数据的情况下复",
+     "seq_hint": "15"
+    },
+    {
+     "excerpt": "println!(\"x={},y={}\",x,y);但是这段代码似乎与我们刚刚学",
+     "seq_hint": "16"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-rs04",
+   "doc": "Rust——所有权【四】 - 。思索 - 博客园.md",
+   "q": "按文档给的通用规则，哪些类型可以实现 Copy？把一个 String 变量传给函数之后，它还能用吗、为什么？",
+   "targets": [
+    {
+     "excerpt": "你可以查看给定类型的文档来确认，不过作为一个通用的规则，任何一组简单标量值的组合",
+     "seq_hint": "16"
+    },
+    {
+     "excerpt": "takes_ownership(s);//s的值移动到函数里...//...所以",
+     "seq_hint": "18"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-rs05",
+   "doc": "Rust——所有权【四】 - 。思索 - 博客园.md",
+   "q": "Rust 什么时候把 String 占的内存还给分配器？它靠什么机制做到这一点 —— 对比没有 GC 的语言，那件事原本要谁来做？",
+   "targets": [
+    {
+     "excerpt": "//使用s}//此作用域已结束，//s不再有效}我们可以将我们需要String的",
+     "seq_hint": "10"
+    },
+    {
+     "excerpt": "用域println!(\"{}\",some_string);}//这里，some_",
+     "seq_hint": "18"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-rs06",
+   "doc": "Rust——所有权【四】 - 。思索 - 博客园.md",
+   "q": "函数返回一个 String 时所有权是怎么流动的？文档给的 takes_and_gives_back 这个函数是干什么的？",
+   "targets": [
+    {
+     "excerpt": ";//gives_ownership将返回值//移给s1lets2=String",
+     "seq_hint": "19"
+    },
+    {
+     "excerpt": "字符串并返回该值fntakes_and_gives_back(a_string:",
+     "seq_hint": "20"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-rs07",
+   "doc": "Rust——所有权【四】 - 。思索 - 博客园.md",
+   "q": "变量的有效范围是怎么界定的？文档说 String 可变而字符串字面量不可变，区别的根源在哪（两个类型对内存的处理有什么不同）？",
+   "targets": [
+    {
+     "excerpt": "该变量从声明该变量的点起一直有效，直到当前范围结束。{//sisnotvalid",
+     "seq_hint": "5"
+    },
+    {
+     "excerpt": "println!(\"{}\",s);//将打印`hello,world!`那么这里",
+     "seq_hint": "8"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-rs08",
+   "doc": "Rust——所有权【四】 - 。思索 - 博客园.md",
+   "q": "在 `let s2 = s1;` 之后再去打印 s1，Rust 会给什么编译错误？错误信息里说明 s1 处于什么状态？",
+   "targets": [
+    {
+     "excerpt": "println!(\"{},world!\",s1);当我们尝试打印s1的时候，会得",
+     "seq_hint": "13"
+    },
+    {
+     "excerpt": "\",s2);23|println!(\"{},world!\",s1);|^^val",
+     "seq_hint": "13"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-tc01",
+   "doc": "TCP拥塞窗口详解：慢启动、避免、恢复策略-CSDN博客.md",
+   "q": "TCP 里有哪两个窗口、各自由谁决定？设备实际最多能发多少字节，文档给的公式是什么？",
+   "targets": [
+    {
+     "excerpt": "学过网络相关课程的，都知道TCP中，有两个窗口：滑动窗口(在我们的上一篇文章中有",
+     "seq_hint": "1"
+    },
+    {
+     "excerpt": "在任何给定时间，设备最多可以发送由接收器窗口和拥塞窗口之间的最小值指定的字节数，",
+     "seq_hint": "1"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-tc02",
+   "doc": "TCP拥塞窗口详解：慢启动、避免、恢复策略-CSDN博客.md",
+   "q": "慢启动算法开始时拥塞窗口设为多大？那个决定「何时从慢启动转入拥塞避免」的阈值叫什么？",
+   "targets": [
+    {
+     "excerpt": "该算法遵循以下规则：拥塞窗口从一个段的大小开始（大约1KB）定义了一个拥塞窗口阈",
+     "seq_hint": "2"
+    },
+    {
+     "excerpt": "因此，较好的方法是先探测一下，即由小到大逐渐增大发送窗口，也就是说，由小到大逐渐",
+     "seq_hint": "3"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-tc03",
+   "doc": "TCP拥塞窗口详解：慢启动、避免、恢复策略-CSDN博客.md",
+   "q": "慢启动阶段 cwnd 按什么规律增长（第 1、2、3 个 RTT 后分别是多少）？到了拥塞避免阶段又改成什么规律？",
+   "targets": [
+    {
+     "excerpt": "慢启动的整个过程如下：初始化cwnd=1经过1个RTT,即收到一个ACK，cwn",
+     "seq_hint": "5"
+    },
+    {
+     "excerpt": "“拥塞避免”是说在拥塞避免阶段将拥塞窗口控制为按线性规律增长，使网络比较不容易出",
+     "seq_hint": "6"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-tc04",
+   "doc": "TCP拥塞窗口详解：慢启动、避免、恢复策略-CSDN博客.md",
+   "q": "收到重复 ACK 时拥塞窗口怎么变？而 Reno 在快速重传之后，把 ssthresh 和拥塞窗口分别设为多少、然后进入哪个阶段？",
+   "targets": [
+    {
+     "excerpt": "每次收到另一个重复的ACK时，cwnd增加1个报文段大小并发送1个分组（如果新的",
+     "seq_hint": "7"
+    },
+    {
+     "excerpt": "Reno在快速重传阶段，重新发送数据之后：ssthresh设置为拥塞窗口的1/2",
+     "seq_hint": "8"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-tc05",
+   "doc": "TCP拥塞窗口详解：慢启动、避免、恢复策略-CSDN博客.md",
+   "q": "Reno 和 NewReno 在快速恢复阶段的差别是什么？NewReno 要等到什么条件才退出快速恢复？",
+   "targets": [
+    {
+     "excerpt": "Reno在快速重传阶段，重新发送数据之后：ssthresh设置为拥塞窗口的1/2",
+     "seq_hint": "8"
+    },
+    {
+     "excerpt": "基于上述原因，NewReno优化了该机制，NewReno在收到部分丢失数据的AC",
+     "seq_hint": "9"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-tc06",
+   "doc": "TCP拥塞窗口详解：慢启动、避免、恢复策略-CSDN博客.md",
+   "q": "拥塞控制的总目的是什么？文档在 Q&A 里说「一个窗口内重复丢包」会造成什么影响？",
+   "targets": [
+    {
+     "excerpt": "防止过多的数据注入到网络，使网络中的路由器或链路不致过载，确保通信子网可以有效为",
+     "seq_hint": "10"
+    },
+    {
+     "excerpt": "那么，此时网络中还可以再容纳1个包。由于发送端滑动窗口不能移动了，所以如果想保持",
+     "seq_hint": "11"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-tc07",
+   "doc": "TCP拥塞窗口详解：慢启动、避免、恢复策略-CSDN博客.md",
+   "q": "两个设备协商连接时交换的是什么、例子里的值多大？它们各自的初始拥塞窗口是多少？",
+   "targets": [
+    {
+     "excerpt": "在协商连接时，两个设备交换它们的接收器窗口(在这种情况下它们都有32KB)双端都",
+     "seq_hint": "4"
+    },
+    {
+     "excerpt": "慢启动的整个过程如下：初始化cwnd=1经过1个RTT,即收到一个ACK，cwn",
+     "seq_hint": "5"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-rf01",
+   "doc": "raft一致性算法详解：CAP理论、选举机制与日志复制-CSDN博客.md",
+   "q": "按 CAP 分类，RAFT 满足的是哪一种、文档拿谁当 AP 的例子？RAFT 的创新点里第一条「Strong Leader」是怎么限制日志流向的？",
+   "targets": [
+    {
+     "excerpt": "举例而言，本文介绍的RAFT便为满足CP的模型，而ZooKeeper则为满足AP",
+     "seq_hint": "1"
+    },
+    {
+     "excerpt": "此外，与之前的算法比起来，Raft存在下面几个创新点1、StrongLeader",
+     "seq_hint": "2"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-rf02",
+   "doc": "raft一致性算法详解：CAP理论、选举机制与日志复制-CSDN博客.md",
+   "q": "RAFT 里的三种角色各做什么（哪一个不会主动发起请求）？follower 在什么情况下会开始增加自己的任期号？",
+   "targets": [
+    {
+     "excerpt": "Follower单纯接收candidate和leader发送过来的rpc请求而不",
+     "seq_hint": "4"
+    },
+    {
+     "excerpt": "如果一个follower在其自己的electiontimeout时间段（每个se",
+     "seq_hint": "5"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-rf03",
+   "doc": "raft一致性算法详解：CAP理论、选举机制与日志复制-CSDN博客.md",
+   "q": "文档说每个 server 的 election timeout 是不是一样的？那个会导致「选不出 leader 的死循环」的问题叫什么、RAFT 用什么办法规避？",
+   "targets": [
+    {
+     "excerpt": "如果一个follower在其自己的electiontimeout时间段（每个se",
+     "seq_hint": "5"
+    },
+    {
+     "excerpt": "值得特别注意的一点是，为了避免出现split-vote问题（例如集群里全部机器同",
+     "seq_hint": "6"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-rf04",
+   "doc": "raft一致性算法详解：CAP理论、选举机制与日志复制-CSDN博客.md",
+   "q": "leader 发 AppendEntries 时会带上之前那条日志的哪两个字段？它给每个 follower 维护的 nextIndex 表示什么？",
+   "targets": [
+    {
+     "excerpt": "发送AppendEntriesRPC时，leader会将新的logentry以及",
+     "seq_hint": "8"
+    },
+    {
+     "excerpt": "leader对每一个follower都维护了一个nextIndex，表示下一个需",
+     "seq_hint": "10"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-rf05",
+   "doc": "raft一致性算法详解：CAP理论、选举机制与日志复制-CSDN博客.md",
+   "q": "当 follower 的日志与 leader 冲突时，leader 怎么调整 nextIndex？文档说这样做的结果是「每个 term 需要几次 RPC」？",
+   "targets": [
+    {
+     "excerpt": "sRPC，包含entry13、nextIndex[S2]=13、prevLogI",
+     "seq_hint": "10"
+    },
+    {
+     "excerpt": "leader重新发送请求时减小nextIndex越过那个term冲突的所有log",
+     "seq_hint": "12"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-rf06",
+   "doc": "raft一致性算法详解：CAP理论、选举机制与日志复制-CSDN博客.md",
+   "q": "RAFT 用快照解决什么问题、快照之后哪些日志可以丢？什么情况下 leader 必须改用 InstallSnapShot RPC？",
+   "targets": [
+    {
+     "excerpt": "使用快照来解决这个问题，在快照系统中，整个系统状态都以快照的形式写入到持久化存储",
+     "seq_hint": "12"
+    },
+    {
+     "excerpt": "这通常发生在当leader已经丢弃了下一条需要发送给follower的logen",
+     "seq_hint": "13"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-rf07",
+   "doc": "raft一致性算法详解：CAP理论、选举机制与日志复制-CSDN博客.md",
+   "q": "客户端随机挑到 follower 时会发生什么？只读操作虽然可以直接处理，但为防止脏读需要哪两个保证措施？",
+   "targets": [
+    {
+     "excerpt": "7.客户端交互客户端交互过程：client启动时，会随机挑选一个服务器进行通信若",
+     "seq_hint": "14"
+    },
+    {
+     "excerpt": "只读的操作可以直接处理而无需记录日志，但是为防止脏读（leader响应客户端时可",
+     "seq_hint": "15"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-rf08",
+   "doc": "raft一致性算法详解：CAP理论、选举机制与日志复制-CSDN博客.md",
+   "q": "配置转换期间会出现什么危险（为什么可能同时出现两个 leader）？RAFT 用「共同一致」怎么避免它 —— 那个中间配置是哪两个配置的结合？",
+   "targets": [
+    {
+     "excerpt": "配置转换期间，整个集群会被分为两个独立的群体，在同一个时间点，两个不同的lead",
+     "seq_hint": "16"
+    },
+    {
+     "excerpt": "共同一致是新配置和老配置的结合：logentry被复制给集群中新、老配置的所有服",
+     "seq_hint": "17"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-vd01",
+   "doc": "深入解析：人工智能基础架构与算力之5 向量数据库技术原理：支撑大模型语义检索的关键架构 - clnchanpin - 博.md",
+   "q": "HNSW 的性能靠哪两个参数控制？Milvus 基准里它在 Recall@10=90% 时的 QPS 是多少，而 LSH 在同等精度下 QPS 更高，那它差在哪？",
+   "targets": [
+    {
+     "excerpt": "HNSW算法的性能高度依赖于两个关键参数：efConstruction和efSe",
+     "seq_hint": "2"
+    },
+    {
+     "excerpt": "Milvus的基准测试表明，在Recall@10=90%时，HNSW的QPS（每",
+     "seq_hint": "5"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-vd02",
+   "doc": "深入解析：人工智能基础架构与算力之5 向量数据库技术原理：支撑大模型语义检索的关键架构 - clnchanpin - 博.md",
+   "q": "基于量化的 IVF 类索引，查询分哪两步？它的聚类过程有什么代价、文档给了什么缓解办法？压缩率过高又会导致什么现象？",
+   "targets": [
+    {
+     "excerpt": "该算法分为两个主要步骤：首先，通过K-Means等聚类算法将向量空间划分为若干个",
+     "seq_hint": "3"
+    },
+    {
+     "excerpt": "聚类过程本身计算成本较高，且对初始中心点敏感，使用K-Means++等改进算法可",
+     "seq_hint": "4"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-vd03",
+   "doc": "深入解析：人工智能基础架构与算力之5 向量数据库技术原理：支撑大模型语义检索的关键架构 - clnchanpin - 博.md",
+   "q": "三种相似度度量里，哪一种对向量的长度（尺度）敏感？哪一种在向量已归一化时等价于余弦相似度、为什么它更快？",
+   "targets": [
+    {
+     "excerpt": "它同时考虑了向量的方向和长度，距离越小，表示两个向量越相似。与余弦相似度不同，欧",
+     "seq_hint": "10"
+    },
+    {
+     "excerpt": "内积（InnerProduct），即点积，对于已归一化的向量等价于余弦相似度，但",
+     "seq_hint": "11"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-vd04",
+   "doc": "深入解析：人工智能基础架构与算力之5 向量数据库技术原理：支撑大模型语义检索的关键架构 - clnchanpin - 博.md",
+   "q": "分布式向量库处理查询时的 scatter-gather 是怎么做的？集群状态和元数据靠什么保证一致？文档举了哪个产品做例子？",
+   "targets": [
+    {
+     "excerpt": "对于查询，框架行采用两种主要策略：一是“scatter-gather”模式，即查",
+     "seq_hint": "18"
+    },
+    {
+     "excerpt": "依据引入共识算法（如Raft或Paxos）来管理集群状态和元数据，可以确保系统在",
+     "seq_hint": "19"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-vd05",
+   "doc": "深入解析：人工智能基础架构与算力之5 向量数据库技术原理：支撑大模型语义检索的关键架构 - clnchanpin - 博.md",
+   "q": "文档说传统 ODQA 的瓶颈在哪？基于大模型加向量库的方案把它改成了什么流程？检索到的片段最后拿去做什么？",
+   "targets": [
+    {
+     "excerpt": "传统的ODQA系统通常依赖于复杂的流水线，包括问题分析、文档检索、答案抽取等多个",
+     "seq_hint": "20"
+    },
+    {
+     "excerpt": "3.1.2结合大模型的生成式问答在检索到相关的文档片段后，系统会将这些片段与用户",
+     "seq_hint": "21"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-vd06",
+   "doc": "深入解析：人工智能基础架构与算力之5 向量数据库技术原理：支撑大模型语义检索的关键架构 - clnchanpin - 博.md",
+   "q": "传统的基于关键词的文档检索差在哪？企业文档做向量化和分块时，文档对「分块」提了什么要求、它和 RAG 怎么配合？",
+   "targets": [
+    {
+     "excerpt": "传统的基于关键词的文档检索系统，往往无法理解用户的真实意图，返回的结果相关性不高",
+     "seq_hint": "22"
+    },
+    {
+     "excerpt": "一个合适的分块策略应该能够在保证语义完整性和上下文信息的同时，最大限度地利用编码",
+     "seq_hint": "23"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-vd07",
+   "doc": "深入解析：人工智能基础架构与算力之5 向量数据库技术原理：支撑大模型语义检索的关键架构 - clnchanpin - 博.md",
+   "q": "用 CLIP 做图片检索时，离线阶段和查询阶段分别用哪个编码器？它支持哪两种方向的检索？",
+   "targets": [
+    {
+     "excerpt": "在离线阶段，系统采用CLIP的图像编码器将图片库中的所有图片编码成向量。当用户输",
+     "seq_hint": "25"
+    },
+    {
+     "excerpt": "训练结束后，CLIP允许实现多种跨模态检索任务，例如“以文搜图”（输入文字描述，",
+     "seq_hint": "8"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-vd08",
+   "doc": "深入解析：人工智能基础架构与算力之5 向量数据库技术原理：支撑大模型语义检索的关键架构 - clnchanpin - 博.md",
+   "q": "把电子病历向量化能给医生提供什么？文档举的那个医学知识库有多大（元数据与概念各多少）？",
+   "targets": [
+    {
+     "excerpt": "例如，凭借将海量电子病历向量化，系统可以为医生提供基于相似病例的诊疗建议，显著提",
+     "seq_hint": "27"
+    },
+    {
+     "excerpt": "一个典型的应用是构建大规模的医学知识库，如Healthline，其知识库涵盖了超",
+     "seq_hint": "28"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-vd09",
+   "doc": "深入解析：人工智能基础架构与算力之5 向量数据库技术原理：支撑大模型语义检索的关键架构 - clnchanpin - 博.md",
+   "q": "法律领域的专用模型为什么比通用模型强？工业界常用的「混合检索」分哪两个阶段、各自负责什么？",
+   "targets": [
+    {
+     "excerpt": "与通用模型不同，这些法律领域的模型在训练时使用了大量的法律文本语料，使其能够更好",
+     "seq_hint": "32"
+    },
+    {
+     "excerpt": "第二阶段再使用BERT等语义模型进行精排，计算查询与候选文档之间的深层语义相关性",
+     "seq_hint": "33"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-vd10",
+   "doc": "深入解析：人工智能基础架构与算力之5 向量数据库技术原理：支撑大模型语义检索的关键架构 - clnchanpin - 博.md",
+   "q": "带元数据过滤的查询，过滤器在检索流程的哪一步应用？检索出候选之后如果还要提升准确性，文档说可以做什么、用什么模型？",
+   "targets": [
+    {
+     "excerpt": "如果查询请求中包含元数据过滤条件，查询层会在索引检索之后或之中（取决于具体完成）",
+     "seq_hint": "16"
+    },
+    {
+     "excerpt": "在检索过程中，查询层还可以结合元资料进行过滤（例如，只搜索特定时间范围内的数据）",
+     "seq_hint": "14"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-vd11",
+   "doc": "深入解析：人工智能基础架构与算力之5 向量数据库技术原理：支撑大模型语义检索的关键架构 - clnchanpin - 博.md",
+   "q": "传统的电商搜索在哪些方面有明显局限？滴滴的外卖业务用什么方案解决了什么问题？",
+   "targets": [
+    {
+     "excerpt": "传统的电商搜索主要依赖于关键词匹配和倒排索引技术，这在处理用户查询的多样性、模糊",
+     "seq_hint": "35"
+    },
+    {
+     "excerpt": "例如，滴滴在其国际化外卖业务中，就利用Milvus向量数据库和jina-embe",
+     "seq_hint": "37"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "mult-vd12",
+   "doc": "深入解析：人工智能基础架构与算力之5 向量数据库技术原理：支撑大模型语义检索的关键架构 - clnchanpin - 博.md",
+   "q": "ANN 索引总的思路是什么（牺牲什么换什么）？文档列了哪三类常见结构？四层架构又是哪四层？",
+   "targets": [
+    {
+     "excerpt": "这些算法经过在向量空间中构建特定的数据结构，牺牲一定的精度来换取极高的查询效率。",
+     "seq_hint": "1"
+    },
+    {
+     "excerpt": "典型的平台架构包括存储层、索引层、查询层和服务层，各层之间依据清晰的接口进行交互",
+     "seq_hint": "12"
+    }
+   ],
+   "src": "multihop-new"
+  },
+  {
+   "id": "batc-pe01",
+   "doc": "实用指南：提示词工程方法及框架 - tlnshuju - 博客园.md",
+   "q": "同是让模型做推理，文档对普通模型和 O1 系列的引导方式正好相反 —— 两边分别怎么说的？O1 为什么不需要这种引导？",
+   "targets": [
+    {
+     "excerpt": "1.先推理后结论：要求模型展示中间推理步骤，尤其在数学、逻辑题中，例如\"先计算每",
+     "seq_hint": "4"
+    },
+    {
+     "excerpt": "O1系列四大核心提示原则1.简洁直白：直接提问核心问题，避免“请您帮我分析一下”",
+     "seq_hint": "44"
+    }
+   ],
+   "src": "batch1"
+  },
+  {
+   "id": "batc-pe02",
+   "doc": "实用指南：提示词工程方法及框架 - tlnshuju - 博客园.md",
+   "q": "给结构化提示选标记形式时，Claude 和 ChatGPT 各自更吃哪一套？这个差别在长法律文档那种任务上，用 XML 标签量化出来的收益是多少？",
+   "targets": [
+    {
+     "excerpt": "实践提示：不同模型对结构化格式的适配性存在差异。例如，Claude对XML标签的",
+     "seq_hint": "10"
+    },
+    {
+     "excerpt": "</instructions>其输出结果较无标签提示呈现显著优势：关键条款识别准",
+     "seq_hint": "41"
+    }
+   ],
+   "src": "batch1"
+  },
+  {
+   "id": "batc-pe03",
+   "doc": "实用指南：提示词工程方法及框架 - tlnshuju - 博客园.md",
+   "q": "要让输出能直接被下游程序读，文档给了两条路 —— 一条靠 schema 约束，一条靠标记分隔。分别是什么？各举了文档里的什么例子？",
+   "targets": [
+    {
+     "excerpt": "•假设缺失：在提示中预设常见假设，如“所有数值为整数”“忽略税费影响”，减少隐性",
+     "seq_hint": "23"
+    },
+    {
+     "excerpt": "•分隔符与标签技术：用XML标签或三重引号区分内容类型，如：总结用<summar",
+     "seq_hint": "24"
+    }
+   ],
+   "src": "batch1"
+  },
+  {
+   "id": "batc-pe04",
+   "doc": "实用指南：提示词工程方法及框架 - tlnshuju - 博客园.md",
+   "q": "提示里那类「先把话说死」的写法 —— 预设假设、硬性词、反幻觉约束 —— 各是为了防什么？文档各举了什么例子？",
+   "targets": [
+    {
+     "excerpt": "•假设缺失：在提示中预设常见假设，如“所有数值为整数”“忽略税费影响”，减少隐性",
+     "seq_hint": "23"
+    },
+    {
+     "excerpt": "实践中需注意：•优先级标记：用“must”“always”强化关键指令，如“所有",
+     "seq_hint": "27"
+    }
+   ],
+   "src": "batch1"
+  },
+  {
+   "id": "batc-pe05",
+   "doc": "实用指南：提示词工程方法及框架 - tlnshuju - 博客园.md",
+   "q": "文档说 O1 系列并非适用于所有场景，那复杂任务该优先用什么？它和普通模型在提示写法上还有哪两条差别？",
+   "targets": [
+    {
+     "excerpt": "O1系列四大核心提示原则1.简洁直白：直接提问核心问题，避免“请您帮我分析一下”",
+     "seq_hint": "44"
+    },
+    {
+     "excerpt": "任务适配建议O1系列并非适用于所有场景：复杂任务（如法律分析、数学证明）建议优先",
+     "seq_hint": "45"
+    }
+   ],
+   "src": "batch1"
+  },
+  {
+   "id": "batc-pe06",
+   "doc": "实用指南：提示词工程方法及框架 - tlnshuju - 博客园.md",
+   "q": "结构化标签用在法律长文档提取上，具体在哪些指标上有提升、提升多少？那个 focus 标签靠什么符号锁定条款类型？",
+   "targets": [
+    {
+     "excerpt": "•**<focus>标签**：凭借“|”分隔符精准锁定关键条款类型，实现“靶向分",
+     "seq_hint": "39"
+    },
+    {
+     "excerpt": "</instructions>其输出结果较无标签提示呈现显著优势：关键条款识别准",
+     "seq_hint": "41"
+    }
+   ],
+   "src": "batch1"
+  },
+  {
+   "id": "batc-pe07",
+   "doc": "实用指南：提示词工程方法及框架 - tlnshuju - 博客园.md",
+   "q": "把提示词拆成角色、上下文、指令、具体性这几块的那套框架叫什么？它对上下文那部分有什么硬要求？",
+   "targets": [
+    {
+     "excerpt": "而采用CRISP结构后，输出质量显著提升：对比维度无结构提示CRISP结构化提示",
+     "seq_hint": "13"
+    },
+    {
+     "excerpt": "•Context需包含“5W1H”中至少3项（Who/What/Where/Wh",
+     "seq_hint": "15"
+    }
+   ],
+   "src": "batch1"
+  },
+  {
+   "id": "batc-b2-01",
+   "doc": "高并发系统限流-漏桶算法和令牌桶算法 - 陶朱公Boy - 博客园.md",
+   "q": "同样大小的桶、同样的速率，为什么令牌桶能一次性放行一批请求，而漏桶只能匀速放行？两个桶在「溢出」时的行为分别是什么？",
+   "targets": [
+    {
+     "excerpt": "因为默认的令牌桶算法，取走token是不需要耗费时间的，也就是说，假设桶内有10",
+     "seq_hint": "32"
+    },
+    {
+     "excerpt": "漏桶算法漏桶作为计量工具（TheLeakyBucketAlgorithmasaM",
+     "seq_hint": "35"
+    }
+   ],
+   "src": "batch2"
+  },
+  {
+   "id": "batc-b2-02",
+   "doc": "高并发系统限流-漏桶算法和令牌桶算法 - 陶朱公Boy - 博客园.md",
+   "q": "文档把限流比作给接口装「保险丝」，那真的触发限流之后，它列出了哪几种处置方式？「排队」和「降级」各举了什么例子？",
+   "targets": [
+    {
+     "excerpt": "同理我们的接口也需要安装上“保险丝”，以防止非预期的请求对系统压力过大而引起的系",
+     "seq_hint": "1"
+    },
+    {
+     "excerpt": "限流的目的是通过对并发访问/请求进行限速或者一个时间窗口内的的请求进行限速来保护",
+     "seq_hint": "33"
+    }
+   ],
+   "src": "batch2"
+  },
+  {
+   "id": "batc-b2-03",
+   "doc": "Redis持久化之RDB&AOF - Margaery - 博客园.md",
+   "q": "RDB 和 AOF 在「对主进程的 IO 负担」和「数据完整性」这两件事上正好互换 —— 两边分别怎么说？RDB 靠什么机制把 IO 从主进程挪走，代价又是什么？",
+   "targets": [
+    {
+     "excerpt": "对于Redis的服务进程而言，在开始持久化时，它唯一需要做的只是fork出子进程",
+     "seq_hint": "11"
+    },
+    {
+     "excerpt": "Redis需要手动开启AOF持久化方式，默认是每秒将写操作日志追加到AOF文件中",
+     "seq_hint": "19"
+    }
+   ],
+   "src": "batch2"
+  },
+  {
+   "id": "batc-b2-04",
+   "doc": "浅谈微服务中的熔断,限流,降级 - 苹果芒 - 博客园.md",
+   "q": "文档说熔断是用来应对「雪崩效应」的；而它在讲重试时又强调「重试成本高的服务反而该少重试」——那个成本用什么量？另外在 A→B→C 这条链上，为什么最下游出问题反而最上游不用熔断？",
+   "targets": [
+    {
+     "excerpt": "如果扇出的链路上某个微服务的调用响应时间过长或者不可用，对微服务A的调用就会占用",
+     "seq_hint": "1"
+    },
+    {
+     "excerpt": "RB=100ms，TBC=10msB是个核心服务，B的计算成本特别大，那么A就应",
+     "seq_hint": "9"
+    }
+   ],
+   "src": "batch2"
+  },
+  {
+   "id": "batc-b2-05",
+   "doc": "高并发系统限流-漏桶算法和令牌桶算法 - 陶朱公Boy - 博客园.md",
+   "q": "文档把常见的限流按「限制什么」分了哪几类？每一类各举了哪个具体实现？而漏桶作为「计量工具」时，它控制的是流入还是流出？",
+   "targets": [
+    {
+     "excerpt": "限流的目的是通过对并发访问/请求进行限速或者一个时间窗口内的的请求进行限速来保护",
+     "seq_hint": "33"
+    },
+    {
+     "excerpt": "漏桶算法漏桶作为计量工具（TheLeakyBucketAlgorithmasaM",
+     "seq_hint": "35"
+    }
+   ],
+   "src": "batch2"
+  },
+  {
+   "id": "batc-b2-06",
+   "doc": "Redis持久化之RDB&AOF - Margaery - 博客园.md",
+   "q": "RDB 启动和 AOF 启动谁的优先级高？RDB 恢复数据的效率比 AOF 高，可它为什么在数据完整性上仍然吃亏？",
+   "targets": [
+    {
+     "excerpt": "对于Redis的服务进程而言，在开始持久化时，它唯一需要做的只是fork出子进程",
+     "seq_hint": "11"
+    },
+    {
+     "excerpt": "AOF相对可靠，它和MySQL中bin.log、apache.log、zooke",
+     "seq_hint": "13"
+    }
+   ],
+   "src": "batch2"
+  },
+  {
+   "id": "batc-b2-07",
+   "doc": "浅谈微服务中的熔断,限流,降级 - 苹果芒 - 博客园.md",
+   "q": "「服务熔断」和「服务降级」的区别是什么？双 11 那种场景降级具体会砍掉哪些功能？文档还提到限流的上游配置要依赖下游，这是为什么？",
+   "targets": [
+    {
+     "excerpt": "如果扇出的链路上某个微服务的调用响应时间过长或者不可用，对微服务A的调用就会占用",
+     "seq_hint": "1"
+    },
+    {
+     "excerpt": "RB=100ms，TBC=10msB是个核心服务，B的计算成本特别大，那么A就应",
+     "seq_hint": "9"
+    }
+   ],
+   "src": "batch2"
+  },
+  {
+   "id": "batc-b2-08",
+   "doc": "高并发系统限流-漏桶算法和令牌桶算法 - 陶朱公Boy - 博客园.md",
+   "q": "为什么说令牌桶「对用户友好」？文档讲限流目的时提到的三种处置，哪一种正是令牌桶擅长的？",
+   "targets": [
+    {
+     "excerpt": "因为默认的令牌桶算法，取走token是不需要耗费时间的，也就是说，假设桶内有10",
+     "seq_hint": "32"
+    },
+    {
+     "excerpt": "限流的目的是通过对并发访问/请求进行限速或者一个时间窗口内的的请求进行限速来保护",
+     "seq_hint": "33"
+    }
+   ],
+   "src": "batch2"
+  },
+  {
+   "id": "hard-hd01",
+   "doc": "JVM基础系列：G1垃圾回收器 - 梅晓煜 - 博客园.md",
+   "q": "线上服务的 Young GC 一次比一次慢，日志显示每次都要扫很大的范围。文档说 G1 靠哪个机制来避免这种全堆扫描？它又是怎么知道某个引用跨了 Region？",
+   "targets": [
+    {
+     "excerpt": "（而G1更突出）回收新生代也不得不同时扫描老年代？这些都会降低YoungGC的效",
+     "seq_hint": "7"
+    },
+    {
+     "excerpt": "G1在每次引用类型数据写操作时，都会产生一个WriteBarrrier(写屏障)",
+     "seq_hint": "8"
+    }
+   ],
+   "src": "hard"
+  },
+  {
+   "id": "hard-hd02",
+   "doc": "JVM基础系列：G1垃圾回收器 - 梅晓煜 - 博客园.md",
+   "q": "把堆调大之后 Full GC 反而更频繁，日志里出现「to-space exhausted」。文档列的那几种会引发 Full GC 的情形里，这属于哪一类？它给的两条缓解办法是什么？",
+   "targets": [
+    {
+     "excerpt": "③.疏散失败（to-spaceexhausted或者to-spaceoverfl",
+     "seq_hint": "18"
+    },
+    {
+     "excerpt": "解决这种问题的方式是:1.增加-XX:G1ReservePercent选项的值（",
+     "seq_hint": "17"
+    }
+   ],
+   "src": "hard"
+  },
+  {
+   "id": "hard-hd03",
+   "doc": "JVM基础系列：G1垃圾回收器 - 梅晓煜 - 博客园.md",
+   "q": "把最大停顿目标调得很小之后吞吐反而掉了。文档说 G1 为了满足这个停顿目标会尝试哪些弥补手段？它又是在堆占用达到哪个比率时启动后台处理的？",
+   "targets": [
+    {
+     "excerpt": "如果G1收集器发生停顿（STW）的时长超过该值，G1收集器就会尝试各种方式进行弥",
+     "seq_hint": "20"
+    },
+    {
+     "excerpt": "G1收集器通常在堆占用达到某个比率（通过参数XX:InitiatingHeapO",
+     "seq_hint": "21"
+    }
+   ],
+   "src": "hard"
+  },
+  {
+   "id": "hard-hd04",
+   "doc": "Rust——所有权【四】 - 。思索 - 博客园.md",
+   "q": "同事说 Rust 里 `let s2 = s1` 之后 s1 就不能用了，他觉得这跟别的语言的浅拷贝差不多。文档为什么说这个类比不准确？如果两个指针都去释放同一块内存会出什么错？",
+   "targets": [
+    {
+     "excerpt": "如果您在使用其他语言时听说过浅拷贝和深拷贝这两个术语，那么在不复制数据的情况下复",
+     "seq_hint": "15"
+    },
+    {
+     "excerpt": "但图2显示了指向同一位置的两个数据指针。这就会产生一个问题：当s1和s2都离开作",
+     "seq_hint": "11"
+    }
+   ],
+   "src": "hard"
+  },
+  {
+   "id": "hard-hd05",
+   "doc": "Rust——所有权【四】 - 。思索 - 博客园.md",
+   "q": "Rust 没有 GC，可也不会忘记释放内存。它靠什么时机触发释放？文档说在没有 GC 的语言里，这件事原本要由谁负责、难在哪？",
+   "targets": [
+    {
+     "excerpt": "//使用s}//此作用域已结束，//s不再有效}我们可以将我们需要String的",
+     "seq_hint": "10"
+    },
+    {
+     "excerpt": "在大多数没有GC的语言中，我们有责任识别何时不再使用内存，并调用代码以显式释放内",
+     "seq_hint": "8"
+    }
+   ],
+   "src": "hard"
+  },
+  {
+   "id": "hard-hd06",
+   "doc": "深入解析：人工智能基础架构与算力之5 向量数据库技术原理：支撑大模型语义检索的关键架构 - clnchanpin - 博.md",
+   "q": "同事推荐用哈希类索引，说吞吐能到 3000+ QPS。按文档给的基准，这个选择在哪个指标上会吃亏？而这几类索引共同的取舍是什么？",
+   "targets": [
+    {
+     "excerpt": "Milvus的基准测试表明，在Recall@10=90%时，HNSW的QPS（每",
+     "seq_hint": "5"
+    },
+    {
+     "excerpt": "这些算法经过在向量空间中构建特定的数据结构，牺牲一定的精度来换取极高的查询效率。",
+     "seq_hint": "1"
+    }
+   ],
+   "src": "hard"
+  },
+  {
+   "id": "hard-hd07",
+   "doc": "深入解析：人工智能基础架构与算力之5 向量数据库技术原理：支撑大模型语义检索的关键架构 - clnchanpin - 博.md",
+   "q": "商品描述向量化之后，用户按「适合两岁宝宝的礼物」这类说法还是搜不到想要的东西。文档说带过滤条件的检索，过滤器是在流程的哪一步应用的？检索出候选之后还能做什么来提升准确性？",
+   "targets": [
+    {
+     "excerpt": "如果查询请求中包含元数据过滤条件，查询层会在索引检索之后或之中（取决于具体完成）",
+     "seq_hint": "16"
+    },
+    {
+     "excerpt": "在检索过程中，查询层还可以结合元资料进行过滤（例如，只搜索特定时间范围内的数据）",
+     "seq_hint": "14"
+    }
+   ],
+   "src": "hard"
+  },
+  {
+   "id": "hard-hd08",
+   "doc": "TCP拥塞窗口详解：慢启动、避免、恢复策略-CSDN博客.md",
+   "q": "抓包看到发送方收到一批重复 ACK 之后把窗口砍了一半。这是哪个动作？文档说 Reno 与它的改进版在这个阶段的做法差在哪、改进版要等到什么条件才退出？",
+   "targets": [
+    {
+     "excerpt": "Reno在快速重传阶段，重新发送数据之后：ssthresh设置为拥塞窗口的1/2",
+     "seq_hint": "8"
+    },
+    {
+     "excerpt": "基于上述原因，NewReno优化了该机制，NewReno在收到部分丢失数据的AC",
+     "seq_hint": "9"
+    }
+   ],
+   "src": "hard"
+  },
+  {
+   "id": "hard-hd09",
+   "doc": "mysql事务隔离级别及MVCC 原理 - 一只阿木木 - 博客园.md",
+   "q": "同一个事务里两次查同一行结果不一样；换成另一个隔离级别就一致了。文档说这两个级别在「什么时候生成 ReadView」上的差别是什么？",
+   "targets": [
+    {
+     "excerpt": "#select1：transaction100,200未提交select*fro",
+     "seq_hint": "10"
+    },
+    {
+     "excerpt": "我们模拟上面一模一样的场景，但换成可重复读的隔离级别，那么可重复读的事务300只",
+     "seq_hint": "10"
+    }
+   ],
+   "src": "hard"
+  },
+  {
+   "id": "hard-hd10",
+   "doc": "raft一致性算法详解：CAP理论、选举机制与日志复制-CSDN博客.md",
+   "q": "集群里所有节点同时超时，结果谁也没选上 leader，反复重来。文档把这个僵局叫什么？RAFT 用什么办法规避它？",
+   "targets": [
+    {
+     "excerpt": "值得特别注意的一点是，为了避免出现split-vote问题（例如集群里全部机器同",
+     "seq_hint": "6"
+    },
+    {
+     "excerpt": "如果一个follower在其自己的electiontimeout时间段（每个se",
+     "seq_hint": "5"
+    }
+   ],
+   "src": "hard"
+  }
+ ]
+}

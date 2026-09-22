@@ -6,6 +6,771 @@
  "note": "出题流水线的产物（tools/ruler/build_spec.py + tools/cases/_spec/*.json）。判据：全中率 —— 答案需要的块是否全部进 top-k。靶子锚内容（excerpt），seq 只作提示。",
  "cases": [
   {
+   "id": "gil01",
+   "doc": "python全局解释器GIL锁(-死锁） - AlexEvans - 博客园.md",
+   "q": "GIL 是 Python 语言的特性吗、只在哪个解释器上存在？文档说线程必须拿到什么才能执行？",
+   "targets": [
+    {
+     "excerpt": "GIL并不是Python语言的特性，它是在实现Python解释器时引用的一个概念",
+     "seq_hint": 2
+    },
+    {
+     "excerpt": "GIL锁：全局解释器锁，在解释器之上的一把大锁，线程必须获得这把锁，才能执行，只",
+     "seq_hint": 3
+    }
+   ]
+  },
+  {
+   "id": "gil02",
+   "doc": "python全局解释器GIL锁(-死锁） - AlexEvans - 博客园.md",
+   "q": "为什么 Python 的多线程被称为「伪多线程」？解释器在程序执行什么操作时会释放 GIL、目的是什么？",
+   "targets": [
+    {
+     "excerpt": "GIL锁：全局解释器锁，在解释器之上的一把大锁，线程必须获得这把锁，才能执行，只",
+     "seq_hint": 3
+    },
+    {
+     "excerpt": "任何工作，程序执行效率非常低。为了提高CPU的使用率，Python解释在程序执行",
+     "seq_hint": 4
+    }
+   ]
+  },
+  {
+   "id": "gil03",
+   "doc": "python全局解释器GIL锁(-死锁） - AlexEvans - 博客园.md",
+   "q": "GIL 的存在让垃圾回收变得安全 —— 文档是怎么解释的（垃圾回收线程运行时其他线程处于什么状态）？",
+   "targets": [
+    {
+     "excerpt": "任何工作，程序执行效率非常低。为了提高CPU的使用率，Python解释在程序执行",
+     "seq_hint": 4
+    },
+    {
+     "excerpt": "之后，其他线程就不能运行，那么在回收变量的时候就不会出现并发安全问题。垃圾回收线",
+     "seq_hint": 5
+    }
+   ]
+  },
+  {
+   "id": "gil04",
+   "doc": "python全局解释器GIL锁(-死锁） - AlexEvans - 博客园.md",
+   "q": "在多核机器上开四条线程会发生什么？文档据此说 Python 适合哪一类程序、为什么？",
+   "targets": [
+    {
+     "excerpt": "核，一个进程四条线程，理论一个线程一核，但是Python不行，在一个线程中开四条",
+     "seq_hint": 6
+    },
+    {
+     "excerpt": "这样的程序称为IO密集型程序。IO密集型程序在运行时，需要大量的时间进行等待，如",
+     "seq_hint": 7
+    }
+   ]
+  },
+  {
+   "id": "gil05",
+   "doc": "python全局解释器GIL锁(-死锁） - AlexEvans - 博客园.md",
+   "q": "文档给「死锁」下的定义是什么？解决死锁它推荐用什么锁、那个锁的特点是什么（acquire 几次就要 release 几次）？",
+   "targets": [
+    {
+     "excerpt": "夺资源而造成的一种互相等待的现象，若无外力作用，它们都将无法推进下去。此时称系统",
+     "seq_hint": 9
+    },
+    {
+     "excerpt": "了僵局，线程2想要线程1手里的B锁，线程1想要线程2里的A锁。2.解决死锁解决死",
+     "seq_hint": 11
+    }
+   ]
+  },
+  {
+   "id": "q801",
+   "doc": "部署系列——神经网络INT8量化教程第一讲！ - 小kk_p - 博客园.md",
+   "q": "FP32 与 FP16 各自用多少 bit 表示指数和小数？文档说 FP16 的精度下降对任务影响如何，NVIDIA 为它准备了什么硬件、吞吐量相比 FP32 提升多少？",
+   "targets": [
+    {
+     "excerpt": "当然也会有FP64、FP16、BF16、TF32等更多的精度：FP32是单精度浮",
+     "seq_hint": 3
+    },
+    {
+     "excerpt": "而且FP16的精度下降对于大部分任务影响不是很大，甚至有些任务会提升。NVIDI",
+     "seq_hint": 4
+    }
+   ]
+  },
+  {
+   "id": "q802",
+   "doc": "部署系列——神经网络INT8量化教程第一讲！ - 小kk_p - 博客园.md",
+   "q": "把浮点范围映射到 INT8 时超出范围的部分怎么办？文档说对称量化与非对称量化为什么都算「线性（均匀）量化」？",
+   "targets": [
+    {
+     "excerpt": "怎么办，当然是要截断了，假设我们的INT8范围是，因为我们使用的是INT8，所以",
+     "seq_hint": 8
+    },
+    {
+     "excerpt": "这样就明白了刚才的问题：如果是呢？貌似直接带入算出来也是0，如果我们采用的是对称",
+     "seq_hint": 9
+    }
+   ]
+  },
+  {
+   "id": "q803",
+   "doc": "部署系列——神经网络INT8量化教程第一讲！ - 小kk_p - 博客园.md",
+   "q": "对称量化的公式比非对称简化在哪（哪个量变成零）？文档说权重为什么必须做成 per-channel，而不是每个权重值都有自己的 scale？",
+   "targets": [
+    {
+     "excerpt": "可以对比下非对称和对称的量化公式，对称量化因为，所以公式简化了很多。对于对称量化",
+     "seq_hint": 10
+    },
+    {
+     "excerpt": "那为什么权重必须是pre-channel呢？不能是每个权重值都有自己的scale",
+     "seq_hint": 11
+    }
+   ]
+  },
+  {
+   "id": "q804",
+   "doc": "部署系列——神经网络INT8量化教程第一讲！ - 小kk_p - 博客园.md",
+   "q": "把矩阵乘拆成逐元素相乘再求和之后，文档说输入的每一行和权重的每一列必须各自共享什么？这样做的依据是什么？",
+   "targets": [
+    {
+     "excerpt": "而对应的INT8精度的输入和权重为，q下标就代表quantize也就是量化：接下",
+     "seq_hint": 12
+    },
+    {
+     "excerpt": "当把k去除将s取出来之后，我们发现和分别代表输入的第行的scale和权重的第列的",
+     "seq_hint": 13
+    }
+   ]
+  },
+  {
+   "id": "q805",
+   "doc": "部署系列——神经网络INT8量化教程第一讲！ - 小kk_p - 博客园.md",
+   "q": "文档在讲 INT8 量化对精度的影响时，引的是 NVIDIA 哪份研究的结论？它提到 TensorFlow 与 TFLite 分别在什么时候支持了量化？",
+   "targets": [
+    {
+     "excerpt": "如果你担心INT8量化对于精度的影响，我们可以看下NVIDIA量化研究的一些结论",
+     "seq_hint": 5
+    },
+    {
+     "excerpt": "TensorFlow很早就支持了量化训练，而TFLite也很早就支持了后训练量化",
+     "seq_hint": 6
+    }
+   ]
+  },
+  {
+   "id": "q806",
+   "doc": "部署系列——神经网络INT8量化教程第一讲！ - 小kk_p - 博客园.md",
+   "q": "文档里那个「ViT-int8 on TVM」的提速是多少、比 TRT 快多少倍？这篇教程属于什么系列、作者说自己是抱着什么态度写的？",
+   "targets": [
+    {
+     "excerpt": "比较有参考意义的一篇：ViT-int8onTVM：提速4.6倍，比TRT快1.5",
+     "seq_hint": 7
+    },
+    {
+     "excerpt": "部署系列——神经网络INT8量化教程第一讲！https://zhuanlan.z",
+     "seq_hint": 1
+    }
+   ]
+  },
+  {
+   "id": "g101",
+   "doc": "JVM基础系列：G1垃圾回收器 - 梅晓煜 - 博客园.md",
+   "q": "G1 把整个 Java 堆划分成多少个大小相同的 Region？划分的目标依据是什么？",
+   "targets": [
+    {
+     "excerpt": "二、分区Region使用G1收集器时，他将整个Java推划分成2048个大小相同",
+     "seq_hint": 2
+    },
+    {
+     "excerpt": "目标是根据最小的JAVA堆大小划分出约2048个区域。-XX:ParallelG",
+     "seq_hint": 25
+    }
+   ]
+  },
+  {
+   "id": "g102",
+   "doc": "JVM基础系列：G1垃圾回收器 - 梅晓煜 - 博客园.md",
+   "q": "回收新生代时为了不全堆扫描，G1 用了哪个数据结构？它又靠什么机制知道某个引用跨了 Region？",
+   "targets": [
+    {
+     "excerpt": "（而G1更突出）回收新生代也不得不同时扫描老年代？这些都会降低YoungGC的效",
+     "seq_hint": 8
+    },
+    {
+     "excerpt": "G1在每次引用类型数据写操作时，都会产生一个WriteBarrrier(写屏障)",
+     "seq_hint": 9
+    }
+   ]
+  },
+  {
+   "id": "g103",
+   "doc": "JVM基础系列：G1垃圾回收器 - 梅晓煜 - 博客园.md",
+   "q": "年轻时回收时 G1 会对 dirty card queue 做什么？文档说这个结果最终会被加到什么地方、从而避免全局扫描？",
+   "targets": [
+    {
+     "excerpt": "在年轻代回收的时候，G1会对dirtycardqueue所有的carf进行处理，",
+     "seq_hint": 11
+    },
+    {
+     "excerpt": "当进行垃圾回收时，在GC根节点的枚举范围加入RememberedSet，就可以保",
+     "seq_hint": 10
+    }
+   ]
+  },
+  {
+   "id": "g104",
+   "doc": "JVM基础系列：G1垃圾回收器 - 梅晓煜 - 博客园.md",
+   "q": "并发标记结束后，「部分为垃圾」的老年代分段默认分几次被回收、由哪个参数控制？而混合回收并不一定要做满这个次数，提前停下来的那个阈值参数叫什么、默认多少？",
+   "targets": [
+    {
+     "excerpt": "并发标记结束以后，老年代中百分百为垃圾的内存区域被回收，部分为垃圾的内存分段被计",
+     "seq_hint": 14
+    },
+    {
+     "excerpt": "混合回收并不一定要进行8次，有一个阈值-XX:G1HeapWastePercen",
+     "seq_hint": 15
+    }
+   ]
+  },
+  {
+   "id": "g105",
+   "doc": "JVM基础系列：G1垃圾回收器 - 梅晓煜 - 博客园.md",
+   "q": "文档说触发 Full GC 的原因有哪两个？另外那种「巨型对象找不到合适空间」的情形叫什么、会引发什么？",
+   "targets": [
+    {
+     "excerpt": "发生FullGC的原因可能有两个：1.回收的时候没有足够的区域来存放晋升的对象2",
+     "seq_hint": 16
+    },
+    {
+     "excerpt": "4.巨型对象分配失败当巨型Humongous对象找不到合适的空间进行分配时，就会",
+     "seq_hint": 20
+    }
+   ]
+  },
+  {
+   "id": "g106",
+   "doc": "JVM基础系列：G1垃圾回收器 - 梅晓煜 - 博客园.md",
+   "q": "触发并发标记周期的堆占用比率由哪个参数设定、默认值多少？而决定一个 Region 是否值得纳入回收集的「活跃度阈值」是哪个参数、文档说它的默认值有哪两个版本？",
+   "targets": [
+    {
+     "excerpt": "G1收集器通常在堆占用达到某个比率（通过参数XX:InitiatingHeapO",
+     "seq_hint": 22
+    },
+    {
+     "excerpt": "-XX:G1MixedGCLiveThresholdbeiPercent=85为",
+     "seq_hint": 26
+    }
+   ]
+  },
+  {
+   "id": "g107",
+   "doc": "JVM基础系列：G1垃圾回收器 - 梅晓煜 - 博客园.md",
+   "q": "文档怎么区分 G1 的「并行性」与「并发性」？而在内存占用与额外执行负载上，它跟 CMS 比是高还是低？",
+   "targets": [
+    {
+     "excerpt": "三、G1垃圾收集器的特点、缺点并发和并行并行性：G1在回收期间，可以有多个GC线",
+     "seq_hint": 3
+    },
+    {
+     "excerpt": "比如在用户程序运行过程中，G1无论是为了垃圾回收产生的内存占用还是程序运行时的额",
+     "seq_hint": 5
+    }
+   ]
+  },
+  {
+   "id": "g108",
+   "doc": "JVM基础系列：G1垃圾回收器 - 梅晓煜 - 博客园.md",
+   "q": "文档说的 Cset（回收集）是什么？每轮 Mixed GC 附加进 Cset 的老年代 Region 最多能占全部 Region 的多少？",
+   "targets": [
+    {
+     "excerpt": "它的意思是在一次垃圾收集器中将被收集的区域集合。在YoungGC的时候，选定所有",
+     "seq_hint": 24
+    },
+    {
+     "excerpt": "默认是10%，也就是每轮MixedGC附加的Cset的Region不超过全部Re",
+     "seq_hint": 27
+    }
+   ]
+  },
+  {
+   "id": "g109",
+   "doc": "JVM基础系列：G1垃圾回收器 - 梅晓煜 - 博客园.md",
+   "q": "并发标记周期里，第一阶段和第二阶段各是不是 STW？G1 用什么算法解决并发标记中的「漏标」问题？",
+   "targets": [
+    {
+     "excerpt": "这个阶段是STW的，并且会触发一次年轻代GC第二阶段：根区域扫描G1GC在初始标",
+     "seq_hint": 12
+    },
+    {
+     "excerpt": "（G1采用了初始快照算法：snapshot-at-the-begining来解决",
+     "seq_hint": 13
+    }
+   ]
+  },
+  {
+   "id": "g110",
+   "doc": "JVM基础系列：G1垃圾回收器 - 梅晓煜 - 博客园.md",
+   "q": "G1 面向的是什么类型的应用（对内存和处理器的要求）？文档说它在普通大小的堆里表现如何？",
+   "targets": [
+    {
+     "excerpt": "五、G1的使用场景面向服务端应用，针对具有大内存、多处理器的机器（在普通大小的堆",
+     "seq_hint": 6
+    },
+    {
+     "excerpt": "JVM基础系列：G1垃圾回收器一、G1垃圾收集器G1(Garbage-First",
+     "seq_hint": 1
+    }
+   ]
+  },
+  {
+   "id": "mv01",
+   "doc": "mysql事务隔离级别及MVCC 原理 - 一只阿木木 - 博客园.md",
+   "q": "文档给「脏读」和「不可重复读」各下了什么定义？而幻读与不可重复读，文档说快照读是用什么机制避免的？",
+   "targets": [
+    {
+     "excerpt": "脏读：如果一个事务成功的读到了另一个未提交事务所修改过的数据，就是脏读。不可重复",
+     "seq_hint": 2
+    },
+    {
+     "excerpt": "（对于快照读，避免不可重复读和幻读都是使用MVCC）。如果对这两段话的一些名词看",
+     "seq_hint": 3
+    }
+   ]
+  },
+  {
+   "id": "mv02",
+   "doc": "mysql事务隔离级别及MVCC 原理 - 一只阿木木 - 博客园.md",
+   "q": "MVCC 设计出来是为了解决哪两个问题、换来了什么好处？在读未提交这个级别下，事务 B 直接读的是版本链上的哪一部分？",
+   "targets": [
+    {
+     "excerpt": "二、MVCC原理MVCC（多版本并发控制）设计出来的目的是为了在不加锁的情况下，",
+     "seq_hint": 5
+    },
+    {
+     "excerpt": "对于读未提交readuncommit隔离级别，它允许出现脏读和不可重复读，所以可",
+     "seq_hint": 6
+    }
+   ]
+  },
+  {
+   "id": "mv03",
+   "doc": "mysql事务隔离级别及MVCC 原理 - 一只阿木木 - 博客园.md",
+   "q": "ReadView 里的 min_trx_id 和 max_trx_id 分别是什么？文档给的可见性判断里，第一步比的是当前版本的 trx_id 与哪个字段？",
+   "targets": [
+    {
+     "excerpt": "min_trx_id：在生成本ReadView时，当前系统未提交的读写事务中的最",
+     "seq_hint": 7
+    },
+    {
+     "excerpt": "1、如果当前版本的trx_id（不是当前事务的trx_id，别搞混了）==Rea",
+     "seq_hint": 8
+    }
+   ]
+  },
+  {
+   "id": "mv04",
+   "doc": "mysql事务隔离级别及MVCC 原理 - 一只阿木木 - 博客园.md",
+   "q": "某个版本对当前事务不可见时，下一步怎么走？如果命中的是二级索引页，文档说可以拿哪个字段做一次快速判断、判断出什么？",
+   "targets": [
+    {
+     "excerpt": "如果某个版本对当前事务不可见（不可访问），则顺着版本链找到下一个更早的版本，并继",
+     "seq_hint": 9
+    },
+    {
+     "excerpt": "执行select时命中该页，如果ReadView的min_trx_id比该页的p",
+     "seq_hint": 12
+    }
+   ]
+  },
+  {
+   "id": "mv05",
+   "doc": "mysql事务隔离级别及MVCC 原理 - 一只阿木木 - 博客园.md",
+   "q": "读已提交与可重复读在「什么时候生成 ReadView」上有什么差别？文档用事务 300 举的例子说明了这一点吗？",
+   "targets": [
+    {
+     "excerpt": "#select1：transaction100,200未提交select*fro",
+     "seq_hint": 10
+    },
+    {
+     "excerpt": "我们模拟上面一模一样的场景，但换成可重复读的隔离级别，那么可重复读的事务300只",
+     "seq_hint": 11
+    }
+   ]
+  },
+  {
+   "id": "mv06",
+   "doc": "mysql事务隔离级别及MVCC 原理 - 一只阿木木 - 博客园.md",
+   "q": "update 语句改的是主键或索引字段时，文档说会先做什么动作？而 undo 日志会不会永远不释放、释放的时机由什么决定？",
+   "targets": [
+    {
+     "excerpt": "其实前面介绍undo日志时说过这种情况，如果update语句修改的是主键或者索引",
+     "seq_hint": 13
+    },
+    {
+     "excerpt": "问题来了：updateundo日志是否会永远存在，一直不释放？如果释放，那么释放",
+     "seq_hint": 14
+    }
+   ]
+  },
+  {
+   "id": "mv07",
+   "doc": "mysql事务隔离级别及MVCC 原理 - 一只阿木木 - 博客园.md",
+   "q": "在读已提交级别下，事务 1 的 ReadView1 什么时候不再是活跃的？ReadView 上的「事务 no」属性和活跃 ReadView 链是用来做什么的？",
+   "targets": [
+    {
+     "excerpt": "例如，对于readcommitted级别，事务1执行了第一次查询，会生成一个Re",
+     "seq_hint": 15
+    },
+    {
+     "excerpt": "Readview也会包含一个事务no属性，在创建的ReadView时候会保存当前",
+     "seq_hint": 16
+    }
+   ]
+  },
+  {
+   "id": "rs01",
+   "doc": "Rust——所有权【四】 - 。思索 - 博客园.md",
+   "q": "在堆上分配内存比在栈上多做了哪些工作？文档说所有权要解决的是哪几件事？",
+   "targets": [
+    {
+     "excerpt": "内存空间；其位置总是在栈顶。相比之下，在堆上分配内存则需要更多的工作，这是因为分",
+     "seq_hint": 4
+    },
+    {
+     "excerpt": "跟踪代码的哪些部分正在使用堆上的哪些数据，最大程度地减少堆上的重复数据量，以及清",
+     "seq_hint": 5
+    }
+   ]
+  },
+  {
+   "id": "rs02",
+   "doc": "Rust——所有权【四】 - 。思索 - 博客园.md",
+   "q": "`let s2 = s1;` 之后为什么 s1 不能再用？如果两个指针都试图释放同一块内存，会发生什么错误？",
+   "targets": [
+    {
+     "excerpt": "lets2=s1;这看起来与上面的代码非常类似，所以我们可能会假设他们的运行方式",
+     "seq_hint": 11
+    },
+    {
+     "excerpt": "但图2显示了指向同一位置的两个数据指针。这就会产生一个问题：当s1和s2都离开作",
+     "seq_hint": 12
+    }
+   ]
+  },
+  {
+   "id": "rs03",
+   "doc": "Rust——所有权【四】 - 。思索 - 博客园.md",
+   "q": "文档说 `let s2 = s1` 这种「不复制数据、只复制指针长度容量」的做法为什么不叫浅拷贝？而为什么 `let y = x`（两个整数）之后 x 仍然有效？",
+   "targets": [
+    {
+     "excerpt": "如果您在使用其他语言时听说过浅拷贝和深拷贝这两个术语，那么在不复制数据的情况下复",
+     "seq_hint": 15
+    },
+    {
+     "excerpt": "println!(\"x={},y={}\",x,y);但是这段代码似乎与我们刚刚学",
+     "seq_hint": 16
+    }
+   ]
+  },
+  {
+   "id": "rs04",
+   "doc": "Rust——所有权【四】 - 。思索 - 博客园.md",
+   "q": "按文档给的通用规则，哪些类型可以实现 Copy？把一个 String 变量传给函数之后，它还能用吗、为什么？",
+   "targets": [
+    {
+     "excerpt": "你可以查看给定类型的文档来确认，不过作为一个通用的规则，任何一组简单标量值的组合",
+     "seq_hint": 17
+    },
+    {
+     "excerpt": "takes_ownership(s);//s的值移动到函数里...//...所以",
+     "seq_hint": 18
+    }
+   ]
+  },
+  {
+   "id": "rs05",
+   "doc": "Rust——所有权【四】 - 。思索 - 博客园.md",
+   "q": "Rust 什么时候把 String 占的内存还给分配器？它靠什么机制做到这一点 —— 对比没有 GC 的语言，那件事原本要谁来做？",
+   "targets": [
+    {
+     "excerpt": "//使用s}//此作用域已结束，//s不再有效}我们可以将我们需要String的",
+     "seq_hint": 10
+    },
+    {
+     "excerpt": "用域println!(\"{}\",some_string);}//这里，some_",
+     "seq_hint": 19
+    }
+   ]
+  },
+  {
+   "id": "rs06",
+   "doc": "Rust——所有权【四】 - 。思索 - 博客园.md",
+   "q": "函数返回一个 String 时所有权是怎么流动的？文档给的 takes_and_gives_back 这个函数是干什么的？",
+   "targets": [
+    {
+     "excerpt": ";//gives_ownership将返回值//移给s1lets2=String",
+     "seq_hint": 20
+    },
+    {
+     "excerpt": "字符串并返回该值fntakes_and_gives_back(a_string:",
+     "seq_hint": 21
+    }
+   ]
+  },
+  {
+   "id": "rs07",
+   "doc": "Rust——所有权【四】 - 。思索 - 博客园.md",
+   "q": "变量的有效范围是怎么界定的？文档说 String 可变而字符串字面量不可变，区别的根源在哪（两个类型对内存的处理有什么不同）？",
+   "targets": [
+    {
+     "excerpt": "该变量从声明该变量的点起一直有效，直到当前范围结束。{//sisnotvalid",
+     "seq_hint": 6
+    },
+    {
+     "excerpt": "println!(\"{}\",s);//将打印`hello,world!`那么这里",
+     "seq_hint": 8
+    }
+   ]
+  },
+  {
+   "id": "rs08",
+   "doc": "Rust——所有权【四】 - 。思索 - 博客园.md",
+   "q": "在 `let s2 = s1;` 之后再去打印 s1，Rust 会给什么编译错误？错误信息里说明 s1 处于什么状态？",
+   "targets": [
+    {
+     "excerpt": "println!(\"{},world!\",s1);当我们尝试打印s1的时候，会得",
+     "seq_hint": 13
+    },
+    {
+     "excerpt": "\",s2);23|println!(\"{},world!\",s1);|^^val",
+     "seq_hint": 14
+    }
+   ]
+  },
+  {
+   "id": "tc01",
+   "doc": "TCP拥塞窗口详解：慢启动、避免、恢复策略-CSDN博客.md",
+   "q": "TCP 里有哪两个窗口、各自由谁决定？设备实际最多能发多少字节，文档给的公式是什么？",
+   "targets": [
+    {
+     "excerpt": "学过网络相关课程的，都知道TCP中，有两个窗口：滑动窗口(在我们的上一篇文章中有",
+     "seq_hint": 1
+    },
+    {
+     "excerpt": "在任何给定时间，设备最多可以发送由接收器窗口和拥塞窗口之间的最小值指定的字节数，",
+     "seq_hint": 2
+    }
+   ]
+  },
+  {
+   "id": "tc02",
+   "doc": "TCP拥塞窗口详解：慢启动、避免、恢复策略-CSDN博客.md",
+   "q": "慢启动算法开始时拥塞窗口设为多大？那个决定「何时从慢启动转入拥塞避免」的阈值叫什么？",
+   "targets": [
+    {
+     "excerpt": "该算法遵循以下规则：拥塞窗口从一个段的大小开始（大约1KB）定义了一个拥塞窗口阈",
+     "seq_hint": 3
+    },
+    {
+     "excerpt": "因此，较好的方法是先探测一下，即由小到大逐渐增大发送窗口，也就是说，由小到大逐渐",
+     "seq_hint": 4
+    }
+   ]
+  },
+  {
+   "id": "tc03",
+   "doc": "TCP拥塞窗口详解：慢启动、避免、恢复策略-CSDN博客.md",
+   "q": "慢启动阶段 cwnd 按什么规律增长（第 1、2、3 个 RTT 后分别是多少）？到了拥塞避免阶段又改成什么规律？",
+   "targets": [
+    {
+     "excerpt": "慢启动的整个过程如下：初始化cwnd=1经过1个RTT,即收到一个ACK，cwn",
+     "seq_hint": 6
+    },
+    {
+     "excerpt": "“拥塞避免”是说在拥塞避免阶段将拥塞窗口控制为按线性规律增长，使网络比较不容易出",
+     "seq_hint": 7
+    }
+   ]
+  },
+  {
+   "id": "tc04",
+   "doc": "TCP拥塞窗口详解：慢启动、避免、恢复策略-CSDN博客.md",
+   "q": "收到重复 ACK 时拥塞窗口怎么变？而 Reno 在快速重传之后，把 ssthresh 和拥塞窗口分别设为多少、然后进入哪个阶段？",
+   "targets": [
+    {
+     "excerpt": "每次收到另一个重复的ACK时，cwnd增加1个报文段大小并发送1个分组（如果新的",
+     "seq_hint": 8
+    },
+    {
+     "excerpt": "Reno在快速重传阶段，重新发送数据之后：ssthresh设置为拥塞窗口的1/2",
+     "seq_hint": 9
+    }
+   ]
+  },
+  {
+   "id": "tc05",
+   "doc": "TCP拥塞窗口详解：慢启动、避免、恢复策略-CSDN博客.md",
+   "q": "Reno 和 NewReno 在快速恢复阶段的差别是什么？NewReno 要等到什么条件才退出快速恢复？",
+   "targets": [
+    {
+     "excerpt": "Reno在快速重传阶段，重新发送数据之后：ssthresh设置为拥塞窗口的1/2",
+     "seq_hint": 9
+    },
+    {
+     "excerpt": "基于上述原因，NewReno优化了该机制，NewReno在收到部分丢失数据的AC",
+     "seq_hint": 10
+    }
+   ]
+  },
+  {
+   "id": "tc06",
+   "doc": "TCP拥塞窗口详解：慢启动、避免、恢复策略-CSDN博客.md",
+   "q": "拥塞控制的总目的是什么？文档在 Q&A 里说「一个窗口内重复丢包」会造成什么影响？",
+   "targets": [
+    {
+     "excerpt": "防止过多的数据注入到网络，使网络中的路由器或链路不致过载，确保通信子网可以有效为",
+     "seq_hint": 11
+    },
+    {
+     "excerpt": "那么，此时网络中还可以再容纳1个包。由于发送端滑动窗口不能移动了，所以如果想保持",
+     "seq_hint": 12
+    }
+   ]
+  },
+  {
+   "id": "tc07",
+   "doc": "TCP拥塞窗口详解：慢启动、避免、恢复策略-CSDN博客.md",
+   "q": "两个设备协商连接时交换的是什么、例子里的值多大？它们各自的初始拥塞窗口是多少？",
+   "targets": [
+    {
+     "excerpt": "在协商连接时，两个设备交换它们的接收器窗口(在这种情况下它们都有32KB)双端都",
+     "seq_hint": 5
+    },
+    {
+     "excerpt": "慢启动的整个过程如下：初始化cwnd=1经过1个RTT,即收到一个ACK，cwn",
+     "seq_hint": 6
+    }
+   ]
+  },
+  {
+   "id": "rf01",
+   "doc": "raft一致性算法详解：CAP理论、选举机制与日志复制-CSDN博客.md",
+   "q": "按 CAP 分类，RAFT 满足的是哪一种、文档拿谁当 AP 的例子？RAFT 的创新点里第一条「Strong Leader」是怎么限制日志流向的？",
+   "targets": [
+    {
+     "excerpt": "举例而言，本文介绍的RAFT便为满足CP的模型，而ZooKeeper则为满足AP",
+     "seq_hint": 2
+    },
+    {
+     "excerpt": "此外，与之前的算法比起来，Raft存在下面几个创新点1、StrongLeader",
+     "seq_hint": 3
+    }
+   ]
+  },
+  {
+   "id": "rf02",
+   "doc": "raft一致性算法详解：CAP理论、选举机制与日志复制-CSDN博客.md",
+   "q": "RAFT 里的三种角色各做什么（哪一个不会主动发起请求）？follower 在什么情况下会开始增加自己的任期号？",
+   "targets": [
+    {
+     "excerpt": "Follower单纯接收candidate和leader发送过来的rpc请求而不",
+     "seq_hint": 5
+    },
+    {
+     "excerpt": "如果一个follower在其自己的electiontimeout时间段（每个se",
+     "seq_hint": 6
+    }
+   ]
+  },
+  {
+   "id": "rf03",
+   "doc": "raft一致性算法详解：CAP理论、选举机制与日志复制-CSDN博客.md",
+   "q": "文档说每个 server 的 election timeout 是不是一样的？那个会导致「选不出 leader 的死循环」的问题叫什么、RAFT 用什么办法规避？",
+   "targets": [
+    {
+     "excerpt": "如果一个follower在其自己的electiontimeout时间段（每个se",
+     "seq_hint": 6
+    },
+    {
+     "excerpt": "值得特别注意的一点是，为了避免出现split-vote问题（例如集群里全部机器同",
+     "seq_hint": 7
+    }
+   ]
+  },
+  {
+   "id": "rf04",
+   "doc": "raft一致性算法详解：CAP理论、选举机制与日志复制-CSDN博客.md",
+   "q": "leader 发 AppendEntries 时会带上之前那条日志的哪两个字段？它给每个 follower 维护的 nextIndex 表示什么？",
+   "targets": [
+    {
+     "excerpt": "发送AppendEntriesRPC时，leader会将新的logentry以及",
+     "seq_hint": 9
+    },
+    {
+     "excerpt": "leader对每一个follower都维护了一个nextIndex，表示下一个需",
+     "seq_hint": 10
+    }
+   ]
+  },
+  {
+   "id": "rf05",
+   "doc": "raft一致性算法详解：CAP理论、选举机制与日志复制-CSDN博客.md",
+   "q": "当 follower 的日志与 leader 冲突时，leader 怎么调整 nextIndex？文档说这样做的结果是「每个 term 需要几次 RPC」？",
+   "targets": [
+    {
+     "excerpt": "sRPC，包含entry13、nextIndex[S2]=13、prevLogI",
+     "seq_hint": 11
+    },
+    {
+     "excerpt": "leader重新发送请求时减小nextIndex越过那个term冲突的所有log",
+     "seq_hint": 12
+    }
+   ]
+  },
+  {
+   "id": "rf06",
+   "doc": "raft一致性算法详解：CAP理论、选举机制与日志复制-CSDN博客.md",
+   "q": "RAFT 用快照解决什么问题、快照之后哪些日志可以丢？什么情况下 leader 必须改用 InstallSnapShot RPC？",
+   "targets": [
+    {
+     "excerpt": "使用快照来解决这个问题，在快照系统中，整个系统状态都以快照的形式写入到持久化存储",
+     "seq_hint": 13
+    },
+    {
+     "excerpt": "这通常发生在当leader已经丢弃了下一条需要发送给follower的logen",
+     "seq_hint": 14
+    }
+   ]
+  },
+  {
+   "id": "rf07",
+   "doc": "raft一致性算法详解：CAP理论、选举机制与日志复制-CSDN博客.md",
+   "q": "客户端随机挑到 follower 时会发生什么？只读操作虽然可以直接处理，但为防止脏读需要哪两个保证措施？",
+   "targets": [
+    {
+     "excerpt": "7.客户端交互客户端交互过程：client启动时，会随机挑选一个服务器进行通信若",
+     "seq_hint": 15
+    },
+    {
+     "excerpt": "只读的操作可以直接处理而无需记录日志，但是为防止脏读（leader响应客户端时可",
+     "seq_hint": 16
+    }
+   ]
+  },
+  {
+   "id": "rf08",
+   "doc": "raft一致性算法详解：CAP理论、选举机制与日志复制-CSDN博客.md",
+   "q": "配置转换期间会出现什么危险（为什么可能同时出现两个 leader）？RAFT 用「共同一致」怎么避免它 —— 那个中间配置是哪两个配置的结合？",
+   "targets": [
+    {
+     "excerpt": "配置转换期间，整个集群会被分为两个独立的群体，在同一个时间点，两个不同的lead",
+     "seq_hint": 17
+    },
+    {
+     "excerpt": "共同一致是新配置和老配置的结合：logentry被复制给集群中新、老配置的所有服",
+     "seq_hint": 18
+    }
+   ]
+  },
+  {
    "id": "vd01",
    "doc": "深入解析：人工智能基础架构与算力之5 向量数据库技术原理：支撑大模型语义检索的关键架构 - clnchanpin - 博.md",
    "q": "HNSW 的性能靠哪两个参数控制？Milvus 基准里它在 Recall@10=90% 时的 QPS 是多少，而 LSH 在同等精度下 QPS 更高，那它差在哪？",
