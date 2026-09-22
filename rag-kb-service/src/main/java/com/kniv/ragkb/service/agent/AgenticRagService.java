@@ -289,17 +289,33 @@ public class AgenticRagService {
      * 一处是「用一句话解释限流，**别查资料**」（资料确实讲限流，但用户明令不许查，
      * 是道故意设的对抗样本）。{@link #CONTRACT_YI} 里那句极短的甲例外就是为这种漏判留的。
      */
+    /** 信号不可用时**不猜**，返回 null ⇒ 调用方退回原提示词（行为与开关关着时一字不差）。
+     *
+     *  <p><b>为什么必须这样</b>：第一版里 {@link #binProb} 拿不到「是/否」就返回 <b>0</b>，
+     *  而 0 会让每块都判不过线 ⇒ 判定**静默变成【丙】** ⇒ 提示词告诉模型
+     *  「知识库没有相关资料」⇒ **每一题都变成"库外问题"**。
+     *  这正是本项目反复吃亏的那类失败：**仪器坏掉时不报错，只让行为悄悄变掉**
+     *  （「尺子自己坏的时候不报错，只会让所有指标一起变低」）。
+     *  按 `tools/_veccache.py` 立过的规矩 —— **拿不到就拒绝跑，不要猜**。
+     */
     private String jevCategory(ProviderRegistry.Ref ref, String question, List<ChunkHit> contexts) {
         ModelProvider p = providers.get(ref.providerId());
         long t0 = System.currentTimeMillis();
 
         // ① 甲？ —— 与 few-shot 同形状：`问：<真问题>\n这是闲聊…吗？\n答：`
-        double chat = binProb(p, ref.model(), JEV_CHITCHAT_FEWSHOT
+        Double chatP = binProb(p, ref.model(), JEV_CHITCHAT_FEWSHOT
                 + "问：" + question + "\n" + JEV_CHITCHAT_TAIL);
+        if (chatP == null) {
+            log.warn("Jev 判定**信号不可用**（首 token 里没有「是/否」）——"
+                    + "本次退回原提示词，行为与开关关着时相同。问题：{}", question);
+            return null;
+        }
+        double chat = chatP;
 
         String cat;
         double best = 0;
         int asked = 0;
+        int blank = 0;          // 有多少块也拿不到信号
         if (chat > 0.5) {
             cat = "甲";
         } else {
@@ -311,14 +327,27 @@ public class AgenticRagService {
                     snip = snip.substring(0, 300);
                 }
                 asked++;
-                double v = binProb(p, ref.model(), JEV_RELEVANCE_FEWSHOT
+                Double v = binProb(p, ref.model(), JEV_RELEVANCE_FEWSHOT
                         + "问：" + question + "\n片段：" + snip + "\n" + JEV_RELEVANCE_TAIL);
+                if (v == null) {
+                    blank++;
+                    continue;
+                }
                 if (v > best) {
                     best = v;
                 }
                 if (best > 0.5) {
                     break;  // 取或 —— 已经够了，不必把剩下的块问完（白省下一次前向）
                 }
+            }
+            // **一块都没问到 ⇒ 这是"不知道"，不是"丙"。**
+            // 判成丙的代价是提示词主动说「知识库没有相关资料」—— 那是**主动说错话**，
+            // 比退回原提示词（让模型自己判断）坏得多。
+            if (asked > 0 && blank == asked) {
+                log.warn("Jev 判定**信号不可用**（问了 {} 块，块块拿不到「是/否」）——"
+                        + "本次退回原提示词；否则会被误判成【丙】而答「知识库没有」。问题：{}",
+                        asked, question);
+                return null;
             }
             cat = best > 0.5 ? "乙" : "丙";
         }
@@ -330,13 +359,18 @@ public class AgenticRagService {
         return cat;
     }
 
-    /** 读「是/否」两个 token 的 logprob 归一化。**未归一化到 1 才是对的** —— 只比较这两个。 */
-    private double binProb(ModelProvider p, String model, String prompt) {
+    /** 读「是/否」两个 token 的 logprob 归一化。**未归一化到 1 才是对的** —— 只比较这两个。
+     *
+     *  <p>返回 {@code null} = **信号不可用**（前 20 名里没有「是」或没有「否」、
+     *  或提供方不支持这条路）。**调用方必须把它与"判成否"区分开** ——
+     *  这两件事混起来的后果见 {@link #jevCategory}。
+     */
+    private Double binProb(ModelProvider p, String model, String prompt) {
         java.util.Map<String, Double> m = p.rawTokenProbs(model, prompt, 20);
         Double a = m.get("是");
         Double b = m.get("否");
         if (a == null || b == null || a + b <= 0) {
-            return 0;       // 信号不可用 ⇒ 由调用方退回原路
+            return null;
         }
         return a / (a + b);
     }
