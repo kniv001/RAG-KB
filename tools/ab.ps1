@@ -54,11 +54,14 @@ function Reset-Prod {
     $env:KB_TWO_STAGE = 'false'
     $env:KB_CTX_IN_PROMPT = 'false'
     $env:KB_SHAPE_THINKING = 'false'
-    $env:KB_CONTRACT_IN_CODE = 'false'
+    # ⚠️ **这个按"当前默认"复位，不是按 false** —— 2026-09-22 起契约进代码是**默认开**的，
+    # 硬写 false 会让每次实验结束都把生产留在**旧路**上（正是本脚本第一段防的那种残留）。
+    # 复位 = 回到生产真实默认，不是回到 false。
+    $env:KB_CONTRACT_IN_CODE = 'true'
     Start-Process -FilePath $java -ArgumentList '-jar', $jar `
         -WorkingDirectory $repo -WindowStyle Hidden
     Start-Sleep -Seconds 25
-    Write-Host "`n（已按**四个开关全关**把应用起回来）"
+    Write-Host "`n（已复位：前三个开关关、契约进代码=默认开）"
 }
 
 try {
