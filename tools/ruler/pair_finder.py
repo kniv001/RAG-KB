@@ -83,10 +83,15 @@ def main():
 
     cands.sort(reverse=True)
     print(f"候选 {len(cands)} 对，取前 {want}（按 相似 − 字面重叠 排序）\n")
+    # `--chars N` 多打点正文 —— 出题时要读全，96 字不够
+    nch = 96
+    if "--chars" in sys.argv:
+        nch = int(sys.argv[sys.argv.index("--chars") + 1])
+    _ws = re.compile(r"\s+")
     for score, cos, ov, gap, i, j in cands[:want]:
         print(f"── cos={cos:.2f} 字面重叠={ov:.2f} 相隔{gap}块　{C.doc[i][:34]}")
-        print(f"   A#{C.seq[i]:<4} {re.sub(chr(92)+'s+', ' ', C.body[i])[:96]}")
-        print(f"   B#{C.seq[j]:<4} {re.sub(chr(92)+'s+', ' ', C.body[j])[:96]}")
+        print(f"   A#{C.seq[i]:<4} {_ws.sub(' ', C.body[i])[:nch]}")
+        print(f"   B#{C.seq[j]:<4} {_ws.sub(' ', C.body[j])[:nch]}")
         print()
 
 
