@@ -290,6 +290,26 @@ strict because it is the system's **only trust boundary** — the user must be a
 to tell at a glance which sentences come from their own material and which are
 the model's general knowledge.
 
+### Type classification moved into code (`contract-in-code`, on by default)
+
+The first step of the three-tier contract is "decide which kind of question this is"
+(has material / lacks material / unrelated), and the model **re-derived it for every
+question**. Measured: sentences about the output contract were **20%** of all thinking —
+**49%** on a small-talk question.
+
+That decision is now made **in code**: for **each chunk**, read the probability of the
+「是 / 否」(yes/no) tokens (`raw:true` + `logprobs`, **without generating** — generation
+falls into the "always pick one side" degenerate solution); one chunk over the line means
+"has material", none means "lacks material". It costs ~0.2–1.7 s per question —
+**cheaper than the assessment step it replaced (~1.8 s)**.
+
+Measured: **median TTFT 4.0 → 2.6 s**, total time −23%, thinking −20–25%; quality holds,
+and **label leakage 7/105 → 0/105** (the prompt's "do not restate the category" closes it).
+
+⚠️ **When the signal is unavailable it no longer guesses**: if the yes/no tokens are missing
+it falls back to the original prompt — otherwise it would silently classify every question
+as "lacks material" and answer "not in the knowledge base" to questions it can answer.
+
 ## Ingesting documents
 
 Two entry points, and **text extraction takes a different route in each**:
@@ -418,6 +438,24 @@ material (up to 24 chunks) and recent history (up to 16 messages).
 | Recent window | Verbatim text | Taken directly, no retrieval involved |
 | Older turns | Vector-recalled excerpts | See "Query ordering" below |
 | Summary | **One line per entry, each written as "was → now"** | Merged once per 6 messages |
+| **Long-term memory** | **Cross-conversation** durable facts (preferences, agreements, settled decisions) | Absorbed from the summary's output, see below |
+
+### Long-term memory (cross-conversation)
+
+The conversation summary is **scoped to one conversation** — an agreement made in one
+session is gone in the next. The `memory_items` table adds that tier: one line per entry
+(a topic keeps exactly one row), reusing the summary's shape (`topic: was → now`), so the
+summary's machinery (parsing / placement test / coverage edges / add-only) applies as-is.
+
+**The merge is purely mechanical — no model call.** The summary's merge needs a model
+because it faces **raw dialogue**; this one faces **already-distilled one-line entries**,
+so only two questions remain: (1) same topic? (2) did the value change? Neither needs
+semantic understanding — so it is deterministic, costs no time, and cannot fall into the
+"copy the old list back verbatim" degenerate solution the summary side hit.
+
+**It must go into the cache key** — if memory changes the answer may change; without it
+the symptom is "memory updated but the answer is stale", and because a cache hit raises no
+error it **looks like memory never took effect**.
 
 **How the summary is written — every rule here is measured** (`tools/summary-*.py`,
 `tools/supersede-probe.py`, `tools/digit-survive-probe.py`):
@@ -597,6 +635,31 @@ keyed by a **corpus stamp**; **every number carries its ruler name and corpus st
 | `xdoc-8` | 8 | 75% / 100% (**cross-document**, saturates at k=24) |
 | `selfretrieval-23` | 23 | rank-1 43%, top-10 83% |
 | `segmentation-10` | 10 windows | WindowDiff — production chunking **0.77**, point-based **0.32** (lower is better) |
+| `multihop-127` | 127 | 84% (expanded set, see below) |
+
+### Question-expansion pipeline (`tools/cases/_spec/*.json`)
+
+Writing questions **touches data only, never code** — a spec is
+`{doc, prefix, cases:[[n, [chunk ids...], "question"]]}`; `build_spec.py` emits a case set and
+`merge_cases.py` merges them (**new content always gets a new name** — otherwise historical
+numbers lose comparability without that being visible).
+
+⚠️ **One number worth reading carefully**: of the 127 questions, **only 9 bear on the
+"should the index include ctx" decision**. The criterion "flips if any of the three variants
+differs" is **too wide** — it also counts "ctx alone is insufficient as an index", which was
+settled long ago. **A criterion must watch the decision, not whether any difference exists.**
+
+### Run recorder (`tools/run.py`)
+
+```powershell
+python toolsun.py <name> -- <command...>   # wraps Python/Node/PS alike
+python toolsun.py ls                       # what has been run, with corpus stamp + commit
+```
+
+Full stdout+stderr lands in `tools/_runs/<name>/<timestamp>/run.log` (flushed per line, so a
+crash still leaves the traceback), and `meta.json` records **arguments / both repos' commits /
+corpus stamp / `KB_*` switches / exit code**. Probes that want to keep full artifacts (logs
+normally print only excerpts like `thinking[:120]`) call `from _artifact import save`.
 
 Single ruler: `python tools\ruler.py run multihop-25 --k 8,12,24 --cap same --source raw`
 (`--k` per-query depth, `--cap` how many slots, `--cap same` = take k and judge at k,
