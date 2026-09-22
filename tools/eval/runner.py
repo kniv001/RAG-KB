@@ -194,6 +194,36 @@ def score(bench_name, model, paths=None, quiet=False, tag=""):
     if lat:
         print(f"\n  耗时中位 {lat[len(lat)//2]/1000:.1f}s"
               + (f"　TTFT 中位 {tt[len(tt)//2]/1000:.1f}s" if tt else ""))
+    # ── 判据命中率（只有多次运行时才给）──────────────────────────────────
+    #
+    # **为什么必须有这个视图**：2026-09-22 发现答案侧基准已经**饱和** ——
+    # 10 次运行里 18/21 题恒过、0 题恒挂，而且**没有任何一题靠近判据边缘**
+    # （最长照抄段最高才 47 字/阈值 100、逐字重合最高 38%/阈值 60）。
+    # 那样的尺子只会说"过"，**说不出两臂的差别**。
+    #
+    # 而这一路真正的信号是**数出来的**：『标签泄漏 4/63 vs 0/63，Fisher p≈0.014』——
+    # 那是**缺陷率**，不是通过率。通过率把"18 题恒过"和"偶尔挂一次"压成同一个数，
+    # 缺陷率不会。所以把每个判据挂了多少次**摊开**，让稀有缺陷自己浮出来。
+    if len(runs) > 1:
+        tot = len(per) * len(runs)
+        cnt = {}
+        for i, res in enumerate(first["results"]):
+            for r in runs:
+                row = judges.judge(r["results"][i]["kind"], r["results"][i]["answer"],
+                                   r["results"][i]["sources"] or [], r["results"][i]["q"])
+                for k in judges.PASS[res["kind"]]:
+                    if row.get(k) is not None:
+                        cnt.setdefault(k, [0, 0])
+                        cnt[k][1] += 1
+                        if not row.get(k):
+                            cnt[k][0] += 1
+        print(f"\n—— 判据命中率（{len(runs)} 次 × {len(per)} 题 = {tot} 个观测）——")
+        for k, (bad_n, n) in sorted(cnt.items(), key=lambda x: -x[1][0]):
+            mark = "  ←" if bad_n else ""
+            print(f"  {k:<12}{bad_n:>4}/{n:<5}= {100*bad_n/max(1,n):>4.1f}%{mark}")
+        print("  （通过率会把'恒过'和'偶尔挂'压成同一个数；缺陷率不会 ——"
+              " 两臂比较要看这一列）")
+
     bad = [p for p in per if not p["ok"]]
     if bad:
         print(f"\n  没通过的 {len(bad)} 题：")

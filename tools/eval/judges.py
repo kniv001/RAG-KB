@@ -298,7 +298,14 @@ def citation_local(answer, sources, min_len=6):
 # ── 按题型给判据 ────────────────────────────────────────────────────────
 def judge(kind, answer, sources, question):
     """返回 {判据名: True/False/None}，None = 该题不适用这一条。"""
-    ctx = (question or "") + "\n" + "\n".join(s.get("preview", "") for s in sources)
+    # **用完整块正文，不能用 preview** —— preview 只有 ~200 字。
+    # 2026-09-22 实测踩到：答案写了 `-XX:G1MixedGCLiveThresholdPercent（默认85%）`，
+    # 而 85 在**完整块里**（519 字那块）、只是落在了 200 字 preview 之外
+    # ⇒ 判成「未落地」。**同一个文件里 `_full_sources()` 是现成的**，
+    # `verbatim_ratio` / `longest_copy` 都在用它，只有这一条在用 preview。
+    # 与台账里「概览被截断当成全集」（grounded 50%→83%）是**同一个坑的第二次**：
+    # **截断的输入会让判据把"没看见"当成"不存在"。**
+    ctx = (question or "") + "\n" + _full_sources(sources)
     r = {}
     grounded, total, bad = numbers_grounded(answer, ctx)
     r["数字落地"] = f"{grounded}/{total}" if total else "—"
