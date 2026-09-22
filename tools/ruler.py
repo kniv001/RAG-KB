@@ -151,7 +151,9 @@ def cmd_run(argv):
     if a.get("source", "planner") == "planner" and name.startswith("multihop"):
         import io
         import json
-        p = os.path.join(corpus.TOOLS, "_multihop-live.json")
+        # `--rec <路径>` 可以指到**别处录的一批规划结果**（例如 plan-capture.py 多跑几次
+        # 存下来的那些）—— 换一批查询就是换一组独立样本，不必重写这个文件。
+        p = a.get("rec") or os.path.join(corpus.TOOLS, "_multihop-live.json")
         if os.path.exists(p):
             rec = json.load(io.open(p, encoding="utf-8"))
             a.setdefault("source", "planner")
