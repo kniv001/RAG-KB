@@ -65,7 +65,10 @@ function Reset-Prod {
     # 于是"实验结束了但生产还跑在实验路径上"（本脚本第一段防的就是这个）。
     $env:KB_NO_RESTATE = 'false'
     $env:KB_SENT_ADDR = 'false'
-    $env:KB_SENT_WINDOW = 'false'
+    # ⚠️ **这条按"当前默认"复位，不是按 false** —— 2026-09-23 起分层注入**默认开**
+    # （转正复验：装入 token −30%、时间不变、质量不变）。硬写 false 会把实验结束后的
+    # 生产留在**旧路**上 —— 与下面 KB_CONTRACT_IN_CODE 那条是同一个坑。
+    $env:KB_SENT_WINDOW = 'true'
     $env:KB_JEV_PICK = 'false'
     # ⚠️ **这个按"当前默认"复位，不是按 false** —— 2026-09-22 起契约进代码是**默认开**的，
     # 硬写 false 会让每次实验结束都把生产留在**旧路**上（正是本脚本第一段防的那种残留）。
@@ -96,8 +99,14 @@ try {
             # 报出来的分数和耗时看起来完全正常（2026-09-23 实测：ctx-in-prompt 那一轮的
             # 臂 A 报 21/21、24.1s，其实是 no-restate 那一轮臂 A 的数 —— **它一题都没跑**）。
             # 这与本项目反复吃的亏同族：**仪器坏掉时不报错，只让结果悄悄变旧**。
-            $stale = Join-Path $repo "tools\eval\_runs\answer-quality__qwen3-4b$TagPrefix`__arm$($arm.n).json"
-            if (Test-Path $stale) { Remove-Item $stale -Force; Write-Host "（已删除上一轮同名落盘：$(Split-Path $stale -Leaf)）" }
+            # ⚠️ **要按通配删，不能按精确名**：`-Repeat N`（N>1）时落盘名中间多一段
+            # `__r1`/`__r2`（`…__r1__swp__armA.json`），精确名**一个都删不到** ——
+            # 于是又回到本段开头那个坑：续跑把整臂换成上一次的数据。
+            $stalePat = Join-Path $repo "tools\eval\_runs\answer-quality__qwen3-4b*$TagPrefix`__arm$($arm.n).json"
+            @(Get-ChildItem -Path $stalePat -ErrorAction SilentlyContinue) | ForEach-Object {
+                Write-Host "（已删除上一轮同名落盘：$($_.Name)）"
+                Remove-Item $_.FullName -Force
+            }
             # **每臂留 tag**：不然第二臂会覆盖第一臂的落盘结果，A/B 只剩后一臂
             python tools\eval.py run answer-quality --model qwen3:4b --repeat $Repeat --tag "$TagPrefix`__arm$($arm.n)"
         }

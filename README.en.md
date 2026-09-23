@@ -331,6 +331,38 @@ and **label leakage 7/105 → 0/105** (the prompt's "do not restate the category
 it falls back to the original prompt — otherwise it would silently classify every question
 as "lacks material" and answer "not in the knowledge base" to questions it can answer.
 
+### Reading probabilities can answer multiple choice too (`jev-pick`, off by default)
+
+The previous section reads probabilities for a **yes/no** question (one read per chunk).
+The same trick goes one step further: **the first token's distribution already carries the
+probability of every number**, so "which passage answers this question most directly" can be
+read in **one forward pass** — measured **~130 ms per question** (asking yes/no per chunk
+costs N reads ≈ 1.8 s).
+
+- **Only the first 9 passages are listed**: what is read is a **single digit token**, and at
+  12 passages `1` is simultaneously the start of 1/10/11/12, so the read cannot tell them
+  apart — a hard constraint, not a tunable
+- The chosen passage's header gets 「★本段最能直接回答此问题」 — **positive marking only**:
+  marking irrelevant passages "no" hurts multi-hop questions (one chunk falling short
+  ≠ that chunk being useless)
+- ⚠️ `top_logprobs` caps at **20** (24 is an HTTP 400 whose exception reaches the SSE stream
+  as a 500); when the probabilities cannot be read it **degrades loudly rather than throwing**
+  — one failed probe should not 500 a whole answer
+
+**Confidence is a clean gate, and it was measured, not assumed**: match each picked passage
+against the citations of the **arm with no injection** — 4/6 agree, and **the two that differ
+are exactly the two lowest P (0.55 / 0.54)**.
+⇒ **High P = it would have found that passage anyway** (injection just skips the scan);
+**low P = it is guessing** (injecting that is misleading). The gate defaults to **0.70**
+(the 0.65 pick happened to be right, but it sat on the boundary with only 6 samples).
+
+**Result: the direction held in six runs out of six, but the strength did not** — pooled n=124,
+"thinking got longer" share 40% (null 48%), **p=0.071**; the runs are **bimodal** between
+24–33% and 47–48%, and no question type shows a significant subgroup.
+⇒ **not promoted** (the switch stays, default off). It is also the living specimen of
+"a single run cannot decide": any one run alone gives the opposite verdict
+(one at p=0.042, another at a long/short ratio of 1.08).
+
 ### Citation normalisation: the model writes what it likes, the backend converges (`CiteFix`)
 
 **The problem**: whenever the **injected unit is finer than a chunk**, the model starts citing
@@ -549,7 +581,7 @@ key is the four characters of "what about that?", and that turn contains no such
 phrase. Planning itself does not need the excerpt: it has the last 16 messages
 and the rolling summary.
 
-### Hierarchical injection: chunks frame the range, sentences get picked (`sent-window`, off by default)
+### Hierarchical injection: chunks frame the range, sentences get picked (`sent-window`, **on by default**)
 
 **Why**: measured, **86% of a question's wall time is decode and 81% of those tokens are thinking**,
 and of the thinking **a median 38% of the characters restate material already in the prompt**.
@@ -566,17 +598,32 @@ the same thing another way**. So we stop feeding it: **after chunk recall, rank 
   rejects the whole batch)
 - Every row carries the **corpus stamp** (position-aligned indexes go silently stale on rebuild)
 - Rebuild is one command: `python tools/build-sentences.py` (build → embed → load, 113 s)
+- Empty table / stale stamp / a chunk that splits into no sentences ⇒ **falls back to the whole
+  chunk and logs it** — never silently becomes "this chunk has no content"
 
-**Measured (21 paired questions)**:
+**Promotion re-verification (21 questions × 2 paired repeats, same direction both times)**:
 
-| | whole chunks | hierarchical top-20 |
+| | arm A, whole chunks | arm B, hierarchical top-20 |
 |---|---|---|
-| **prompt tokens** | 4894 | **2712 (−45%)** |
-| prefill | 1.3 s | 0.7 s |
-| TTFT | | **−0.47 s** |
-| total time | | **−1.1 s (not slower)** |
-| thinking characters | | 0.99 (unchanged) |
-| answer quality | 20/21 | **20/21** |
+| **prompt tokens** | 3781 / 3748 | **2647 / 2347 (−30% / −37%)**, lower on 20/21 |
+| **generated tokens** | 1788 / 1611 | **1963 / 1938 (+10% / +20%)**, higher on 16/21 and 15/21 |
+| 　of which thinking (chars) | 2385 / 2297 | **2833 / 2659 (+19% / +16%)** |
+| 　of which answer (chars) | 432 / 488 | 424 / 417 (split down the middle ⇒ noise) |
+| total time | 26.0 / 22.7 s | 26.2 / 23.5 s (signs 10:11, 9:12) ⇒ **not slower** |
+| quality (defect rate) | `走对了出口` 2/12 | `走对了出口` 2/12 |
+
+⚠️ **The re-verification refuted the mechanism it was meant to confirm**: the hope was
+"feed less ⇒ think less", but thinking actually went **up 16–19%**. The real ledger is
+**prompt tokens traded for thinking tokens** — the 1134 saved prefill tokens are worth **0.3 s**
+(prefill at 3800 tok/s), the ~175 extra decode tokens cost **2.2 s** (decode at 80 tok/s), and the
+two are cancelled by "shorter context ⇒ decode rate +5–10 tok/s" ⇒ **time unchanged**.
+
+⇒ The value is in the **context budget** (1134 fewer tokens of window, further from the 12288
+cliff), **not in time saved**. It passes the "tokens first, time not worse" criterion, hence promoted.
+
+(The earlier "thinking characters 0.99, unchanged" reading was **a single run falling inside the
+noise** — re-running the same config gives per-question ratios of 0.37–2.90, the living specimen
+of rule 1 in "Four things to know before running an A/B".)
 
 **"Does feeding less hurt quality?"** has its own measurement: **an answer covers only 14%
 (median), 31% (90th percentile), of the content of the chunks it cites** (438 samples)
@@ -749,7 +796,7 @@ python tools\decode-split-probe.mjs              # channel x time, rate quintile
 ⚠️ **The 20-bin timeline is flat** — thinking has **no separable phases**. The earlier
 keyword-phase version put 89% into "other" precisely because it assumed phases that are not there.
 
-### ⚠️ Three things to know before running an A/B
+### ⚠️ Four things to know before running an A/B
 
 1. **A single run cannot decide anything.** Re-running the *same* configuration gives per-question
    **thinking-length ratios of 0.37–2.90** and total-time swings of **−25 s to +18 s**.
@@ -761,6 +808,17 @@ keyword-phase version put 89% into "other" precisely because it assumed phases t
 3. **Percentages can flip the story.** "Material restatement share" *fell* (12%→8%) while the
    **absolute count fell only 14% and the total rose 29%** — always read
    **share / absolute / total** together.
+4. **Instruments go stale silently** (this project's most expensive class of misreading — three
+   times in the same family; a broken instrument **does not error, it just quietly changes the
+   result**):
+   - **A whole arm going stale**: `ab.ps1` not deleting the old dump + the collector resuming
+     ⇒ an entire arm ran **zero questions** yet reported a normal score and timing
+     (it reported 21/21 in 24.1 s)
+   - **Replay diluting a significant result**: `--repeat N` did not clear the answer cache, so
+     run 2 was served from cache (empty thinking, no `stats`) and **diluted p=0.042 into p=0.21**
+     (fixed: runs after the first clear the cache and say so on one line)
+   - **Measuring a different thing**: the log estimated tokens per whole chunk and reported 4265
+     where the real number was 2712 — when two readings disagree, **suspect the instrument first**
 
 **The platform now records tokens** (added 2026-09-23): each question stores
 `promptTokens / evalTokens / prefill / decode / tokPerSec`, and the scoring report prints its
