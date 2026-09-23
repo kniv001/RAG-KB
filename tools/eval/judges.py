@@ -296,8 +296,133 @@ def citation_local(answer, sources, min_len=6):
 
 
 # ── 按题型给判据 ────────────────────────────────────────────────────────
-def judge(kind, answer, sources, question):
-    """返回 {判据名: True/False/None}，None = 该题不适用这一条。"""
+_SENT_CACHE = None
+
+
+def sentence_citations(cites, sources):
+    """**句子级引用指得到句子吗** —— 机械可判，且抓得到编造。
+
+    2026-09-23 连着两轮实测到同一件事：**注入的单位比"块"更细时，模型自发按句子粒度引用**
+    （给了地址那轮写 `[1.7]`；**没给地址**的分层注入那轮自己编 `[4.3]`、`[2.11]`）。
+    后端已经把它们规范化成 `[n]`（见 `CiteFix`），句号那半截随 `stats.cites` 出来 ——
+    这一条就是量它指得准不准。
+
+    ⚠️ **只判"指得到"，不判"指得对"**：规范化把 `[4.3]` 变成了 `[4]`，
+    "这一句支不支持那句结论"所需的**位置信息有意丢掉了**（换来判据与前端不用改）。
+    要判"对不对"得再留一份位置映射 —— **留到真需要时再做**，不在这里假装能判。
+
+    返回 (有效数, 总数)。指到不存在的段/句就是编造。
+    """
+    global _SENT_CACHE
+    if not cites:
+        return (0, 0)
+    try:
+        import os
+        import sys
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from ruler import corpus
+        C = corpus.load()
+        if _SENT_CACHE is None:
+            rows = corpus.psql_rows("SELECT chunk_id, seq FROM sentences")
+            _SENT_CACHE = {}
+            for cid, sq in rows:
+                _SENT_CACHE.setdefault(cid, set()).add(int(sq))
+    except Exception:
+        return (0, 0)
+    ok = tot = 0
+    for one in str(cites).split(","):
+        one = one.strip()
+        if not one or "." not in one:
+            continue
+        n_s, m_s = one.split(".", 1)
+        m_s = m_s.split("@", 1)[0]              # 偏移（@ 后面那半）在这条判据里不用
+        try:
+            n, m = int(n_s), int(m_s)
+        except ValueError:
+            continue
+        tot += 1
+        if not (1 <= n <= len(sources or [])):
+            continue
+        s = sources[n - 1]
+        i = next((k for k in range(C.n)
+                  if C.doc[k] == s.get("docName") and C.seq[k] == str(s.get("seq"))), None)
+        if i is not None and m in _SENT_CACHE.get(C.ids[i], ()):
+            ok += 1
+    return (ok, tot)
+
+
+def sentence_citation_local(cites, sources, answer):
+    """**句子级引用指得对吗**：把每个 `[n.m]` 所在子句里的**具体值**，
+    拿去比它指的那**一句**（而不是整块）。
+
+    这是 `citation_local`（块级）往下沉一层。判据形状照搬它，理由也一样：
+    **只查"具体值在不在"，不查"整体支不支持"** —— 后者要靠语义，
+    而语义判据在本项目里反复指错方向（`2026-09-21-少想这条线收口` 那五条）。
+    概括性表述本来就不含具体值 ⇒ **对不上 ≠ 一定错**，所以只报数、由人看。
+
+    有了 `@偏移`，才知道这个引用**挂在哪句结论上** —— 这是它与"只判指得到"的区别。
+
+    ⚠️ **已知的假阳性形状（实测抓到第一个就长这样，记下来免得下一个人重新踩）**：
+    一条结论挂**两个引用**时，两个都被独立检查 —— 而值往往只在前一个里。
+    实例：`-XX:G1MixedGCLiveThresholdbeiPercent（默认85%）…[2][11]`，
+    `85` 在 `[2.6]`（「…默认为85%…」）里、不在 `[11.2]`（「…低于此值…」）里
+    ⇒ 判 `[11.2]` 对不上，而那一句其实**正确地补充了另一件事**。
+    与块级的 `引用对得上` 是同一族的形状（那条的契约就是**只报数，由人看**），
+    所以这里也**只报数、不进 PASS** —— 它衡量的是"句级引用的精度"，不是"这题答得好不好"。
+
+    返回 (查过的条数, 对不上的列表)。
+    """
+    import os
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from ruler import corpus
+    C = corpus.load()
+    texts = {}
+    checked, bad = 0, []
+    for one in str(cites or "").split(","):
+        one = one.strip()
+        if "@" not in one or "." not in one:
+            continue
+        nm, off = one.split("@", 1)
+        n_s, m_s = nm.split(".", 1)
+        try:
+            n, m, off = int(n_s), int(m_s), int(off)
+        except ValueError:
+            continue
+        if not (1 <= n <= len(sources or [])):
+            continue
+        key = (n, m)
+        if key not in texts:
+            s = sources[n - 1]
+            i = next((k for k in range(C.n)
+                      if C.doc[k] == s.get("docName") and C.seq[k] == str(s.get("seq"))), None)
+            t = ""
+            if i is not None:
+                rows = corpus.psql_rows(
+                    "SELECT text FROM sentences WHERE chunk_id = %s AND seq = %s"
+                    % (C.ids[i], m))
+                t = rows[0][0] if rows else ""
+            texts[key] = re.sub(r"\s+", "", t)
+        if not texts[key]:
+            continue                     # 句子查不到 —— 那是「句级引用有效」那一条的事
+        # 引用**挂在哪句结论上**：从最近的一个句末/换行切到引用处
+        clause = re.split(r"[。；\n]", (answer or "")[:off])[-1]
+        vals = _values(clause)
+        if not vals:
+            continue                     # 概括性表述不含具体值 ⇒ 这一条不适用
+        checked += 1
+        miss = [v for v in vals if v not in texts[key]]
+        if miss:
+            bad.append((clause.strip()[:50], f"[{n}.{m}]", miss[:3]))
+    return checked, bad
+
+
+def judge(kind, answer, sources, question, cites=None):
+    """返回 {判据名: True/False/None}，None = 该题不适用这一条。
+
+    {@code cites} = 后端规范化时剥出来的句子级引用（`"4.3,2.11"`），
+    来自 `stats` 事件。**没有它就没法量句级引用** —— 因为答案文本里只剩 `[4]` 了。
+    """
     # **用完整块正文，不能用 preview** —— preview 只有 ~200 字。
     # 2026-09-22 实测踩到：答案写了 `-XX:G1MixedGCLiveThresholdPercent（默认85%）`，
     # 而 85 在**完整块里**（519 字那块）、只是落在了 200 字 preview 之外
@@ -311,6 +436,15 @@ def judge(kind, answer, sources, question):
     r["数字落地"] = f"{grounded}/{total}" if total else "—"
     r["_数字未落地"] = bad[:6]
     r["无标签泄漏"] = not label_leak(answer)
+    # **句级引用**：只报数不进 PASS —— 它衡量的是"细粒度注入下模型引用的精度"，
+    # 不是"这题答得好不好"。做成通过条件反而会把"用了句级引用"变成一种失败。
+    sok, stot = sentence_citations(cites, sources)
+    if stot:
+        r["句级引用有效"] = f"{sok}/{stot}"
+    sc, sbad = sentence_citation_local(cites, sources, answer)
+    if sc:
+        r["句级引用对得上"] = f"{sc - len(sbad)}/{sc}"
+        r["_句级引用对不上"] = sbad[:3]
     nc, badc = citation_local(answer, sources)
     if nc:
         r["引用对得上"] = f"{nc - len(badc)}/{nc}"

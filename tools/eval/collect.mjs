@@ -76,6 +76,11 @@ for (const cs of cases) {
   // 而 2026-09-21 那个开关（类型判定交给代码）正是拿它当依据 ——
   // 它准不准，直接决定那条路成不成立。不存就只能靠答案反推。
   let enough = null, assessReason = null;
+  // **token 用量必须存下来**（2026-09-23）—— 平台此前只存 ms / ttftMs。
+  // 而"省 token"这条优化线（分层注入：装入 4894 → 2712）**在落盘里一个字都看不到**，
+  // 只能靠一次性的速度探针顺手打出来。判据换了（以 token 为主）而仪器没跟上，
+  // 就是"尺子量不到要做的事"——这个项目栽过好几次。
+  let stats = null;
   try {
     const st = await c.openStream('POST', '/api/chat/stream', body, { token: TOKEN });
     await readSse(st.response, (name, raw) => {
@@ -94,6 +99,11 @@ for (const cs of cases) {
         // 多轮时会有多条，取**最后一轮**的（那才是决定要不要继续找的那次）
         enough = dec.enough;
         assessReason = dec.reason ?? null;
+      } else if (name === 'stats') {
+        // Ollama 末帧的原生计时：promptTokens（装入）/ evalTokens（生成）/
+        // prefill / decode / 模型加载。**缓存命中时没有这条** ⇒ 它也是
+        // "这一题是不是真跑了"的判据（此前只能靠耗时猜）。
+        stats = dec;
       } else if (name === 'done') {
         sources = dec.sources || [];
       } else if (name === 'error') {
@@ -104,10 +114,15 @@ for (const cs of cases) {
     err = String(e.message || e);
   }
   const ms = Date.now() - t0;
-  results.push({ ...cs, answer, thinking, ttftMs: ttft, ms, sources, enough, assessReason, error: err });
+  results.push({ ...cs, answer, thinking, ttftMs: ttft, ms, sources, enough, assessReason,
+    stats: stats || null, error: err });
   flush();      // **每题落盘** —— 崩了只丢当前这题
+  const tok = stats ? `装入 ${stats.promptTokens} / 生成 ${stats.evalTokens} tok` : '（无 stats＝缓存命中）';
+  if (stats && stats.cites) {
+    console.log(`     引用规范化：${String(stats.cites).split(',').filter(Boolean).length} 处句子级引用 → 块号（${stats.cites}）`);
+  }
   console.log(`  ${err ? '✗' : '✔'} ${(ms / 1000).toFixed(1)}s  正文 ${answer.length} 字`
-    + ` / 思考 ${thinking.length} 字  `
+    + ` / 思考 ${thinking.length} 字  ${tok}  `
     + `来源 ${sources.length}  ${cs.q.slice(0, 30)}${err ? '  ' + err.slice(0, 40) : ''}`);
 }
 

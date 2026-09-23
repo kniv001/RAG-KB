@@ -47,3 +47,8 @@ tools/eval/_cache-chunkp.json
 
 # 运行记录（每次跑的完整日志 + meta）—— 量可能大，不进仓库
 tools/_runs/
+
+# 句子向量缓存：**派生物，一条命令可重建**（python tools/build-sentences.py，113 秒）。
+# 79 MB —— 比语料那三个已跟踪的缓存（各 8.7 MB）大一个量级，而按内容锚（stamp + 逐条 hash）
+# 重建时不会静默错位，所以没有"必须随仓库走"的理由。
+tools/_sentence_vecs.json

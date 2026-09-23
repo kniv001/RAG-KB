@@ -76,6 +76,33 @@ def psql_rows(sql, tag="corpus"):
             for ln in raw.split("\n") if ln.strip()]
 
 
+def psql_script(sql_text, tag="exec"):
+    """**写路径**：执行一段 SQL 脚本（脚本里自带 BEGIN/COMMIT）。
+
+    与 {@link psql_rows} 用同一套连接参数与**同一个静默失败的判据** ——
+    这里尤其要紧：写操作如果静默失败，读回来会是"表是空的"，
+    而那是本项目最贵的一类误读（`psql` 在 SQL 出错时**退出码仍然是 0**）。
+    """
+    f = os.path.join(TOOLS, f"_ruler_{tag}.sql")
+    io.open(f, "w", encoding="utf-8").write(sql_text)
+    env = dict(os.environ)
+    env["PGPASSWORD"] = io.open(PGPASS, encoding="utf-8").read().strip()
+    env["PGCLIENTENCODING"] = "UTF8"
+    r = subprocess.run([PSQL, "-h", "127.0.0.1", "-U", "ragkb", "-d", "ragkb",
+                        "-v", "ON_ERROR_STOP=1", "-f", f],
+                       capture_output=True, env=env)
+    err = r.stderr.decode("utf-8", "replace")
+    if r.returncode != 0 or "ERROR" in err.upper():
+        raise RuntimeError(f"psql 写失败（退出码 {r.returncode}）：{err[:600]}")
+    return r.stdout.decode("utf-8", "replace")
+
+
+def copy_escape(s):
+    """COPY 文本格式的转义（`psql_rows` 那边是反转义，这里是它的逆）。"""
+    return (s.replace("\\", "\\\\").replace("\t", "\\t")
+             .replace("\n", "\\n").replace("\r", "\\r"))
+
+
 def embed(texts, batch=8, timeout=1800):
     import urllib.request
     out = []

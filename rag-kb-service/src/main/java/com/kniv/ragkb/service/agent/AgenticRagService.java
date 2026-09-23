@@ -130,6 +130,114 @@ public class AgenticRagService {
             不要自我辩论。清单里的编号沿用正文的引用编号即可。
             """;
 
+    /**
+     * **推理时不许复述资料原文** —— 拼在系统提示末尾（默认关，见 {@code noRestate}）。
+     *
+     * <p>依据见 {@link RagProperties.Agent#isNoRestate()}：思考里中位 38% 的字能对上
+     * 注入材料里的某一句话，且集中在前 1/3（"读材料"那一段）。
+     *
+     * <p>写法上刻意<b>不</b>用祈使句讲道理，而是<b>给一个替代动作</b>
+     * （"直接写用哪几块、结论是什么"）—— 这个项目里两次验证过：
+     * 只禁止不给替代时，模型会换个方式做同一件事（no-think 那次就是：
+     * 关了思考通道，推理从 thinking 转进 content）。
+     */
+    private static final String THINK_NO_RESTATE = """
+
+            【关于推理】
+            【参考资料】已经在上面的提示词里了。**推理时不要复述资料原文**，也不要成段抄写它。
+            直接写「用哪几块、结论是什么、哪几块互相矛盾」；需要落到引用时，
+            在正文里标 [编号] 就够了，推理里不必把原句抄一遍。
+            """;
+
+    /**
+     * **地址计划**：给参考资料里的每句话一个地址 {@code ⟨块号.句号⟩}，
+     * 并明确要求推理时**用地址指代、不要抄原句**（默认关，见 {@code sentAddr}）。
+     *
+     * <p><b>它与 {@link #THINK_NO_RESTATE} 的区别是这条路的全部要点</b>：
+     * 那一条只有**禁止**（"不要复述原文"）—— 实测思考反而变长
+     * （符号检验 p=0.007，方向是反的），因为**只禁止、不给替代**时模型只会换个方式
+     * 做同一件事。这一条是**禁止＋替代**：先给出一个更省力的指代方式，再要求用它。
+     *
+     * <p>地址用尖括号而**不是方括号**：方括号是引用契约的语法
+     * （判分正则 {@code \[(\d{1,2})\]} 只认块号）。若让模型用 {@code [2.4]} 指代，
+     * 它很可能把这个写法带进正文 —— 而那是"有效的引用在判据眼里变成缺引用"。
+     * 所以最后一句必须把两套写法**分清楚**。
+     */
+    private static final String THINK_SENT_ADDR = """
+
+            【关于指代】
+            【参考资料】里**每句话前面都有一个地址**（形如 ⟨2.4⟩ = 第 2 段的第 4 句）。
+            推理时**用地址指代，不要抄原句** —— 想引用哪句就写「⟨2.4⟩ 说…」，
+            结论照写，但不必把原句再复述一遍。
+            ⚠️ **正文里的来源标注仍然用 [编号]**（原来的规矩不变），⟨⟩ 只在推理里用。
+            """;
+
+    /** **选出这次要注入的句子**（见 {@code sentAddr} / {@code sentWindow} 两个开关）。
+     *
+     *  <p>抽成方法是因为它现在要在**预算之前**跑（装什么就得估什么），
+     *  和提示词组装隔了几十行，留在原地容易被下一个人当成"组装的一部分"再挪回去。
+     */
+    private Map<Long, List<com.kniv.ragkb.domain.entity.Sentence>> selectSentences(
+            String question, List<ChunkHit> contexts) {
+        // **必须是可变 map** —— 第一版写的 `Map.of()`，它是不可变的，
+        // 于是 `computeIfAbsent` 抛 UnsupportedOperationException，
+        // 整个回答路径 500（实测：5 秒就报错，比"悄悄少了几段资料"好得多）
+        Map<Long, List<com.kniv.ragkb.domain.entity.Sentence>> sentMap = new LinkedHashMap<>();
+        List<Long> ids = new ArrayList<>();
+        for (ChunkHit h : contexts) {
+            if (h.getId() != null) {
+                ids.add(h.getId());
+            }
+        }
+        if (ids.isEmpty()) {
+            return sentMap;
+        }
+        List<com.kniv.ragkb.domain.entity.Sentence> all;
+        if (props.getAgent().isSentWindow()) {
+            // **分层注入**：块先框范围，块内再按问题挑句 —— 只注入挑中的那几句。
+            // 依据见 RagProperties.Agent#sentWindow。
+            float[] qv = embedding.embedOne(question);
+            all = sentences.topInChunks(ids,
+                    com.kniv.ragkb.domain.handler.VectorTypeHandler.toLiteral(qv),
+                    embedding.modelColumn(),
+                    props.getAgent().getSentWindowM());
+        } else {
+            all = sentences.listByChunks(ids);
+        }
+        for (com.kniv.ragkb.domain.entity.Sentence s : all) {
+            sentMap.computeIfAbsent(s.getChunkId(), k -> new ArrayList<>()).add(s);
+        }
+        // **覆盖率必须记** —— 索引没建好、没灌向量、或语料戳过期时，症状会伪装成
+        // "开关没生效"（本项目反复吃亏的那类：仪器缺了，行为悄悄变回默认）。
+        // 分层模式下还要看**注入了多少句**：那正是这个开关要省的量。
+        long covered = contexts.stream().filter(h -> sentMap.containsKey(h.getId())).count();
+        int nSent = sentMap.values().stream().mapToInt(List::size).sum();
+        log.info("句子注入（{}）：注入 {} 段 / 其中 {} 段有句子 / 共 {} 句",
+                props.getAgent().isSentWindow() ? "分层窗口" : "全量地址",
+                contexts.size(), covered, nSent);
+        return sentMap;
+    }
+
+    /** **选中的句子要进缓存键** —— 键里原本只有开关与**块**内容。
+     *
+     *  <p>而句子是从 `sentences` 表来的：重建句子表 / 换切分器 / 重灌向量都可能
+     *  改变选中的是哪几句，**而语料戳与块内容一个字都没变** ⇒ 键不变
+     *  ⇒ 返回一条基于**另一批句子**算出来的陈旧答案，且不报错。
+     *  （实测踩过：smoke 那次选句返回空、退回整块，它的答案被缓存下来；
+     *   修好之后再问同一句，1 秒返回的正是那个旧答案。）
+     */
+    private static String sentKeyOf(Map<Long, List<com.kniv.ragkb.domain.entity.Sentence>> sentMap) {
+        StringBuilder sk = new StringBuilder();
+        sentMap.forEach((cid, ls) -> {
+            sk.append(cid).append(':');
+            for (com.kniv.ragkb.domain.entity.Sentence s : ls) {
+                sk.append(s.getSeq()).append(',');
+            }
+            sk.append(';');
+        });
+        return CacheService.hash(sk.toString());
+    }
+
     /** 回答路径的开关指纹。
      *
      *  <p>**必须进缓存键**：这几个开关都会改变"同一问题得到什么答案"，却都不改提示词文本
@@ -142,7 +250,12 @@ public class AgenticRagService {
         return "2s=" + props.getAgent().isTwoStage()
                 + ",ctx=" + props.getAgent().isCtxInPrompt()
                 + ",shape=" + props.getAgent().isShapeThinking()
-                + ",cic=" + props.getAgent().isContractInCode();
+                + ",cic=" + props.getAgent().isContractInCode()
+                // **新开关必须进这里** —— 否则两臂共用缓存条目，A/B 的第二臂
+                // 全命中第一臂的答案，量出来"没差别"。一天之内踩过三次。
+                + ",nr=" + props.getAgent().isNoRestate()
+                + ",sa=" + props.getAgent().isSentAddr()
+                + ",sw=" + (props.getAgent().isSentWindow() ? props.getAgent().getSentWindowM() : 0);
     }
 
     /** 回答用的系统提示：开关打开时拼上「思考形状」那一段。
@@ -151,8 +264,26 @@ public class AgenticRagService {
      *  只改发消息那处的话预算会低估，而低估的后果是提示词顶到窗口悬崖，
      *  Ollama 会把开头（也就是系统提示）整个丢掉。
      */
+    /** 系统提示末尾那两个**与类别无关**的附加段（形状约束、禁复述）。
+     *
+     *  <p>抽出来是为了三条路径用同一份 —— 甲/乙/丙三版契约各写一遍的话，
+     *  迟早有一版漏掉（这个项目在"复制粘贴的提示词忘了同步"上已经栽过）。 */
+    private String thinkTail() {
+        StringBuilder b = new StringBuilder();
+        if (props.getAgent().isShapeThinking()) {
+            b.append(THINK_SHAPE);
+        }
+        if (props.getAgent().isNoRestate()) {
+            b.append(THINK_NO_RESTATE);
+        }
+        if (props.getAgent().isSentAddr()) {
+            b.append(THINK_SENT_ADDR);
+        }
+        return b.toString();
+    }
+
     private String answerSystem() {
-        return props.getAgent().isShapeThinking() ? ANSWER_SYSTEM + THINK_SHAPE : ANSWER_SYSTEM;
+        return ANSWER_SYSTEM + thinkTail();
     }
 
     /** 真正要发出去的那份系统提示。{@code category} 由 {@link #jevCategory} 判出。
@@ -170,7 +301,7 @@ public class AgenticRagService {
             case "乙" -> CONTRACT_YI;
             default -> CONTRACT_BING;
         };
-        return rule + (props.getAgent().isShapeThinking() ? THINK_SHAPE : "");
+        return rule + thinkTail();
     }
 
     private static final String ANSWER_SYSTEM = """
@@ -451,6 +582,10 @@ public class AgenticRagService {
     private final RagProperties props;
     private final ObjectMapper mapper;
     private final CacheService cache;
+    /** 句子级索引（见 {@link com.kniv.ragkb.domain.entity.Sentence}）—— 地址计划 / 分层注入用。 */
+    private final com.kniv.ragkb.dao.mapper.SentenceMapper sentences;
+    /** 分层注入要按问题给句子排序 ⇒ 需要把问题嵌成向量（与检索器同一条路）。 */
+    private final com.kniv.ragkb.service.index.EmbeddingService embedding;
     /**
      * 主题树。agent 直接问它要「知识库覆盖了什么」，不通过参数层层传 ——
      * 这是库的属性，不是某一次请求的属性。
@@ -802,12 +937,36 @@ public class AgenticRagService {
         // 最后才对资料动手 —— 资料是事实依据，丢了回答就没有根。
         String overview = tree.overview();
 
+        // **句子要先选，预算才算得对**（2026-09-23 修）。
+        //
+        // 此前选择发生在下面组装提示词的地方，而这个预算/裁剪用的是**整块正文** ——
+        // 于是分层注入那一路：实际装 2712 token，估算却报 4265（差 36%），
+        // 而且**裁剪判据也偏保守**（按整块判"超预算"，可能白裁掉资料）。
+        // 症状是"日志上的数与实际不符"——正是本项目最忌讳的那类：
+        // **数字看着正常，只是它量的不是同一件事**。
+        Map<Long, List<com.kniv.ragkb.domain.entity.Sentence>> sentMap = new LinkedHashMap<>();
+        String sentKey = "";
+        if (props.getAgent().isSentAddr() || props.getAgent().isSentWindow()) {
+            sentMap = selectSentences(question, contexts);
+            sentKey = sentKeyOf(sentMap);
+        }
+
         int reserve = props.getAgent().getGenerationReserveTokens();
         int budget = Math.max(1024,
                 props.getAgent().getPromptWindowTokens() - reserve - PromptBudget.estimateTokens(answerSystem()));
         List<String> ctxTexts = new ArrayList<>(contexts.size());
         for (ChunkHit h : contexts) {
-            ctxTexts.add(h.getContent());
+            // 装什么就估什么：分层模式下装的是选中的那几句，不是整块
+            List<com.kniv.ragkb.domain.entity.Sentence> ss = sentMap.get(h.getId());
+            if (ss != null && !ss.isEmpty()) {
+                StringBuilder b = new StringBuilder();
+                for (com.kniv.ragkb.domain.entity.Sentence s : ss) {
+                    b.append(s.getText()).append('\n');
+                }
+                ctxTexts.add(b.toString());
+            } else {
+                ctxTexts.add(h.getContent());
+            }
         }
         List<String> histTexts = new ArrayList<>();
         if (history != null) {
@@ -909,6 +1068,8 @@ public class AgenticRagService {
             user.append("【参考资料】\n（本次未检索到与问题相关的资料。）\n\n");
         } else {
             user.append("【参考资料】\n");
+            // sentMap / sentKey 在上面**预算之前**就算好了（见那里 2026-09-23 的注释：
+            // 装什么就得估什么，否则日志与裁剪都在按整块算）
             for (int i = 0; i < contexts.size(); i++) {
                 ChunkHit h = contexts.get(i);
                 user.append('[').append(i + 1).append("] 来源：").append(h.getDocName())
@@ -924,7 +1085,21 @@ public class AgenticRagService {
                 if (props.getAgent().isCtxInPrompt() && h.getCtx() != null && !h.getCtx().isBlank()) {
                     user.append("｜本段可回答：").append(h.getCtx());
                 }
-                user.append('\n').append(h.getContent()).append("\n\n");
+                user.append('\n');
+                List<com.kniv.ragkb.domain.entity.Sentence> ss = sentMap.get(h.getId());
+                if (ss != null && !ss.isEmpty()) {
+                    // 逐句带地址。**不另起空行**：地址连着正文读起来才像"每句一个编号"，
+                    // 而这一段的形状本身就是在告诉模型"你可以按句指代"。
+                    for (com.kniv.ragkb.domain.entity.Sentence s : ss) {
+                        user.append('⟨').append(i + 1).append('.').append(s.getSeq()).append('⟩')
+                                .append(s.getText()).append('\n');
+                    }
+                } else {
+                    // 没有句子（表没建 / 语料戳过期 / 这块切不出句子）⇒ **退回整块**。
+                    // 绝不能静默变成"这块没有内容" —— 那会让回答凭空少掉依据，
+                    // 而日志看起来一切正常。
+                    user.append(h.getContent()).append("\n\n");
+                }
             }
         }
         user.append("【问题】\n").append(question);
@@ -976,14 +1151,29 @@ public class AgenticRagService {
                         // 而且因为缓存命中不报错，**看起来像记忆没生效**。
                         // 这与"改提示词不失效""改开关不失效"是同一类坑，
                         // 本项目一天内踩过三次。
-                        + "|mem=" + CacheService.hash(memory.list().toString())));
+                        + "|mem=" + CacheService.hash(memory.list().toString())
+                        // **实际选中的句子**（见上面注释：语料戳管不到 sentences 表）
+                        + "|sent=" + sentKey));
 
         CachedAnswer hit = cache.getAnswer(cacheKey);
         if (hit != null && hit.getAnswer() != null && !hit.getAnswer().isBlank()) {
             log.info("回答缓存命中，跳过生成（{} 字）", hit.getAnswer().length());
+            // **回放也要过一遍引用规范化** —— 缓存里存的是**模型原文**（含 [4.3] 这类），
+            // 不回放就会与"实时那条路"给出两种文本：同一条答案，第一次看是 [4]、
+            // 命中缓存时却是 [4.3]。判据与前端只认前者。
+            CiteFix replay = new CiteFix();
+            String shown = replay.feed(hit.getAnswer()) + replay.flush();
+            if (replay.count() > 0) {
+                log.info("（回放）引用规范化：{} 处（{}）", replay.count(), replay.citeStr());
+                // **回放也要把 cites 发出去** —— 否则缓存命中的那些题，判据拿不到
+                // 句子级引用，那一维就直接缺了（而判据缺一维是**静默**的：
+                // 报告里只是少一列，没人会注意到它为什么少）。
+                onEvent.accept(AgentEvent.of(AgentEvent.STATS,
+                        "cites", replay.citeStr(), "cached", true));
+            }
             // 缓存命中时一次性推出整段：客户端渲染是瞬时的，
             // 再逐字模拟反而增加无谓往返
-            onEvent.accept(AgentEvent.answerToken(hit.getAnswer()));
+            onEvent.accept(AgentEvent.answerToken(shown));
             return hit.getAnswer();
         }
 
@@ -1037,15 +1227,29 @@ public class AgenticRagService {
         java.util.concurrent.atomic.AtomicReference<com.kniv.ragkb.provider.ChatStats> stats =
                 new java.util.concurrent.atomic.AtomicReference<>(
                         com.kniv.ragkb.provider.ChatStats.none());
+        // **引用规范化**（见 CiteFix 的类注释）：模型尽管按句子粒度写引用，
+        // 后端在**出去的这一侧**收敛成契约形式 [n] —— 于是判据、前端、历史数字一概不动。
+        CiteFix fix = new CiteFix();
         providers.chatStream(ref, messages, TEMPERATURE,
                 piece -> {
                     out.append(piece);
-                    onEvent.accept(AgentEvent.answerToken(piece));
+                    String show = fix.feed(piece);
+                    if (!show.isEmpty()) {
+                        onEvent.accept(AgentEvent.answerToken(show));
+                    }
                 },
                 onThinking,
                 stats::set);
+        String tail = fix.flush();
+        if (!tail.isEmpty()) {
+            onEvent.accept(AgentEvent.answerToken(tail));
+        }
         if (thinkBuf.length() > 0) {
             onEvent.accept(AgentEvent.thinking(thinkBuf.toString()));
+        }
+        if (fix.count() > 0) {
+            log.info("引用规范化：{} 处句子级引用收敛成块号（{}）",
+                    fix.count(), fix.citeStr());
         }
         com.kniv.ragkb.provider.ChatStats st = stats.get();
         if (st.promptTokens() > 0 || st.evalTokens() > 0) {
@@ -1056,7 +1260,10 @@ public class AgenticRagService {
                     "evalTokens", st.evalTokens(),
                     "evalMs", st.evalMs(),
                     "loadMs", st.loadMs(),
-                    "tokPerSec", Math.round(st.tokensPerSecond() * 10) / 10.0));
+                    "tokPerSec", Math.round(st.tokensPerSecond() * 10) / 10.0,
+                    // **句子号不丢**：它是规范化时从 [n.m] 里剥出来的，
+                    // 判据要拿它判"引的那一句对不对"，前端将来要拿它做句级高亮
+                    "cites", fix.citeStr()));
         }
 
         if (out.length() > 0) {

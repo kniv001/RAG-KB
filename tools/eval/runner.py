@@ -167,7 +167,8 @@ def score(bench_name, model, paths=None, quiet=False, tag=""):
     per = []
     for i, res in enumerate(first["results"]):
         rows = [judges.judge(r["results"][i]["kind"], r["results"][i]["answer"],
-                             r["results"][i]["sources"] or [], r["results"][i]["q"])
+                             r["results"][i]["sources"] or [], r["results"][i]["q"],
+                             ((r["results"][i].get("stats") or {}).get("cites")))
                 for r in runs]
         need = judges.PASS[res["kind"]]
         ok = all(judges.passes(r, res["kind"]) for r in rows)
@@ -194,6 +195,32 @@ def score(bench_name, model, paths=None, quiet=False, tag=""):
     if lat:
         print(f"\n  耗时中位 {lat[len(lat)//2]/1000:.1f}s"
               + (f"　TTFT 中位 {tt[len(tt)//2]/1000:.1f}s" if tt else ""))
+    # ── token 用量（2026-09-23 加）────────────────────────────────────────
+    #
+    # **为什么必须单列**："省 token"是一条独立的优化线（分层注入：装入 4894 → 2712，
+    # 而耗时基本不变）。此前平台只记 ms / ttftMs ⇒ 那条线的收益**在落盘里一个字都看不到**，
+    # 只能靠一次性的速度探针顺手打。判据换了而仪器没跟上，就是"尺子量不到要做的事"。
+    #
+    # 取 `stats` 事件（Ollama 末帧的原生计时）。**缓存命中时没有 stats** ⇒
+    # 顺便把"真跑了几题"报出来（这此前要靠耗时猜，而耗时是连着的）。
+    # 只取**带 token 数**的那条：回放路径也会发一条只带 cites 的 stats
+    st = [r["stats"] for r in first["results"]
+          if (r.get("stats") or {}).get("promptTokens")]
+    if st:
+        pt = sorted(int(x.get("promptTokens") or 0) for x in st)
+        et = sorted(int(x.get("evalTokens") or 0) for x in st)
+        pm = sorted(int(x.get("promptMs") or 0) for x in st)
+        em = sorted(int(x.get("evalMs") or 0) for x in st)
+        m = len(st) // 2
+        print(f"\n  装入 token 中位 {pt[m]}（{pt[0]}~{pt[-1]}）"
+              f"　生成 token 中位 {et[m]}（{et[0]}~{et[-1]}）"
+              f"　合计中位 **{pt[m]+et[m]}**")
+        print(f"  prefill 中位 {pm[m]/1000:.1f}s"
+              f"　decode 中位 {em[m]/1000:.1f}s"
+              f"　decode 速率中位 {et[m]*1000.0/max(1,em[m]):.1f} tok/s")
+        if len(st) < len(first["results"]):
+            print(f"  ⚠ 只有 {len(st)}/{len(first['results'])} 题带 token 数（其余是**缓存命中**，"
+                  f"上面的数只对真跑的那几题成立）")
     # ── 判据命中率（只有多次运行时才给）──────────────────────────────────
     #
     # **为什么必须有这个视图**：2026-09-22 发现答案侧基准已经**饱和** ——

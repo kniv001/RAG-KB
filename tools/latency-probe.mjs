@@ -132,4 +132,8 @@ if (withSt.length) {
 const chars = med((r) => r.ansChars);
 const gen = med((r) => r.tDone - r.tFirst);
 console.log(`\n  回答正文中位 ${chars} 字；生成阶段 ${s(gen)} ⇒ 约 **${(chars / (gen / 1000)).toFixed(0)} 字/秒**`);
-console.log('  （中文 1 字 ≈ 1.5~2 token ⇒ 折算 token 速率时再乘 1.5~2）');
+// **方向别写反**（2026-09-22 修）：此处原来写的是「1 字 ≈ 1.5~2 token」，
+// 与同一段自己算出来的数**互相矛盾** —— 上面正是拿 `字 ÷ 1.88` 折出 token 的。
+// 实测（decode-split-probe，6 问逐题对账）**1 token ≈ 1.5~1.9 个中文字**（中位 ~1.7）：
+// qwen 的词表里常见词整词一个 token，所以一个 token 覆盖**不止一个字**。
+console.log('  （实测 1 token ≈ 1.5~1.9 字 ⇒ 上面 565 字 ≈ 300 token，与 token 速率对得上）');

@@ -155,6 +155,27 @@ It uses the JDK's built-in `java.net.http.HttpClient`: `BodyHandlers.ofLines()`
 reads line-by-line natively, so NDJSON (Ollama) and SSE (OpenAI-compatible) both
 need zero dependencies — no reactive stack just for streaming.
 
+### Runaway fuse: `num-predict` (default 8192)
+
+**On 2026-09-23 we caught a runaway**: a single request generated **25,756 tokens inside Ollama
+and kept going** (`slot context shift, n_keep = 4, n_discard = 8189` over and over — past
+`num_ctx`, discarding the window and continuing), holding the GPU for over seven minutes.
+It only stopped because a human killed the process.
+
+Root cause: `num_predict` **was never set** (the config class defaults to 0 = unlimited,
+and the key was absent from the yml), while the only watchdog, `stream-idle`, is an idle
+timeout *between chunks* — and a runaway streams continuously, so **it can never fire**.
+From prompt to model to transport, nothing would ever call a halt.
+
+The value comes from measurements (generated tokens over 15 real Q&As): **median 1848,
+max 4133**, the runaway 25,756+ ⇒ **8192** (twice the worst normal case, a third of the runaway),
+so it only bites in pathological cases.
+
+⚠️ **Residual risk**: guaranteeing "generation never overruns the context" needs
+`prompt + num_predict ≤ num_ctx`. Measured prompts are 3606–6303 ⇒ 8192+6303 < 16384, safe;
+but **the budget allows prompts up to 12288**, and at that size a context shift is still possible.
+The clean fix is a **dynamic** `num_ctx − estimated prompt` (not done yet).
+
 ### Streaming versus encryption (design note)
 
 The filter's response encryption is "buffer the whole response, then encrypt",
@@ -309,6 +330,30 @@ and **label leakage 7/105 → 0/105** (the prompt's "do not restate the category
 ⚠️ **When the signal is unavailable it no longer guesses**: if the yes/no tokens are missing
 it falls back to the original prompt — otherwise it would silently classify every question
 as "lacks material" and answer "not in the knowledge base" to questions it can answer.
+
+### Citation normalisation: the model writes what it likes, the backend converges (`CiteFix`)
+
+**The problem**: whenever the **injected unit is finer than a chunk**, the model starts citing
+at sentence granularity by itself — observed twice on 2026-09-23 (with address labels it wrote
+`[1.7]`; with **no labels at all** it invented `[4.3]`, `[2.11]`), and **every one of those
+citations checked out by hand**. But the judge's regex `\[(\d{1,2})\]` and the frontend both
+understand only `[n]` ⇒ **good answers were scored as "no citation"** (grounded 6/6 → 1/6).
+
+**What we do**: neither fight the model nor bend the judge — **converge once, on the way out**.
+`CiteFix` holds text from the moment it sees `[` or `⟨` (a citation can straddle tokens) and
+decides once it can:
+
+- sentence-level citation ⇒ converge to `[n]`, keeping **the sentence number and its byte offset**
+- not a citation (markdown link, bracketed prose) ⇒ emit as-is
+- **more than 12 characters without closing ⇒ emit as-is** — better bad formatting than a dropped character
+
+**Both paths must run through it** — live streaming *and* cache replay: the cache stores the
+model's raw text, so without replay normalisation you would see `[4]` the first time and `[4.3]`
+on a cache hit.
+
+The sentence number is not lost: it ships in the `stats` event as `cites=4.3@123,…`
+(the `@` is the offset into the answer). The judge uses it to check *which* sentence was cited;
+**the frontend does not render sentence-level citations — the contract is still `[n]`**.
 
 ## Ingesting documents
 
@@ -504,6 +549,42 @@ key is the four characters of "what about that?", and that turn contains no such
 phrase. Planning itself does not need the excerpt: it has the last 16 messages
 and the rolling summary.
 
+### Hierarchical injection: chunks frame the range, sentences get picked (`sent-window`, off by default)
+
+**Why**: measured, **86% of a question's wall time is decode and 81% of those tokens are thinking**,
+and of the thinking **a median 38% of the characters restate material already in the prompt**.
+Simply forbidding that — a "do not restate" prompt — was tried and **failed** (thinking got
+*longer*; sign test p=0.007): **prohibit without offering a substitute and the model just does
+the same thing another way**. So we stop feeding it: **after chunk recall, rank sentences
+*within those chunks* and inject only the winners**.
+
+**Sentence-level index** (the `sentences` table, 661 chunks → 6003 sentences):
+
+- Splitting is **its own module** (`tools/sentence_split.py`): fenced code stays whole, tables
+  split per row, headings stand alone; **every sentence carries a character span that must
+  reproduce the source byte-for-byte** (verified per sentence before writing; one mismatch
+  rejects the whole batch)
+- Every row carries the **corpus stamp** (position-aligned indexes go silently stale on rebuild)
+- Rebuild is one command: `python tools/build-sentences.py` (build → embed → load, 113 s)
+
+**Measured (21 paired questions)**:
+
+| | whole chunks | hierarchical top-20 |
+|---|---|---|
+| **prompt tokens** | 4894 | **2712 (−45%)** |
+| prefill | 1.3 s | 0.7 s |
+| TTFT | | **−0.47 s** |
+| total time | | **−1.1 s (not slower)** |
+| thinking characters | | 0.99 (unchanged) |
+| answer quality | 20/21 | **20/21** |
+
+**"Does feeding less hurt quality?"** has its own measurement: **an answer covers only 14%
+(median), 31% (90th percentile), of the content of the chunks it cites** (438 samples)
+⇒ keeping three tenths covers nine tenths of what questions need.
+
+⚠️ **`num_predict` is a different thing, do not conflate**: `generation-reserve-tokens` is the
+**prompt budget** reserve, not a generation cap. The cap is the runaway fuse above.
+
 **Turn notes**: turns outside the window are rewritten into self-contained notes,
 and **the note is what gets indexed, not the original text**. A single message is
 a poor retrieval unit — the user's line often carries pronouns, the assistant's
@@ -636,6 +717,41 @@ keyed by a **corpus stamp**; **every number carries its ruler name and corpus st
 | `selfretrieval-23` | 23 | rank-1 43%, top-10 83% |
 | `segmentation-10` | 10 windows | WindowDiff — production chunking **0.77**, point-based **0.32** (lower is better) |
 | `multihop-127` | 127 | 84% (expanded set, see below) |
+
+**Three more rulers** (added 2026-09-23, each measuring something orthogonal to the main flow):
+
+```powershell
+python tools\sent-recall.py multihop-127      # sentence-level recall: three views + a hierarchical arm
+python tools\think-structure-read.py <run-dir>   # thinking structure: restating question/material/self vs reasoning
+python tools\think-structure-eval.py answer-quality qwen3:4b <armA> <armB>  # the above, over an A/B's saved runs
+python tools\decode-split-probe.mjs              # channel x time, rate quintiles, reconciliation
+```
+
+- **Sentence recall**: the verdict is **no complementarity, worse at equal budget**
+  (at the same ~6300-character budget: chunk arm 89% vs sentence arm 71%; "only the sentence
+  arm found it" = **0 cases**). The one bright spot is tiny budgets (top-20 = 1437 characters
+  still touches 98% of the target chunks).
+- **Thinking structure**: a median **38%** of characters restate material already in the prompt,
+  **19%** repeat the model's own earlier sentences — and restating is concentrated in the first
+  third while self-repetition is concentrated in the last.
+
+### ⚠️ Three things to know before running an A/B
+
+1. **A single run cannot decide anything.** Re-running the *same* configuration gives per-question
+   **thinking-length ratios of 0.37–2.90** and total-time swings of **−25 s to +18 s**.
+   The only usable test is **paired + sign test**, with repeats.
+2. **The null is not 50%.** Every A/B should spend one pair on an **A/A control** (same config,
+   back to back, cache cleared) to measure that session's null — measured in-session it is
+   **0.48 (no order bias)**, whereas a pair **10 hours apart** gave 0.81 (drift across hours)
+   ⇒ **two runs hours apart are not a same-config control**.
+3. **Percentages can flip the story.** "Material restatement share" *fell* (12%→8%) while the
+   **absolute count fell only 14% and the total rose 29%** — always read
+   **share / absolute / total** together.
+
+**The platform now records tokens** (added 2026-09-23): each question stores
+`promptTokens / evalTokens / prefill / decode / tokPerSec`, and the scoring report prints its
+own block. **A cache hit carries no `stats`** ⇒ that doubles as a mechanical "did this question
+actually run" marker.
 
 ### Question-expansion pipeline (`tools/cases/_spec/*.json`)
 

@@ -18,6 +18,12 @@ param(
     [int]$Offset = 3,          # 速度那段的题目起点（错开，避开答案缓存）
     [int]$SpeedN = 5,
     [int]$Repeat = 1,          # 质量采集重复几次（>1 时「全部通过」才算过）
+    # **每轮实验的文件名前缀**（默认 `__armA` / `__armB`）。
+    # 为什么要有它：落盘名是 `{bench}__{model}{tag}.json`，两轮不同的实验用同一个
+    # 默认 tag ⇒ **后一轮直接覆盖前一轮**（2026-09-23 实测：ctx-in-prompt 那一轮
+    # 差点把 no-restate 那一轮的两臂覆盖掉，靠手工 cp 抢下来的）。
+    # 跑新实验时给个前缀，例如 -TagPrefix __nr ⇒ `...__nr-armA.json`。
+    [string]$TagPrefix = '',
     [switch]$SkipQuality
 )
 
@@ -54,6 +60,12 @@ function Reset-Prod {
     $env:KB_TWO_STAGE = 'false'
     $env:KB_CTX_IN_PROMPT = 'false'
     $env:KB_SHAPE_THINKING = 'false'
+    # **每一个被 Start-App 设过的开关都要在这里显式复位** —— 它们是同一个
+    # PowerShell 进程的环境变量，不复位就会被 Reset-Prod 启动的那个进程继承，
+    # 于是"实验结束了但生产还跑在实验路径上"（本脚本第一段防的就是这个）。
+    $env:KB_NO_RESTATE = 'false'
+    $env:KB_SENT_ADDR = 'false'
+    $env:KB_SENT_WINDOW = 'false'
     # ⚠️ **这个按"当前默认"复位，不是按 false** —— 2026-09-22 起契约进代码是**默认开**的，
     # 硬写 false 会让每次实验结束都把生产留在**旧路**上（正是本脚本第一段防的那种残留）。
     # 复位 = 回到生产真实默认，不是回到 false。
@@ -77,8 +89,16 @@ try {
         node tools\clear-answers.mjs
         if (-not $SkipQuality) {
             Write-Host "`n--- 质量 ---"
+            # **开跑前删掉本臂的旧落盘** —— 采集端（collect.mjs）有**断点续跑**：
+            # 它看到目标文件里已有这道题就直接跳过。而落盘名只由 bench+model+tag 决定，
+            # 于是**同一轮实验跑第二次时，整臂会"续跑"成上一次的数据**，
+            # 报出来的分数和耗时看起来完全正常（2026-09-23 实测：ctx-in-prompt 那一轮的
+            # 臂 A 报 21/21、24.1s，其实是 no-restate 那一轮臂 A 的数 —— **它一题都没跑**）。
+            # 这与本项目反复吃的亏同族：**仪器坏掉时不报错，只让结果悄悄变旧**。
+            $stale = Join-Path $repo "tools\eval\_runs\answer-quality__qwen3-4b$TagPrefix`__arm$($arm.n).json"
+            if (Test-Path $stale) { Remove-Item $stale -Force; Write-Host "（已删除上一轮同名落盘：$(Split-Path $stale -Leaf)）" }
             # **每臂留 tag**：不然第二臂会覆盖第一臂的落盘结果，A/B 只剩后一臂
-            python tools\eval.py run answer-quality --model qwen3:4b --repeat $Repeat --tag "__arm$($arm.n)"
+            python tools\eval.py run answer-quality --model qwen3:4b --repeat $Repeat --tag "$TagPrefix`__arm$($arm.n)"
         }
         Write-Host "`n--- 速度 ---"
         node tools\latency-probe.mjs --n $SpeedN --offset $Offset

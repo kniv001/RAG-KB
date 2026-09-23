@@ -121,6 +121,12 @@ def ls(limit=25):
 
 
 def main():
+    # 控制台按 utf-8 写（见下面写入循环里的注释：GBK 控制台曾让记录器半路死掉）。
+    # 探针各自都在开头做过这一步，记录器反而漏了。
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
     if len(sys.argv) >= 2 and sys.argv[1] in ("ls", "list"):
         return ls()
     if len(sys.argv) < 4 or sys.argv[2] != "--":
@@ -162,15 +168,30 @@ def main():
         for line in p.stdout:
             f.write(line)
             f.flush()                       # **逐行 flush**：崩了也留得下
-            sys.stdout.write(line)
-            sys.stdout.flush()
+            # **控制台写不出去，不能连累记录** —— 2026-09-22 踩到：Windows 控制台是
+            # GBK，探针打出一个 `⇒`（U+21D2）⇒ `sys.stdout.write` 抛 UnicodeEncodeError
+            # ⇒ **记录器自己在半路死掉**，而 run.log 停在一行看起来正常的地方
+            # （这次正好停在"prefill"之后、"decode 与思考占比"之前 —— 最该看的两行没了）。
+            # 这正是本项目反复吃亏的那类故障：**产物看起来完整，其实是截断的**。
+            # 两道防线：① 控制台改 utf-8；② 控制台再出任何错也只跳过这一行。
+            try:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+            except Exception:
+                pass
         rc = p.wait()
 
     m["exitCode"] = rc
     m["seconds"] = round(time.time() - t0, 1)
     m["log"] = log_path
     json.dump(m, io.open(meta_path, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-    print(f"\n==== 退出码 {rc}　耗时 {m['seconds']}s ====")
+    tail_line = f"\n==== 退出码 {rc}　耗时 {m['seconds']}s ====\n"
+    # **退出码也要写进日志本身** —— 2026-09-22 发现：它此前只进 meta.json，
+    # 于是日志的结尾**看不出这次跑成功没有**（一个故意失败、退出码 3 的 smoke run，
+    # 日志结尾和成功的逐字相同）。日志是给人看的那一份，就得不翻别的文件自证。
+    with io.open(log_path, "a", encoding="utf-8", errors="replace") as f:
+        f.write(tail_line)
+    sys.stdout.write(tail_line)
     print(f"完整日志 → {log_path}")
     return rc
 

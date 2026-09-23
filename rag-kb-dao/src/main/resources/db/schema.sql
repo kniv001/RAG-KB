@@ -216,3 +216,56 @@ CREATE TABLE IF NOT EXISTS memory_items (
 
 COMMENT ON TABLE memory_items IS '跨会话的长期记忆，一行一条（主题：曾经 → 现在）';
 COMMENT ON COLUMN memory_items.src_conv IS '最早写下这条的会话，便于追溯';
+
+-- 句子级索引：把每块切成**带字符区间的句子**，给它们一个可在提示词里引用的地址。
+--
+-- 为什么需要它（2026-09-23）：把思考按句切开量过 —— **中位 38% 的字是在复述
+-- 已经在提示词里的资料**（`tools/think-structure-read.py`）。而"禁止复述"这条
+-- 提示词试过了、不通（思考反而 +29%，符号检验 p=0.007）：**光禁止，模型会换个
+-- 方式做同一件事**。改成"换任务"才有希望 —— 让模型输出**地址**（用哪几句），
+-- 正文由**代码按地址原样拼**。于是句子必须可寻址。
+--
+-- 为什么区间要存 char_start/char_end：展开时必须**逐字原样**取出，
+-- 而不是靠模型或靠"再切一遍" —— 再切一遍就可能与当初切的不一致。
+--
+-- 为什么存 sent_hash：本项目吃过"一切按位置对齐的缓存会随重建静默错位"的亏
+--（向量缓存那次，661 条里 438 条错位且不报错）。**按内容锚定**是这里的纪律。
+--
+-- ⚠️ 地址（供模型引用）用 **块内序号 `[3.2]`**（第 3 段的第 2 句），
+-- 因为那个地址**只需在这一次提示词里唯一**；全局 id 只在库内用。
+CREATE TABLE IF NOT EXISTS sentences (
+    id          bigserial PRIMARY KEY,
+    chunk_id    bigint  NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+    doc_id      text    NOT NULL,
+    seq         integer NOT NULL,          -- 块内第几句，1 起
+    char_start  integer NOT NULL,          -- 在 chunks.content 里的半开区间
+    char_end    integer NOT NULL,
+    kind        text    NOT NULL DEFAULT 'sent',   -- sent/table/code/head
+    text        text    NOT NULL,
+    sent_hash   text    NOT NULL,          -- sha1(去空白后的正文)[:12]
+    stamp       text    NOT NULL,          -- 建这份索引时的**语料戳**
+    built_at    timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (chunk_id, seq)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sentences_doc   ON sentences (doc_id);
+CREATE INDEX IF NOT EXISTS idx_sentences_hash  ON sentences (sent_hash);
+CREATE INDEX IF NOT EXISTS idx_sentences_chunk ON sentences (chunk_id);
+
+COMMENT ON TABLE sentences IS '句子级索引：带字符区间的可寻址切片，供"地址计划→代码展开"使用';
+COMMENT ON COLUMN sentences.stamp IS '建索引时的语料戳；与当前语料戳不一致即为陈旧，需重建';
+
+-- 句子向量：**分层注入**用（块召回 → 块内按问题对句子排序 → 只注入那几句）。
+--
+-- 为什么要有它（2026-09-23 实测）：
+--   · `tools/sent-recall.py` 的分层臂：块 top-12 → 句 top-20，**靶子内容保留 30.6%**、
+--     精度 36.8%（整块注入是 21.9%）、每题 1416 字（整块是 6339 字）
+--   · 而**答案只覆盖被引用块内容的 14%（中位）/ 31%（90 百分位）**（438 个样本）
+--     ⇒ 保留三成，覆盖九成题目的需要
+--   · 收益两条线：prefill −0.7s；**decode 速率 75.7 → 84.5 tok/s**
+--     （实拟合 `速率 ≈ 94.9 − 0.00338 × 装入token`，r = −0.97）⇒ 合计约 −2.9s/题
+--
+-- 不建 HNSW 索引：查询是 `WHERE chunk_id = ANY(...) ORDER BY embedding <=> q LIMIT M`，
+-- 候选只有一两百句（一次问答注入的块里的句子），顺扫就够；而带过滤的 HNSW 反而容易走不到索引。
+ALTER TABLE sentences ADD COLUMN IF NOT EXISTS embedding   vector(1024);
+ALTER TABLE sentences ADD COLUMN IF NOT EXISTS embed_model text NOT NULL DEFAULT '';
