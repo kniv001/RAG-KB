@@ -255,7 +255,8 @@ public class AgenticRagService {
                 // 全命中第一臂的答案，量出来"没差别"。一天之内踩过三次。
                 + ",nr=" + props.getAgent().isNoRestate()
                 + ",sa=" + props.getAgent().isSentAddr()
-                + ",sw=" + (props.getAgent().isSentWindow() ? props.getAgent().getSentWindowM() : 0);
+                + ",sw=" + (props.getAgent().isSentWindow() ? props.getAgent().getSentWindowM() : 0)
+                + ",jp=" + props.getAgent().isJevPick();
     }
 
     /** 回答用的系统提示：开关打开时拼上「思考形状」那一段。
@@ -390,6 +391,115 @@ public class AgenticRagService {
           + JEV_RELEVANCE_TAIL + "是\n"
           + "问：Redis 挂了重启后数据还在吗？\n片段：Kubernetes 调度器先过滤节点再打分。\n"
           + JEV_RELEVANCE_TAIL + "否\n";
+
+    /**
+     * **Jev 选择题**：一次前向读出「哪一段最能直接回答这个问题」。
+     *
+     * <p><b>为什么是选题、不是逐块问是否</b>：逐块问要 N 次前向（实测 ~150ms/次，
+     * 12 块 ≈ 1.8s），而**一次前向的首 token 分布里本来就有全部编号的概率** —— 读它就行。
+     * 这是「读概率而不是生成」的自然延伸：**不只能读 A/B，还能读选择题**。
+     *
+     * <p>⚠️ **只列前 {@value #PICK_MAX} 段**，因为读的是**单个数字 token** 的概率：
+     * 列到 12 段时 `1` 会同时是 1、10、11、12 的开头，读出来分不清。
+     * 前 9 段是召回头部，尾部本来也很少是"最能答的那段"。
+     *
+     * <p><b>它给的是一个与向量检索不同的信号</b>：这是**作答模型自己**对"哪段最管用"的排序。
+     */
+    private static final int PICK_MAX = 9;
+    /** few-shot 的形状必须与任务一致（实测：形状不匹配时靶子会掉到十几名）。 */
+    private static final String JEV_PICK_FEWSHOT = """
+            问：Redis 挂了重启后数据还在吗？
+            1. Kubernetes 调度器先过滤节点再打分。
+            2. RDB 是某一时刻的全量快照，AOF 记录每一条写命令。
+            3. 漏桶按固定速率流出，桶满则丢弃。
+            哪一段最能直接回答这个问题？只答编号。
+            答：2
+            """;
+
+    /** 选择题版的读概率：读若干候选 token 并归一化。**读不到就返回 null，不猜**。 */
+    private Map<String, Double> choiceProbs(ModelProvider p, String model, String prompt,
+                                            java.util.List<String> cands) {
+        // **别超过 20** —— Ollama 的硬边界，实测传 24 直接 HTTP 400
+        //（`top_logprobs must be between 0 and 20`），而那个异常会一路冒到 SSE 变成 500。
+        java.util.Map<String, Double> m = p.rawTokenProbs(model, prompt, 20);
+        Map<String, Double> out = new LinkedHashMap<>();
+        double sum = 0;
+        for (String c : cands) {
+            // token 可能带前导空格（取决于分词），两种写法都认
+            Double v = m.get(c);
+            if (v == null) {
+                v = m.get(" " + c);
+            }
+            if (v != null) {
+                out.put(c, v);
+                sum += v;
+            }
+        }
+        if (sum <= 0 || out.size() < 2) {
+            return null;
+        }
+        for (Map.Entry<String, Double> e : out.entrySet()) {
+            e.setValue(e.getValue() / sum);
+        }
+        return out;
+    }
+
+    /** 一次前向选出「最能直接回答此问题的段号」（1 起）。失败返回 -1。 */
+    private int jevPick(ProviderRegistry.Ref ref, String question, List<ChunkHit> contexts) {
+        ModelProvider p = providers.get(ref.providerId());
+        int n = Math.min(contexts.size(), PICK_MAX);
+        if (n < 2) {
+            return -1;
+        }
+        StringBuilder b = new StringBuilder(JEV_PICK_FEWSHOT).append("\n问：").append(question).append('\n');
+        for (int i = 0; i < n; i++) {
+            String c = contexts.get(i).getContent();
+            b.append(i + 1).append(". ").append(clip(c, 60)).append('\n');
+        }
+        b.append("哪一段最能直接回答这个问题？只答编号。\n答：");
+        java.util.List<String> cands = new ArrayList<>();
+        for (int i = 1; i <= n; i++) {
+            cands.add(String.valueOf(i));
+        }
+        long t0 = System.currentTimeMillis();
+        Map<String, Double> pr;
+        try {
+            pr = choiceProbs(p, ref.model(), b.toString(), cands);
+        } catch (Exception e) {
+            // **降级不炸，但要大声** —— 一次探针失败不该让整个回答 500
+            //（实测踩过：top_logprobs 传了 24，Ollama 直接 400，异常冒到 SSE）。
+            // 按本项目"拿不到就退回，不猜"的规矩：这里退回原提示词。
+            log.warn("Jev 选择题**调用失败**，本次不注入（行为与开关关着时相同）：{}", e.getMessage());
+            return -1;
+        }
+        if (pr == null) {
+            log.warn("Jev 选择题**信号不可用**（首 token 里没有编号）—— 本次不注入，行为与开关关着时相同");
+            return -1;
+        }
+        String best = null;
+        double bv = -1;
+        for (Map.Entry<String, Double> e : pr.entrySet()) {
+            if (e.getValue() > bv) {
+                bv = e.getValue();
+                best = e.getKey();
+            }
+        }
+        int idx = Integer.parseInt(best);
+        // **低置信就不注入** —— 这一闸门是实测出来的，不是拍的：
+        // 拿臂 B 选中的段去对臂 A（**没有注入**）的引用，6 道 grounded 里 4 道相同，
+        // 而**不同的那两道恰好是 P 最低的两次（0.55 / 0.54）**；相同的四次 P 都在 0.65 以上。
+        // ⇒ **P 高 = 它本来就会找到那一段（注入只是让它别扫了）；
+        //     P 低 = 它在猜（注进去就是误导）**。
+        double gate = props.getAgent().getJevPickMinP();
+        if (bv < gate) {
+            log.info("Jev 选择题：{} 段里最高只到第 {} 段 P={}（低于闸门 {}）—— **不注入**（多半在猜）",
+                    n, idx, String.format("%.3f", bv), gate);
+            return -1;
+        }
+        log.info("Jev 选择题：{} 段里选第 {} 段（P={}）　耗时 {}ms",
+                n, idx, String.format("%.3f", bv), System.currentTimeMillis() - t0);
+        return idx;
+    }
 
     /** 代码判定为【甲】（与知识库无关）。 */
     private static final String CONTRACT_JIA = """
@@ -1070,10 +1180,21 @@ public class AgenticRagService {
             user.append("【参考资料】\n");
             // sentMap / sentKey 在上面**预算之前**就算好了（见那里 2026-09-23 的注释：
             // 装什么就得估什么，否则日志与裁剪都在按整块算）
+            // **Jev 选择题的结果注进去**（开关，默认关）：把"哪段最能直接回答"作为**事实**
+            // 给模型 —— 它自己就不必逐段去判"这段管不管用"了。
+            // 依据：锚到块号的思考占 37%，其中"判断/指路"那一档三个口径量出来 9~25%。
+            // ⚠️ **只标正向**：标「否」会伤多跳题（单块不够 ≠ 这块没用）—— 那正是多跳的定义。
+            int pick = -1;
+            if (props.getAgent().isJevPick()) {
+                pick = jevPick(ref, question, contexts);
+            }
             for (int i = 0; i < contexts.size(); i++) {
                 ChunkHit h = contexts.get(i);
                 user.append('[').append(i + 1).append("] 来源：").append(h.getDocName())
                         .append("（第 ").append(h.getSeq()).append(" 块）");
+                if (i + 1 == pick) {
+                    user.append("　**★本段最能直接回答此问题**");
+                }
                 // **带上语境行**（开关，默认关）：思考的大头是「逐条扫描这些块」
                 // （实测原文：「[1] 提到了…但没有…[2] 提到了…」，15 段扫一遍 ≈ 700 token）。
                 // 把「这段能回答什么」直接给出来，它就不必自己扫 —— 而代价从

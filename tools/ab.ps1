@@ -66,6 +66,7 @@ function Reset-Prod {
     $env:KB_NO_RESTATE = 'false'
     $env:KB_SENT_ADDR = 'false'
     $env:KB_SENT_WINDOW = 'false'
+    $env:KB_JEV_PICK = 'false'
     # ⚠️ **这个按"当前默认"复位，不是按 false** —— 2026-09-22 起契约进代码是**默认开**的，
     # 硬写 false 会让每次实验结束都把生产留在**旧路**上（正是本脚本第一段防的那种残留）。
     # 复位 = 回到生产真实默认，不是回到 false。
