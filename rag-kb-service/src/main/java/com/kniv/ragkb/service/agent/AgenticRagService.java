@@ -197,10 +197,17 @@ public class AgenticRagService {
             // **分层注入**：块先框范围，块内再按问题挑句 —— 只注入挑中的那几句。
             // 依据见 RagProperties.Agent#sentWindow。
             float[] qv = embedding.embedOne(question);
-            all = sentences.topInChunks(ids,
-                    com.kniv.ragkb.domain.handler.VectorTypeHandler.toLiteral(qv),
-                    embedding.modelColumn(),
-                    props.getAgent().getSentWindowM());
+            String vec = com.kniv.ragkb.domain.handler.VectorTypeHandler.toLiteral(qv);
+            String model = embedding.modelColumn();
+            int k = props.getAgent().getSentChunkK();
+            // **逐块挑句**（k>0）与**全局挑句**（k=0）的区别只在"没入选的块怎么办"：
+            // 全局 LIMIT M 下，没挤进前 M 名的块一句都拿不到 ⇒ 落到下面那条"注入整块"的
+            // 退路上（那是给"表没建/戳过期/切不出句子"准备的）—— 实测平均 2.0 段/次发生，
+            // 形状与意图相反：**最相关的块被截成几句，最不相关的块反而装全文**。
+            // 逐块挑句让每个有句子的块都至少出一句，退路只剩"真的没句子"。
+            all = (k > 0)
+                    ? sentences.topPerChunkInChunks(ids, vec, model, k)
+                    : sentences.topInChunks(ids, vec, model, props.getAgent().getSentWindowM());
         } else {
             all = sentences.listByChunks(ids);
         }
@@ -255,7 +262,13 @@ public class AgenticRagService {
                 // 全命中第一臂的答案，量出来"没差别"。一天之内踩过三次。
                 + ",nr=" + props.getAgent().isNoRestate()
                 + ",sa=" + props.getAgent().isSentAddr()
-                + ",sw=" + (props.getAgent().isSentWindow() ? props.getAgent().getSentWindowM() : 0)
+                // **逐块挑句也要进来** —— 它改的是"注入哪几句"，注入的句子一变，
+                // 同一问题的答案就变，而提示词之外的东西（语料戳/块内容）一个字没变。
+                + ",sw=" + (props.getAgent().isSentWindow()
+                        ? (props.getAgent().getSentChunkK() > 0
+                                ? "k" + props.getAgent().getSentChunkK()
+                                : String.valueOf(props.getAgent().getSentWindowM()))
+                        : "0")
                 + ",jp=" + props.getAgent().isJevPick();
     }
 

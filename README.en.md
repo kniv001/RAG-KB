@@ -629,6 +629,26 @@ of rule 1 in "Four things to know before running an A/B".)
 (median), 31% (90th percentile), of the content of the chunks it cites** (438 samples)
 ⇒ keeping three tenths covers nine tenths of what questions need.
 
+**Tried per-chunk picking (`sent-chunk-k`, off by default) — the shape got fixed, the effect did not show.**
+The motive was a shape problem in the global `LIMIT M`: **a chunk that does not make the top M
+gets no sentence at all**, so it falls back to "inject the whole chunk" (a fallback meant for
+missing table / stale stamp / unsplittable chunk) — measured on **29 of 43 calls** at least one
+chunk came back whole, the opposite of the intent: **the most relevant chunks get trimmed to a few
+sentences while the least relevant ones get their full text**. With per-chunk top-3, **47 of 50
+calls** reach full coverage (the shape is indeed fixed), but:
+
+| Paired (21 questions × 2 runs) | run 1 | run 2 |
+|---|---|---|
+| prompt tokens | −4% (9:12) | −0% (10:11) |
+| generated tokens | −16% (11:10) | **+33%** (10:11) |
+| total time | −15% (11:10) | **+29%** (8:13) |
+| quality defects | `走对了出口` 2/12 | 1/12 |
+
+**Every sign flips between the two runs** ⇒ no detectable difference (a live specimen of
+"a single run cannot decide": run 1 alone says "15% faster", run 2 alone says "29% slower").
+**A better shape with no measurable effect is no reason to change a default** ⇒ not promoted;
+the switch stays (global top-20 remains the default).
+
 ⚠️ **`num_predict` is a different thing, do not conflate**: `generation-reserve-tokens` is the
 **prompt budget** reserve, not a generation cap. The cap is the runaway fuse above.
 

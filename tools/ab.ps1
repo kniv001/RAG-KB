@@ -15,6 +15,10 @@
 
 param(
     [Parameter(Mandatory = $true)][string]$Switch,
+    # **两臂的值可以不是 true/false** —— 数值开关（如 KB_SENT_CHUNK_K 的 0/3）也要能测。
+    # 默认保持 false/true，所以既有的用法一个字不用改。
+    [string]$A = 'false',
+    [string]$B = 'true',
     [int]$Offset = 3,          # 速度那段的题目起点（错开，避开答案缓存）
     [int]$SpeedN = 5,
     [int]$Repeat = 1,          # 质量采集重复几次（>1 时「全部通过」才算过）
@@ -70,6 +74,8 @@ function Reset-Prod {
     # 生产留在**旧路**上 —— 与下面 KB_CONTRACT_IN_CODE 那条是同一个坑。
     $env:KB_SENT_WINDOW = 'true'
     $env:KB_JEV_PICK = 'false'
+    # 逐块挑句：**0 = 生产默认（走全局 top-20）**，转正后这里要跟着改成新的 k。
+    $env:KB_SENT_CHUNK_K = '0'
     # ⚠️ **这个按"当前默认"复位，不是按 false** —— 2026-09-22 起契约进代码是**默认开**的，
     # 硬写 false 会让每次实验结束都把生产留在**旧路**上（正是本脚本第一段防的那种残留）。
     # 复位 = 回到生产真实默认，不是回到 false。
@@ -81,7 +87,7 @@ function Reset-Prod {
 }
 
 try {
-    foreach ($arm in @(@{ n = 'A'; on = 'false' }, @{ n = 'B'; on = 'true' })) {
+    foreach ($arm in @(@{ n = 'A'; on = $A }, @{ n = 'B'; on = $B })) {
         Write-Host "`n========== 臂 $($arm.n)　$Switch=$($arm.on) ==========" -ForegroundColor Cyan
         Stop-App
         if (-not (Start-App $arm.on)) { Write-Host "！应用没起来，跳过这臂"; continue }
