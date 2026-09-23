@@ -269,3 +269,79 @@ COMMENT ON COLUMN sentences.stamp IS '建索引时的语料戳；与当前语料
 -- 候选只有一两百句（一次问答注入的块里的句子），顺扫就够；而带过滤的 HNSW 反而容易走不到索引。
 ALTER TABLE sentences ADD COLUMN IF NOT EXISTS embedding   vector(1024);
 ALTER TABLE sentences ADD COLUMN IF NOT EXISTS embed_model text NOT NULL DEFAULT '';
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 信息流方向（`news` 分支）：周期性抓取的新闻/热搜等外部信息
+--
+-- 与 documents/chunks 的关系是**并存**，不是替代：
+--   feed_items  是"抓到的东西"原始落点（先过闸、先去重、先记权重）
+--   documents   是"值得进知识库的东西"——由 feed_items 里**过闸且不重复**的那些转过去
+-- 这样切的原因：抓取量远大于值得入库的量，而**丢弃是不可逆的**（权重估计一定会错，
+-- 校准来源权重又需要保留本该丢的样本）⇒ 所以这里的原则是
+-- **「入库但不召回」而不是「不入库」**：status 决定可见性，行本身一律留下。
+-- ─────────────────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS feed_sources (
+    id          bigserial PRIMARY KEY,
+    domain      text NOT NULL UNIQUE,
+    label       text,
+    -- 来源权重：只用于**排序与准入**，不用于判定真假
+    -- （否则会变成"大媒体错了一起错"；真假由证据聚合给出）。
+    -- refuted_n / total_n 是它**被后续推翻**的统计，权重由这两者校准 —— 这正是
+    -- "append-only + 补充/推翻"能给而覆盖式存储给不了的东西。
+    authority   double precision NOT NULL DEFAULT 0.5,
+    total_n     bigint NOT NULL DEFAULT 0,
+    refuted_n   bigint NOT NULL DEFAULT 0,
+    last_fetch  timestamptz,
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS feed_items (
+    id           bigserial PRIMARY KEY,
+    source_id    bigint NOT NULL REFERENCES feed_sources(id),
+    url          text NOT NULL UNIQUE,          -- 同址重抓只更新 fetched_at，不新增行
+    title        text,
+    body         text NOT NULL,
+    published_at timestamptz,                    -- 可能抓不到（很多页不给发布时间）
+    fetched_at   timestamptz NOT NULL DEFAULT now(),
+    -- 64 位 simhash（3-gram shingle 加权）。**近重复判定的载体**：
+    -- 新闻的转载率极高，不去重的话 top-24 里可能十几条是同一件事的转述，
+    -- 预算被吃光、多样性塌缩，而"被挤掉的别的事件"事后救不回来。
+    simhash      bigint NOT NULL,
+    -- 近重复指向**首见**条目（NULL = 这是首见）。指向根而不是上一跳：
+    -- 一条新闻被转三次时，三条都指回最早那条，而不是串成链。
+    dup_of       bigint REFERENCES feed_items(id),
+    -- 0=冷存不召回 · 1=可召回 · 2=已入库为文档
+    status       smallint NOT NULL,
+    -- 判定理由**必须留痕**：这是后面校准阈值与权重的唯一依据，
+    -- 不记的话"为什么这条没召回"永远只能靠猜。
+    gate_reason  text,
+    -- 与**最近候选**的汉明距离（NULL = 一条候选都没有，即没有任何分段撞上）。
+    -- 这一列是**校准阈值的仪器**，不是判定结果：DUP_DISTANCE=3 是沿用经典取值，
+    -- 而"转载"的真实距离分布得从数据里看 —— 不记的话阈值永远只能靠猜。
+    -- ⚠️ 它只统计**LSH 候选里**的最近距离（没候选时无从知道真正的最近是多少），
+    -- 读的时候要带上这个边界。
+    nearest_dist smallint,
+    char_n       integer NOT NULL DEFAULT 0,
+    created_at   timestamptz NOT NULL DEFAULT now()
+);
+
+-- LSH 分带：64 位切成 4 段 16 位，**任意一段相同即可作候选**。
+-- 鸽巢：汉明距离 ≤3 时，3 个不同位最多落在 3 段里 ⇒ 必有一段完全相同 ⇒ 不会漏。
+-- 存成独立表而不是 bigint[]：省掉数组类型处理器，且 (band_no, band_key) 上就是普通 B 树。
+CREATE TABLE IF NOT EXISTS feed_bands (
+    item_id  bigint NOT NULL REFERENCES feed_items(id) ON DELETE CASCADE,
+    band_no  smallint NOT NULL,
+    band_key bigint NOT NULL,
+    PRIMARY KEY (item_id, band_no)
+);
+
+CREATE INDEX IF NOT EXISTS feed_items_pub_idx    ON feed_items (published_at DESC NULLS LAST);
+CREATE INDEX IF NOT EXISTS feed_items_status_idx ON feed_items (status, fetched_at DESC);
+CREATE INDEX IF NOT EXISTS feed_items_dup_idx    ON feed_items (dup_of) WHERE dup_of IS NOT NULL;
+CREATE INDEX IF NOT EXISTS feed_items_src_idx    ON feed_items (source_id, fetched_at DESC);
+CREATE INDEX IF NOT EXISTS feed_bands_lookup_idx ON feed_bands (band_no, band_key);
+
+COMMENT ON TABLE feed_items IS '信息流条目：抓到即落库，可见性由 status 决定（入库但不召回，不是不入库）';
+COMMENT ON COLUMN feed_items.dup_of IS '近重复指向首见条目（simhash 汉明距离 ≤3）';
+COMMENT ON TABLE feed_bands IS 'simhash 的 LSH 分带索引：4×16 位，任意一段相同即候选';
