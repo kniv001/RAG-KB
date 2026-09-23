@@ -722,18 +722,32 @@ keyed by a **corpus stamp**; **every number carries its ruler name and corpus st
 
 ```powershell
 python tools\sent-recall.py multihop-127      # sentence-level recall: three views + a hierarchical arm
-python tools\think-structure-read.py <run-dir>   # thinking structure: restating question/material/self vs reasoning
-python tools\think-structure-eval.py answer-quality qwen3:4b <armA> <armB>  # the above, over an A/B's saved runs
-python tools\decode-split-probe.mjs              # channel x time, rate quintiles, reconciliation
+python tools\think-structure.py --run <run-dir>          # thinking structure and flow (frames ⇒ real **seconds**)
+python tools\think-structure.py --eval answer-quality __sw3   # same ruler, over a scored run (**characters**)
+python tools\decode-split-probe.mjs              # channel x time, rate quintiles, window reconciliation
 ```
 
 - **Sentence recall**: the verdict is **no complementarity, worse at equal budget**
   (at the same ~6300-character budget: chunk arm 89% vs sentence arm 71%; "only the sentence
   arm found it" = **0 cases**). The one bright spot is tiny budgets (top-20 = 1437 characters
   still touches 98% of the target chunks).
-- **Thinking structure**: a median **38%** of characters restate material already in the prompt,
-  **19%** repeat the model's own earlier sentences — and restating is concentrated in the first
-  third while self-repetition is concentrated in the last.
+- **Thinking structure and flow** (one ruler, two inputs, five views):
+  ① five classes (restating the question 6% / the contract 0% / **the material 26–37%** /
+  **repeating itself 19–20%** / organising and reasoning 42–47%)
+  ② two orthogonal axes: **41% ends up in the final answer** (output) · **38% is anchored to a
+  specific chunk** (working against the material)
+  ③ cross-table: **16% of "repeating itself" lands in the answer and only 4% does not** ⇒ it is
+  not going in circles, it is **polishing**; what truly never lands is 37% of "organising" and
+  16% of "restating the material"
+  ④ shape over time: material restating in the **first third** (47%), self-repetition in the
+  **last third** (57%)
+  ⑤ flow: **process narration is only 18%** (78% of sentences carry no discourse marker — most
+  of the time the model is not explaining, it is working); the real flow is the **run sequence
+  of the five classes**: a median of **26 runs per question**, the dominant cycle being
+  "repeat itself ⇄ organise" ⇒ **thinking is not a pipeline, it is a polishing loop**
+
+⚠️ **The 20-bin timeline is flat** — thinking has **no separable phases**. The earlier
+keyword-phase version put 89% into "other" precisely because it assumed phases that are not there.
 
 ### ⚠️ Three things to know before running an A/B
 
