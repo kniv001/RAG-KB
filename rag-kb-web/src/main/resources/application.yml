@@ -51,6 +51,18 @@ spring:
 # 边界：前端 JS 本身也由 CF 分发，所以这层「防偷看」但不「防使坏（替换 JS）」——
 # 完整端到端需要客户端由自己控制（桌面端 / App）。
 ragkb:
+  # **信息流方向**（`news` 分支）：周期性抓取的新闻/热搜等外部信息。
+  # 两个相似度阈值都是**临时值**，依据不是拍脑袋，而是两张表上记下来的分布：
+  #   feed_segments.best_sim（段与库里最近段落的相似度）→ dup-sim
+  #   feed_items.nearest_topic_sim（条目与最近议题质心的相似度）→ topic-sim
+  # **先跑一批看分布，再定阈值**（与 Simhash.DUP_DISTANCE 由 nearest_dist 校准同规矩）。
+  feed:
+    dup-sim: ${KB_FEED_DUP_SIM:0.92}
+    dup-ratio-demote: ${KB_FEED_DUP_RATIO:0.8}
+    topic-sim: ${KB_FEED_TOPIC_SIM:0.80}
+    topic-window-days: ${KB_FEED_TOPIC_WINDOW:7}
+    enrich-limit: ${KB_FEED_ENRICH_LIMIT:30}
+
   crypto:
     enabled: ${KB_CRYPTO_ENABLED:true}
     # 同样必须绝对。用相对路径时它侥幸落在项目目录，但那只是因为

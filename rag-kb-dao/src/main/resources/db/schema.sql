@@ -345,3 +345,78 @@ CREATE INDEX IF NOT EXISTS feed_bands_lookup_idx ON feed_bands (band_no, band_ke
 COMMENT ON TABLE feed_items IS '信息流条目：抓到即落库，可见性由 status 决定（入库但不召回，不是不入库）';
 COMMENT ON COLUMN feed_items.dup_of IS '近重复指向首见条目（simhash 汉明距离 ≤3）';
 COMMENT ON TABLE feed_bands IS 'simhash 的 LSH 分带索引：4×16 位，任意一段相同即候选';
+
+-- ── 信息流第 2、3 层：条目嵌入 · 段落级重复 · 议题归并 ────────────────────────
+--
+-- 为什么是三层而不是一层（2026-09-24 实测定的）：
+--   整篇 simhash 抓"逐字转载"（零成本）；但三家媒体报同一件事时两两距离 **28/64**
+--   （各家自己写）⇒ 文字层量不到。而它们的**段落**仍可能高度重叠（通稿段被抄）——
+--   那一层用"切段 + 向量回归"抓；再上一层"同一件事的不同表述"只能靠议题聚类。
+-- 三层**共用同一次 embedding**（条目的 lead 向量与段落向量在同一次批处理里算完），
+-- 所以层数增加不等于 GPU 成本成倍增加。
+
+ALTER TABLE feed_items ADD COLUMN IF NOT EXISTS embedding    vector(1024);
+ALTER TABLE feed_items ADD COLUMN IF NOT EXISTS embed_model  text NOT NULL DEFAULT '';
+-- 与**最近的议题质心**的余弦相似度（NULL = 还没算 / 没有可比议题）。
+-- 与 nearest_dist 同样的角色：**校准阈值用的仪器**，不是判定结果。
+ALTER TABLE feed_items ADD COLUMN IF NOT EXISTS nearest_topic_sim real;
+-- 段落级重复的两个读数：总段数 / 判定为"已有"的段数。
+-- `dup_ratio = dup_seg_n / seg_n` 就是**"这篇有多少内容是库里已有的"**。
+ALTER TABLE feed_items ADD COLUMN IF NOT EXISTS seg_n       integer;
+ALTER TABLE feed_items ADD COLUMN IF NOT EXISTS dup_seg_n   integer;
+ALTER TABLE feed_items ADD COLUMN IF NOT EXISTS enriched_at timestamptz;
+
+-- 段落（**粗糙切分**的产物，只为"是不是已有的片段"这件事服务，不承担检索单元的角色）。
+CREATE TABLE IF NOT EXISTS feed_segments (
+    id          bigserial PRIMARY KEY,
+    item_id     bigint NOT NULL REFERENCES feed_items(id) ON DELETE CASCADE,
+    seq         integer NOT NULL,
+    text        text NOT NULL,
+    char_start  integer NOT NULL,
+    char_end    integer NOT NULL,
+    embedding   vector(1024),
+    embed_model text NOT NULL DEFAULT '',
+    -- 与**库里已有段落**的最近相似度（NULL = 库里还没有可比的段落）。
+    -- 与 nearest_dist / nearest_topic_sim 同样的角色：**校准阈值的仪器**。
+    -- 判"是不是重复"用的是一个阈值，而阈值该取多少要看这一列的分布 —— 不记就只能拍。
+    best_sim    real,
+    UNIQUE (item_id, seq)
+);
+
+-- 议题（事件簇）。**按"事件"归并、不按实体**（用户 2026-09-24 定）：
+-- 一个议题 = "谁在什么时候做了什么"；实体只做标签与查询入口，因为
+-- **补充/推翻发生在"某件事的说法"上**，挂在实体上就退化成"这家公司的所有新闻"、时间线也就没了。
+--
+-- ⚠️ `embedding` 是**质心**（成员向量均值），属于**派生统计量**，可以更新 ——
+-- 与 append-only 不冲突（append-only 管的是事实，不是统计）。
+-- 维护方式见 FeedTopicService：pgvector 0.8 **没有标量乘**（`vector * float8` 不存在），
+-- 所以均值在 Java 侧混合后写回，不在 SQL 里算。
+CREATE TABLE IF NOT EXISTS feed_topics (
+    id          bigserial PRIMARY KEY,
+    label       text,
+    embedding   vector(1024),
+    embed_model text NOT NULL DEFAULT '',
+    first_seen  timestamptz NOT NULL DEFAULT now(),
+    last_seen   timestamptz NOT NULL DEFAULT now(),
+    item_n      integer NOT NULL DEFAULT 0
+);
+
+-- 条目 × 议题 的**边**。今天只写一条，但结构上允许多条 ——
+-- 因为"这条新闻对议题 A 是补充、对议题 B 是推翻"正是这一支要表达的东西（relation 待闸 2 填）。
+CREATE TABLE IF NOT EXISTS feed_item_topics (
+    item_id   bigint NOT NULL REFERENCES feed_items(id) ON DELETE CASCADE,
+    topic_id  bigint NOT NULL REFERENCES feed_topics(id) ON DELETE CASCADE,
+    sim       real,
+    joined_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (item_id, topic_id)
+);
+
+CREATE INDEX IF NOT EXISTS feed_segments_item_idx ON feed_segments (item_id, seq);
+-- 段落召回要的是"最近的已有段落"，所以这一处**建 HNSW**（与 sentences 表不同：
+-- 那张的查询被 `chunk_id IN (...)` 框死了候选，顺扫就够；这张要全库找最近邻）。
+CREATE INDEX IF NOT EXISTS feed_segments_vec_idx
+    ON feed_segments USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS feed_item_topics_topic_idx ON feed_item_topics (topic_id);
+-- 议题不建向量索引：查询带"近 N 天"的时间过滤，而**带过滤的 HNSW 容易走不到索引**；
+-- 议题量级是"每天几十个、窗口内几百个"，顺扫精确且够快。
+CREATE INDEX IF NOT EXISTS feed_topics_recent_idx ON feed_topics (last_seen DESC);

@@ -2,7 +2,9 @@ package com.kniv.ragkb.web;
 
 import com.kniv.ragkb.common.api.R;
 import com.kniv.ragkb.service.config.WebProperties;
+import com.kniv.ragkb.service.config.FeedProperties;
 import com.kniv.ragkb.service.feed.FeedCrawler;
+import com.kniv.ragkb.service.feed.FeedEnrichService;
 import com.kniv.ragkb.service.feed.FeedIngestService;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -35,6 +37,8 @@ public class FeedController {
 
     private final FeedCrawler crawler;
     private final FeedIngestService ingest;
+    private final FeedEnrichService enrich;
+    private final FeedProperties feedProps;
     private final WebProperties webProps;
 
     /** 读数的形状见 {@link FeedIngestService.Stats}。 */
@@ -50,6 +54,50 @@ public class FeedController {
         m.put("冷存", s.cold());
         m.put("来源数", s.sources());
         return R.ok(m);
+    }
+
+    /**
+     * **富化一批**（第 1、2 层）：粗糙切分 → 段落级"库里有没有" → 议题归并。
+     *
+     * <p>显式触发而不是入队时自动做：它要 GPU（嵌入），而本机只有一个推理槽 ——
+     * 放进抓取请求里会让"抓 10 个网址"从 6 秒变成几十秒，并且直接和问答抢。
+     * 由后台在静默窗口里跑（内部走 {@code GpuGate}，有用户请求在跑就直接放弃这一轮）。
+     */
+    @PostMapping("/enrich")
+    public R<Map<String, Object>> enrich(@RequestBody(required = false) EnrichBody body) {
+        int limit = body != null && body.getLimit() != null ? body.getLimit() : feedProps.getEnrichLimit();
+        FeedEnrichService.Batch b = enrich.run(limit);
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (FeedEnrichService.Enriched e : b.items()) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", e.id());
+            m.put("段数", e.segN());
+            m.put("重复段", e.dupSegN());
+            m.put("重复率", String.format("%.0f%%", 100 * e.dupRatio()));
+            m.put("议题", e.topicId());
+            m.put("议题相似", e.topicSim() == null ? null : String.format("%.3f", e.topicSim()));
+            m.put("新议题", e.newTopic());
+            if (e.note() != null) {
+                m.put("说明", e.note());
+            }
+            rows.add(m);
+        }
+        Map<String, Object> res = new LinkedHashMap<>();
+        res.put("待处理", b.pending());
+        res.put("已处理", b.done());
+        res.put("新建议题", b.newTopics());
+        res.put("判为高度重复", b.demoted());
+        if (b.note() != null) {
+            res.put("说明", b.note());
+        }
+        res.put("明细", rows);
+        return R.ok(res);
+    }
+
+    /** 议题榜（按条目数）——"哪件事在升温"最粗的一个视图。 */
+    @GetMapping("/topics")
+    public R<List<Map<String, Object>>> topics() {
+        return R.ok(enrich.topTopics(20));
     }
 
     /** 抓一批网址进信息流。 */
@@ -83,5 +131,10 @@ public class FeedController {
     @Data
     public static class UrlsBody {
         private List<String> urls;
+    }
+
+    @Data
+    public static class EnrichBody {
+        private Integer limit;
     }
 }
