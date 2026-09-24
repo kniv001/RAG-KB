@@ -459,6 +459,15 @@ CREATE TABLE IF NOT EXISTS feed_channels (
     err_n        integer NOT NULL DEFAULT 0,
     last_error   text
 );
+-- **取条目的通道类型**：`rss` = XML feed；`json` = 站点的接口（很多站点已经没有 RSS，
+-- 但列表页是 JS 渲染的 —— 条目在 HTML 里根本不存在，只能找它的接口）。
+-- JSON 的字段名各站不同，所以下面四个列是**每频道一份的映射**，不写死在代码里。
+ALTER TABLE feed_channels ADD COLUMN IF NOT EXISTS kind        text NOT NULL DEFAULT 'rss';
+ALTER TABLE feed_channels ADD COLUMN IF NOT EXISTS array_path  text;   -- 数组在哪：'' = 根，'data.list' = 点号路径
+ALTER TABLE feed_channels ADD COLUMN IF NOT EXISTS f_title     text;
+ALTER TABLE feed_channels ADD COLUMN IF NOT EXISTS f_link      text;
+ALTER TABLE feed_channels ADD COLUMN IF NOT EXISTS f_date      text;
+
 CREATE INDEX IF NOT EXISTS feed_channels_poll_idx ON feed_channels (enabled, last_fetch NULLS FIRST);
 
 COMMENT ON COLUMN feed_channels.last_item_at IS '已见过的最新 pubDate —— 增量抓取的锚点';
@@ -504,6 +513,26 @@ ON CONFLICT (url) DO NOTHING;
 INSERT INTO feed_channels (source_id, url, label, enabled)
 SELECT id, 'https://www.chinanews.com.cn/rss/society.xml', '社会', true
   FROM feed_sources WHERE domain = 'chinanews.com.cn'
+ON CONFLICT (url) DO NOTHING;
+
+-- **中国政府网**：RSS 早就没了（404），但它的推送接口是活的 —— 60 条国务院/国办政策，
+-- 带 title/link/pubDate。这是最该收的 tier 1（政策原文，来源权重最高）。
+INSERT INTO feed_sources (domain, label, tier) VALUES ('gov.cn', '中国政府网', 1)
+ON CONFLICT (domain) DO UPDATE SET tier = EXCLUDED.tier, label = EXCLUDED.label;
+
+-- ⚠️ **默认关**：接口是活的，但 **Java 侧 TLS 校验不过** ——
+-- `PKIX path building failed`：gov.cn 用 **CFCA** 签的（链：*.www.gov.cn ← CFCA OV OCA ← CFCA EV ROOT），
+-- 而 **JDK 21 的 cacerts 里 0 条 CFCA**（实测）。curl/浏览器能过是因为用了 Windows 证书库。
+-- 这是**一类**问题（新华网那次 `news.cn` 抓取失败同源），不是这一个站。
+-- 要开它得先定信任策略：① 把 CFCA 根导入 JDK cacerts（对**所有** JVM TLS 生效）
+-- ② 给抓取路径单独一个信任库文件（范围窄、可回退，推荐）③ 不接 CFCA 签的站。
+-- 在定之前保持关闭 —— 让它每轮去撞一次墙没有意义，而错误信息已经记在这。
+-- **这个源值得开**：国务院/国办政策原文（60 条滚动），是 tier 1 里最有分量的一个。
+INSERT INTO feed_channels (source_id, url, label, enabled, kind, array_path, f_title, f_link, f_date, last_error)
+SELECT id, 'https://www.gov.cn/pushinfo/v150203/pushinfo.json', '政策推送', false,
+       'json', '', 'title', 'link', 'pubDate',
+       'TLS：JDK cacerts 无 CFCA 根（实测 0 条），Java 侧 PKIX path building failed；开之前先定信任策略'
+  FROM feed_sources WHERE domain = 'gov.cn'
 ON CONFLICT (url) DO NOTHING;
 
 -- 僵尸 feed：收进来但关掉，并把原因写进 last_error

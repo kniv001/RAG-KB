@@ -89,10 +89,15 @@ public class FeedPoller {
             String url = str(ch.get("url"));
             String label = str(ch.get("label")) + "@" + str(ch.get("domain"));
             try {
-                String xml = search.fetchRaw(url);
-                List<FeedRss.Entry> entries = FeedRss.parse(xml);
+                String body = search.fetchRaw(url);
+                // 两种通道：RSS（XML）与站点接口（JSON）。**类型与字段映射都在库里**
+                // （feed_channels.kind / array_path / f_*），换站点只改数据不改代码。
+                List<FeedRss.Entry> entries = "json".equalsIgnoreCase(str(ch.get("kind")))
+                        ? FeedJson.parse(body, str(ch.get("arrayPath")), str(ch.get("fTitle")),
+                                str(ch.get("fLink")), str(ch.get("fDate")))
+                        : FeedRss.parse(body);
                 if (entries.isEmpty()) {
-                    feed.markChannelError(id, "feed 里一条 item 都没有（解析不了？）");
+                    feed.markChannelError(id, "这个频道一条条目都取不到（RSS 解析失败？映射不对？）");
                     notes.add(label + "：feed 空");
                     continue;
                 }

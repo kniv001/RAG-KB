@@ -101,8 +101,10 @@ public interface FeedMapper extends BaseMapper<FeedItem> {
      * 一轮的抓取预算有限时，先保证层级高的源被覆盖。
      * {@code NULLS FIRST} 让没抓过的排在抓过的前面（冷启动先铺满）。
      */
-    @Select("SELECT c.id, c.url, c.label, c.source_id AS sourceId, c.last_item_at AS lastItemAt, "
-            + "s.domain, s.tier FROM feed_channels c JOIN feed_sources s ON s.id = c.source_id "
+    @Select("SELECT c.id, c.url, c.label, c.kind, c.array_path AS arrayPath, c.f_title AS fTitle, "
+            + "c.f_link AS fLink, c.f_date AS fDate, c.source_id AS sourceId, "
+            + "c.last_item_at AS lastItemAt, s.domain, s.tier "
+            + "FROM feed_channels c JOIN feed_sources s ON s.id = c.source_id "
             + "WHERE c.enabled AND s.tier <= #{tierMax} "
             + "ORDER BY s.tier ASC, c.last_fetch ASC NULLS FIRST")
     List<java.util.Map<String, Object>> pollableChannels(@Param("tierMax") int tierMax);

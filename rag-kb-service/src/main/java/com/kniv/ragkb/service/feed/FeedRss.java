@@ -104,6 +104,13 @@ public final class FeedRss {
         } catch (Exception ignore) {
             // 继续往下试
         }
+        try {
+            // **只到天**（gov.cn 的 pushinfo 就是这种）。补到当天 00:00 ——
+            // 宁可粗糙也不能丢：丢了这条的时间维度就整个没有了。
+            return java.time.LocalDate.parse(t).atStartOfDay(ZoneId.systemDefault()).toInstant();
+        } catch (Exception ignore) {
+            // 继续往下试
+        }
         log.debug("时间解析不出来：{}", t);
         return null;
     }
