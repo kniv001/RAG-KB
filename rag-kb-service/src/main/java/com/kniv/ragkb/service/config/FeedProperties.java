@@ -83,6 +83,15 @@ public class FeedProperties {
      */
     private int promoteMinTopicItems = 2;
 
+    /**
+     * **站点家具的判定门槛**：同一行出现在 ≥ 这么多个**不同条目**里就删掉它。
+     *
+     * <p>取 3：实测前几名是「发表评论」410 次、「大字体」408 次、「来源：中国新闻网」322 次 ——
+     * 而阈值 3 与 5 的效果几乎一样（垃圾条目删 70~77%），取小的那个更保守 ——
+     * 宁可多删一点家具，也别让导航进知识库（它会聚成巨簇、还会写进面向用户的概览）。
+     */
+    private int promoteMinRepeats = 3;
+
     /** 一次晋升几条。**显式上限**：每条都要切分 + 向量化，是 GPU 活。 */
     private int promoteLimit = 20;
 

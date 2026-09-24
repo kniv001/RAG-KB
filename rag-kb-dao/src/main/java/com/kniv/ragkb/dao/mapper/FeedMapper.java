@@ -158,6 +158,38 @@ public interface FeedMapper extends BaseMapper<FeedItem> {
     @Select("SELECT count(*) FROM feed_items WHERE doc_id IS NOT NULL")
     long countPromoted();
 
+    /**
+     * **全部可召回条目的正文** —— 用来算"哪些行是站点家具"。
+     *
+     * <p>为什么按行频而不是写规则：实测（2026-09-24）—— 按"连续短行"猜，误伤率 5%、
+     * 与真删的 14% 一个量级（**精度约等于抛硬币**）；而按"这行出现在多少个不同条目里"，
+     * 前几名是「发表评论」410 次、「大字体」408 次、「来源：中国新闻网」322 次 ——
+     * **每一行都是页面家具，没有一条是内容**。
+     *
+     * <p>只取 {@code status = 1}：冷存的垃圾不该参与"什么算家具"的判断。
+     */
+    @Select("SELECT body FROM feed_items WHERE status = 1 AND body IS NOT NULL")
+    List<String> allBodies();
+
+    /**
+     * **某条目里被判为模板的段落区间**（在 body 里的字符位置）。
+     *
+     * <p>为什么用这个而不是再写一条文本规则：实测（2026-09-24）—— 模板登记表
+     * （{@code feed_boilerplate}，按**相似度**认家具）已经标出这些正文的 **12~64%**
+     * （多数 30~58%），而那正是导航/侧栏那些块。**它早就算好了，只是晋升那一步没用它。**
+     *
+     * <p>而文本规则试过两条都不行：「连续短行」（卡 ≤12 字）漏掉了 15~24 字的那批；
+     * 「跨条目行频」（放开长度上限）在长侧栏上只命中 2 行（侧栏里的日期每页都在变，
+     * 逐字比对自然过不了）。
+     */
+    @Select("""
+            SELECT s.char_start AS s, s.char_end AS e
+            FROM feed_segments s JOIN feed_boilerplate b ON b.hash = md5(s.text)
+            WHERE s.item_id = #{itemId}
+            ORDER BY s.char_start
+            """)
+    List<java.util.Map<String, Object>> boilerplateRanges(@Param("itemId") long itemId);
+
     // ── 读数（量重复率用；也是这个方向的第一批"尺子"） ──────────────────────
 
     /** 首见条目数。 */

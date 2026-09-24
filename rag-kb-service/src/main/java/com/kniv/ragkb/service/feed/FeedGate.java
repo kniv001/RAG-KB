@@ -48,14 +48,16 @@ public final class FeedGate {
     }
 
     /** 参数。默认值都是"先宽后紧"：宁可先放进来（冷存），也别在第一版就把数据丢掉。 */
-    public record Config(int minChars, double minCjkRatio, Duration maxAge, List<String> blockedDomains) {
+    public record Config(int minChars, double minCjkRatio, Duration maxAge, List<String> blockedDomains,
+                         int listingMinChars, double listingMaxDensity) {
 
         public static Config defaults() {
             return new Config(
                     200,                                  // 正文短于 200 字：多为导航页/JS 壳/反爬页
                     0.30,                                 // 中日韩字符占比低于三成
                     Duration.ofDays(30),                  // 抓到的旧闻：冷存，不直接进召回池
-                    List.of("localhost", "127.0.0.1"));   // 域名黑名单（内网地址由 SSRF 检查兜底）
+                    List.of("localhost", "127.0.0.1"),    // 域名黑名单（内网地址由 SSRF 检查兜底）
+                    1500, 3.0);                           // 列表页判据，见 check 里的注释
         }
     }
 
@@ -83,6 +85,24 @@ public final class FeedGate {
         if (domain != null && cfg.blockedDomains().contains(domain.toLowerCase(Locale.ROOT))) {
             return new Verdict(Status.COLD, "域名在黑名单：" + domain);
         }
+        // **列表页/门户页**：长，但几乎没有句子。
+        //
+        // 为什么需要它（2026-09-24 实测）：门户首页那种"链接墙"——正文几万字、全是互不相同的
+        // 标题链接 —— **行频抓不到**（每一行都只出现一次）、**模板段也抓不到**（每页内容都不同），
+        // 于是它们过了闸 0 进向量库，聚成一个 200 块的巨簇，还写进了面向用户的概览。
+        //
+        // 判据是**句号密度**：文章有句子，链接墙没有。实测「>1500 字 且 <3/千字」命中 10 条，
+        // **10 条全是列表页**（精度 10/10）；而"亚运会夺金"那类只有标题+图注的**短**新闻
+        // （密度也是 0）被长度条件挡住了，不会误伤。
+        // 只判 **COLD**（可见性）—— 万一误判，行还在、可回捞。
+        int n = text.length();
+        double density = (countChar(text, '。') + countChar(text, '；')) * 1000.0 / n;
+        if (n > cfg.listingMinChars() && density < cfg.listingMaxDensity()) {
+            return new Verdict(Status.COLD, "像列表页：正文 " + n + " 字但句号密度只有 "
+                    + String.format(Locale.ROOT, "%.1f", density) + "/千字（阈值 "
+                    + cfg.listingMaxDensity() + "）");
+        }
+
         if (publishedAt != null && now != null
                 && publishedAt.isBefore(now.minus(cfg.maxAge()))) {
             long days = Duration.between(publishedAt, now).toDays();
@@ -114,6 +134,16 @@ public final class FeedGate {
             }
         }
         return total == 0 ? 0 : (double) cjk / total;
+    }
+
+    private static int countChar(String s, char c) {
+        int n = 0;
+        for (int i = 0; i < s.length(); i++) {
+            if (s.charAt(i) == c) {
+                n++;
+            }
+        }
+        return n;
     }
 
     /** 汉字（含扩展 A）＋ 中文标点区间。够用即可 —— 这里判的是"是不是中文内容"。 */

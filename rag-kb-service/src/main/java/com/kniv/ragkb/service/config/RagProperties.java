@@ -97,6 +97,18 @@ public class RagProperties {
          */
         private boolean injectOverview = true;
 
+        /**
+         * **陈旧了就自动重建**（默认开，每天一次）。
+         *
+         * <p>为什么必须有它（2026-09-24 实测）：新闻灌进库之后树还停在 09-17 的 661 块，
+         * 而那份概览每轮都进提示词 ⇒ 模型拿**过时的全局视图**否决**手上的资料**
+         * （召回了 9 块含答案的资料，它却答"知识库中没有"）。
+         *
+         * <p>过期判据本来就有（{@code stale}：块数变化 >两成 或 >20 块）——
+         * 缺的是**消费者**。见 {@code TreeAutoRebuild}。
+         */
+        private boolean autoRebuild = true;
+
         /** 概览的字符上限，防止主题太多把上下文挤爆 */
         private int overviewChars = 700;
     }

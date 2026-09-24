@@ -62,6 +62,9 @@ public class FeedPromoteService {
 
     public Result promote(int limit, int minTopicItems, boolean dryRun) {
         List<Map<String, Object>> rows = feed.promotable(limit, minTopicItems);
+        // **一次算好"哪些行是站点家具"**（见下面 furniture 的注释），整批复用。
+        // 全库正文一次读完（几百条、量级 MB），比"每条晋升都查一次"便宜得多。
+        Map<String, Integer> lineFreq = lineFrequency(feed.allBodies());
         if (rows.isEmpty()) {
             return new Result(0, 0, List.of(), "没有够格的条目（可召回 + 非转载 + 议题至少 "
                     + minTopicItems + " 条）");
@@ -81,7 +84,12 @@ public class FeedPromoteService {
                 // ⚠️ **时间列别强转**：timestamptz 取出来是 java.sql.Timestamp，
                 // 强转 OffsetDateTime 会 ClassCastException（第一版就是这么八条全失败的）。
                 // 取值一律走 FeedValues —— 这一支已经被"从 map 取值"咬了三次。
-                docIds.add(one(itemId, FeedValues.str(r.get("title")), FeedValues.str(r.get("body")),
+                // 两道清洗，各自管一类（都被实测量化过）：
+                //   ① **模板段**（按相似度认的侧栏/导航块）—— 覆盖正文的 12~64%；
+                //   ② **行频**（跨条目重复的短行：'发表评论' 410 次那种）—— 管模板段漏掉的小件。
+                String body = stripFurniture(maskBoilerplate(itemId, FeedValues.str(r.get("body"))),
+                        lineFreq);
+                docIds.add(one(itemId, FeedValues.str(r.get("title")), body,
                         FeedValues.str(r.get("url")), FeedValues.time(r.get("publishedAt"))));
             } catch (Exception e) {
                 log.warn("晋升失败 #{}：{}", itemId, e.getMessage());
@@ -131,6 +139,109 @@ public class FeedPromoteService {
         feed.markPromoted(itemId, docId);
         log.info("晋升：条目 #{} → 文档 {}（{}）", itemId, docId, shorten(title));
         return docId;
+    }
+
+    /**
+     * **按区间掩掉模板段**：那些字符位直接删掉。
+     *
+     * <p>区间来自 {@code feed_segments}（导入时切分算的），指的是 body 里的位置 ——
+     * body 只在"同址重抓"时更新，而重抓会连带重算段落，所以区间是有效的。
+     *
+     * <p>边界：切分器本身有粒度（60~300 字），所以掩掉的是"整段"，可能连带删掉紧邻的
+     * 少量正文。**宁可多删一点也不留导航** —— 导航进库的代价已经量过：
+     * 它聚成了一个 359 块的巨簇，还写进了面向用户的概览。
+     */
+    private String maskBoilerplate(long itemId, String body) {
+        if (body == null || body.isBlank()) {
+            return body;
+        }
+        List<Map<String, Object>> ranges = feed.boilerplateRanges(itemId);
+        if (ranges.isEmpty()) {
+            return body;
+        }
+        StringBuilder out = new StringBuilder(body.length());
+        int pos = 0;
+        int masked = 0;
+        for (Map<String, Object> r : ranges) {
+            int s = FeedValues.intOf(r.get("s"), -1);
+            int e = FeedValues.intOf(r.get("e"), -1);
+            if (s < pos || e <= s || e > body.length()) {
+                continue;               // 区间不合法或重叠 —— 跳过，别把正文切坏
+            }
+            out.append(body, pos, s);
+            out.append('\n');
+            pos = e;
+            masked += (e - s);
+        }
+        out.append(body, pos, body.length());
+        if (masked > 0) {
+            log.debug("掩掉模板段 #{}：{} 字（原 {} 字）", itemId, masked, body.length());
+        }
+        return out.toString();
+    }
+
+    /** 行 → 它出现在多少个**不同条目**里。 */
+    private static Map<String, Integer> lineFrequency(List<String> bodies) {
+        Map<String, Integer> freq = new java.util.HashMap<>();
+        for (String body : bodies) {
+            if (body == null) {
+                continue;
+            }
+            java.util.Set<String> seen = new java.util.HashSet<>();
+            for (String raw : body.split("\r?\n")) {
+                String l = raw.strip();
+                // 只统计"可能是家具"的长度区间：太短的（"|"、"#"）没信息，
+                // 太长的几乎必然是正文段落（家具不会写一段 60 字的话）。
+                if (l.length() < 2 || l.length() > 60 || !seen.add(l)) {
+                    continue;
+                }
+                freq.merge(l, 1, Integer::sum);
+            }
+        }
+        return freq;
+    }
+
+    /**
+     * **去掉站点家具**：出现在 {@code promoteMinRepeats} 个以上不同条目里的行，直接删。
+     *
+     * <p>为什么这么做（2026-09-24 实测）：抽取层（{@code WebSearchService}）清掉的是
+     * `nav/header/footer/aside` 这些**标签**，而中新网/中华网的导航藏在普通 `div` 里 ⇒
+     * 27% 的新闻正文带着整块导航，**而且通过了闸 0**（是中文、长度也够）⇒
+     * 进向量库、聚成一个 359 块的巨簇、最后**写进面向用户的概览**（"未归类主题 1：内容较杂"）。
+     *
+     * <p>判据是**跨条目的行频**，因为家具的定义就是"每一页都有"：
+     * 实测前几名是「发表评论」410 次、「大字体」408 次、「来源：中国新闻网」322 次 ——
+     * **每一行都是家具，没有一条是内容**。而按"连续短行"猜的那版误伤率 5%、
+     * 与真删量同级（精度约等于抛硬币），已弃。
+     *
+     * <p>⚠️ 两个边界写清楚：
+     * <ol>
+     *   <li>它**只作用于将要晋升的新闻**，统计也只统计 feed_items 内部 ——
+     *       **碰不到用户自己上传的文档**；</li>
+     *   <li>同一条通稿被多家转载时，正文段落也可能撞成"高频" ⇒ 会被误删。
+     *       但那种条目本来就会因为 simhash 判重而不晋升（{@code dup_of IS NULL} 是前置条件），
+     *       所以实际影响面很小 —— 仍然记在这里，别当成没有。</li>
+     * </ol>
+     */
+    private String stripFurniture(String body, Map<String, Integer> freq) {
+        if (body == null || body.isBlank() || freq.isEmpty()) {
+            return body;
+        }
+        StringBuilder out = new StringBuilder(body.length());
+        int dropped = 0;
+        for (String raw : body.split("\r?\n", -1)) {
+            String l = raw.strip();
+            if (l.length() >= 2 && l.length() <= 60
+                    && freq.getOrDefault(l, 0) >= props.getPromoteMinRepeats()) {
+                dropped++;
+                continue;
+            }
+            out.append(raw).append('\n');
+        }
+        if (dropped > 0) {
+            log.debug("去掉站点家具 {} 行", dropped);
+        }
+        return out.toString();
     }
 
     /** 标题里常带路径分隔符与超长串，落盘前收拾干净（与联网入库同一套）。 */
