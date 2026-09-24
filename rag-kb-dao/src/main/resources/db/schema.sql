@@ -544,14 +544,51 @@ ON CONFLICT (url) DO NOTHING;
 INSERT INTO feed_sources (domain, label, tier) VALUES ('jiemian.com', '界面新闻', 2)
 ON CONFLICT (domain) DO UPDATE SET tier = EXCLUDED.tier, label = EXCLUDED.label;
 
+-- ⚠️ **列数与值数必须对齐**：这里原先多塞了一个 `true`（列只有三个），
+-- 而 `SchemaInitializer` 是 `continueOnError=true` ⇒ **整条 INSERT 被静默跳过**，
+-- 于是"已加界面新闻"只存在于 schema 文件里、库里根本没有它（2026-09-24 实测发现）。
+-- 症状与"这个源没新闻"完全一样。**改完 seed 必须核一次库**，别只看文件。
 INSERT INTO feed_channels (source_id, url, label)
-SELECT id, 'https://a.jiemian.com/index.php?m=article&a=rss', '要闻', true
+SELECT id, 'https://a.jiemian.com/index.php?m=article&a=rss', '要闻'
   FROM feed_sources WHERE domain = 'jiemian.com'
 ON CONFLICT (url) DO NOTHING;
 
--- 中新网还有几个栏目是活的（要闻/国内/国际/财经/社会之外）
+-- **华尔街见闻**（tier 2 财经/市场）：RSS 58 条、pubDate 当天。对"趋势"类问题最有价值的一类源
+-- （市场行情、宏观数据、机构观点都在这里）。2026-09-24 实测：36氪/虎嗅/机器之心/第一财经/
+-- 财联社/证券时报/中证网 的 RSS 全空或 404，财经类目前**只有这一家**供货。
+INSERT INTO feed_sources (domain, label, tier) VALUES ('wallstreetcn.com', '华尔街见闻', 2)
+ON CONFLICT (domain) DO UPDATE SET tier = EXCLUDED.tier, label = EXCLUDED.label;
+
 INSERT INTO feed_channels (source_id, url, label)
-SELECT id, 'https://www.chinanews.com.cn/rss/importnews.xml', '要闻·补充', true
+SELECT id, 'https://dedicated.wallstreetcn.com/rss.xml', '财经·市场'
+  FROM feed_sources WHERE domain = 'wallstreetcn.com'
+ON CONFLICT (url) DO NOTHING;
+
+-- 中新网还有几个栏目是活的（要闻/国内/国际/财经/社会之外）
+-- （2026-09-24 逐个名字试出来的：sports/edu/health/culture 有 30 条；
+--   gn/tw/mil/house/ent2/yl 这些名字存在但**返回 0 条** —— 是空壳，别当可用源）
+INSERT INTO feed_channels (source_id, url, label)
+SELECT id, 'https://www.chinanews.com.cn/rss/importnews.xml', '要闻·补充'
+  FROM feed_sources WHERE domain = 'chinanews.com.cn'
+ON CONFLICT (url) DO NOTHING;
+
+INSERT INTO feed_channels (source_id, url, label)
+SELECT id, 'https://www.chinanews.com.cn/rss/sports.xml', '体育'
+  FROM feed_sources WHERE domain = 'chinanews.com.cn'
+ON CONFLICT (url) DO NOTHING;
+
+INSERT INTO feed_channels (source_id, url, label)
+SELECT id, 'https://www.chinanews.com.cn/rss/edu.xml', '教育'
+  FROM feed_sources WHERE domain = 'chinanews.com.cn'
+ON CONFLICT (url) DO NOTHING;
+
+INSERT INTO feed_channels (source_id, url, label)
+SELECT id, 'https://www.chinanews.com.cn/rss/health.xml', '健康'
+  FROM feed_sources WHERE domain = 'chinanews.com.cn'
+ON CONFLICT (url) DO NOTHING;
+
+INSERT INTO feed_channels (source_id, url, label)
+SELECT id, 'https://www.chinanews.com.cn/rss/culture.xml', '文化'
   FROM feed_sources WHERE domain = 'chinanews.com.cn'
 ON CONFLICT (url) DO NOTHING;
 

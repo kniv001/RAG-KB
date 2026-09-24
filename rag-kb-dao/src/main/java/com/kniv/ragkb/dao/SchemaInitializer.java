@@ -38,6 +38,27 @@ public class SchemaInitializer {
             } catch (Exception e) {
                 log.error("建表失败：{}", e.getMessage(), e);
             }
+            // **种子行数的可见性检查**（2026-09-24 加）。
+            //
+            // 为什么需要：`continueOnError(true)` 让**一条写错的 seed 被静默跳过** ——
+            // 实测踩过两次：① 列数与值数不匹配（多写了一个值）；② 同一个坏模式被复制成六条。
+            // 症状与"这个源本来就没新闻"一模一样，而我去核的是**文件**不是**库**，
+            // 于是"已加某某源"只存在于 schema 里。这里把它们打出来，**每次启动都看得见**。
+            try (var conn = dataSource.getConnection();
+                 var st = conn.createStatement()) {
+                StringBuilder b = new StringBuilder();
+                for (String t : new String[]{"documents", "chunks", "sentences",
+                        "feed_sources", "feed_channels", "feed_items"}) {
+                    try (var rs = st.executeQuery("SELECT count(*) FROM " + t)) {
+                        b.append(rs.next() ? rs.getLong(1) : -1).append(' ').append(t).append("　");
+                    } catch (Exception ignore) {
+                        // 表还不存在就算了（首次启动时 feed_* 是新加的）
+                    }
+                }
+                log.info("数据现状：{}", b.toString().trim());
+            } catch (Exception e) {
+                log.debug("行数检查跳过：{}", e.getMessage());
+            }
         };
     }
 }
