@@ -267,6 +267,43 @@ public class WebSearchService {
         }
     }
 
+    /**
+     * 抓**原始文本**（RSS / 接口用）。
+     *
+     * <p>与 {@link #fetch} 的区别只有一处：不做 DOM→Markdown —— 那会把 RSS 的 XML
+     * 拍平成一堆文字，item/link/pubDate 全丢。其余（UA、超时、体积上限、
+     * **SSRF 全地址检查**）全部走同一套：重写一份就会重犯它已经解决过的错。
+     *
+     * <p>⚠️ **顺带堵上一个既有的口子**：jsoup 会跟随重定向，而 {@code assertPublicHost}
+     * 只检查了**入口** URL —— 一个公网地址 301 到 {@code http://127.0.0.1:6379/}
+     * 就能绕过去。这里在拿到响应后**再查一次最终地址**。
+     * （{@link #fetch} 那边同样有这个性质，本次没动它 —— 改它超出这一支的范围，
+     * 但记在这里，免得被当成"已经安全了"。）
+     */
+    public String fetchRaw(String url) {
+        requireEnabled();
+        assertPublicHost(url);
+        try {
+            org.jsoup.Connection.Response res = Jsoup.connect(url)
+                    .userAgent(props.getUserAgent())
+                    .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+                    .timeout(props.getTimeoutSeconds() * 1000)
+                    .maxBodySize(props.getMaxPageBytes())
+                    .followRedirects(true)
+                    // RSS 的 Content-Type 不是 HTML，这一条不放开会直接被 jsoup 拒掉
+                    .ignoreContentType(true)
+                    .ignoreHttpErrors(false)
+                    .execute();
+            String finalUrl = res.url().toString();
+            if (!finalUrl.equals(url)) {
+                assertPublicHost(finalUrl);      // 重定向之后**再查一次**
+            }
+            return res.body();
+        } catch (IOException e) {
+            throw new IllegalStateException("抓取失败：" + e.getMessage(), e);
+        }
+    }
+
     /** 连续抓取之间歇一下，别把对端当压测目标 */
     public void pauseBetweenFetches() {
         int ms = props.getFetchDelayMs();

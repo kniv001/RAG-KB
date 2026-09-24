@@ -60,12 +60,33 @@ public interface FeedIndexMapper {
     @Select("SELECT 1 - (s.embedding <=> #{vec}::vector) AS sim "
             + "FROM feed_segments s JOIN feed_items i ON i.id = s.item_id "
             + "WHERE s.embed_model = #{model} AND s.item_id <> #{itemId} AND i.status = 1 "
+            + "AND NOT EXISTS (SELECT 1 FROM feed_boilerplate b WHERE b.hash = md5(s.text)) "
             + "ORDER BY s.embedding <=> #{vec}::vector LIMIT 1")
     List<Double> nearestSegmentSim(@Param("vec") String vecLiteral, @Param("model") String model,
                                    @Param("itemId") long itemId);
 
     @Select("SELECT count(*) FROM feed_segments WHERE item_id = #{itemId}")
     long countSegments(@Param("itemId") long itemId);
+
+    /**
+     * **登记模板段**：同一段文字在 ≥{@code minItems} 个不同条目里出现 ⇒ 它是站点家具。
+     *
+     * <p>写进 `feed_boilerplate`（按文本哈希）而**不是**标在段落行上 ——
+     * 段落会随切分器/粒度/重跑而重建，标在段上等于每次重建都要重学一遍，
+     * 而重学期间的读数又是脏的。
+     */
+    @Insert("INSERT INTO feed_boilerplate (hash, n_items, sample) "
+            + "SELECT md5(text), count(DISTINCT item_id), min(left(replace(text, E'\n', ' '), 120)) "
+            + "FROM feed_segments GROUP BY md5(text) "
+            + "HAVING count(DISTINCT item_id) >= #{minItems} "
+            + "ON CONFLICT (hash) DO UPDATE SET n_items = EXCLUDED.n_items")
+    int markBoilerplate(@Param("minItems") int minItems);
+
+    /** 模板占比（读数）—— 它有多大，直接决定 dup_ratio 有多脏。 */
+    @Select("SELECT (SELECT count(*) FROM feed_segments s WHERE EXISTS ("
+            + "  SELECT 1 FROM feed_boilerplate b WHERE b.hash = md5(s.text))), "
+            + "(SELECT count(*) FROM feed_segments)")
+    List<Map<String, Object>> boilerplateStats();
 
     // ── 议题 ────────────────────────────────────────────────────────────────
 

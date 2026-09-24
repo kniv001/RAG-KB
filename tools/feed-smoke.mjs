@@ -9,6 +9,8 @@
  *   node tools/feed-smoke.mjs "关键词1" "关键词2" ...      # 每个词取前 N 条结果去抓
  *   node tools/feed-smoke.mjs --limit 6 "关键词"           # 每个词只抓 6 条
  *   node tools/feed-smoke.mjs --stats-only                 # 只看读数，不抓
+ *   node tools/feed-smoke.mjs --poll                       # 手动跑一轮定时抓取（与定时器同一个方法）
+ *   node tools/feed-smoke.mjs --enrich [--limit 60]         # 手动跑一批富化（切段+重复+议题）
  */
 import fs from 'node:fs';
 import { makeClient } from './kb-client.mjs';
@@ -37,6 +39,29 @@ async function stats() {
   const d = r.body?.data || {};
   console.log(`读数：总 ${d['总条目']} · 首见 ${d['首见']} · 近重复 ${d['近重复']}` +
     `（${d['近重复率']}）· 可召回 ${d['可召回']} · 冷存 ${d['冷存']} · 来源 ${d['来源数']}`);
+}
+
+// ── 手动跑一轮定时抓取 / 富化 ─────────────────────────────────────────────
+// 定时是第一性的，但调试不能等 30 分钟 —— 而且"这一轮到底发生了什么"得在看得见的时刻看。
+if (has('poll')) {
+  const t0 = Date.now();
+  const r = await c.call('POST', '/api/feed/poll', {}, { token: TOKEN });
+  console.log(`HTTP ${r.status}　用时 ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+  console.log(r.body?.data?.['结果'] || JSON.stringify(r.body).slice(0, 300));
+  await stats();
+  process.exit(0);
+}
+if (has('enrich')) {
+  const r = await c.call('POST', '/api/feed/enrich',
+    { limit: parseInt(arg('limit', '60'), 10) }, { token: TOKEN });
+  const d = r.body?.data || {};
+  console.log(`待处理 ${d['待处理']} · 已处理 ${d['已处理']} · 新建议题 ${d['新建议题']}` +
+    ` · 判为高度重复 ${d['判为高度重复']}`);
+  for (const it of (d['明细'] || []).slice(0, 10)) {
+    console.log(`  #${it.id}  ${it['段数']} 段 / 重复 ${it['重复段']}（${it['重复率']}）  议题 ${it['议题']}${it['新议题'] ? '（新）' : ''}`);
+  }
+  await stats();
+  process.exit(0);
 }
 
 if (has('stats-only') || QUERIES.length === 0) {

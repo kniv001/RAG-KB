@@ -92,6 +92,31 @@ public interface FeedMapper extends BaseMapper<FeedItem> {
     List<Candidate> candidatesByBands(@Param("k0") long k0, @Param("k1") long k1,
                                       @Param("k2") long k2, @Param("k3") long k3);
 
+    // ── 抓取调度（频道层） ──────────────────────────────────────────────────
+
+    /**
+     * 待轮询的频道：**按层级、再按最久没抓的排**。
+     *
+     * <p>排序就是"分层推进"的落点：tier 1（国家级）永远排在门户/垂媒前面 ——
+     * 一轮的抓取预算有限时，先保证层级高的源被覆盖。
+     * {@code NULLS FIRST} 让没抓过的排在抓过的前面（冷启动先铺满）。
+     */
+    @Select("SELECT c.id, c.url, c.label, c.source_id AS sourceId, c.last_item_at AS lastItemAt, "
+            + "s.domain, s.tier FROM feed_channels c JOIN feed_sources s ON s.id = c.source_id "
+            + "WHERE c.enabled AND s.tier <= #{tierMax} "
+            + "ORDER BY s.tier ASC, c.last_fetch ASC NULLS FIRST")
+    List<java.util.Map<String, Object>> pollableChannels(@Param("tierMax") int tierMax);
+
+    @Update("UPDATE feed_channels SET last_fetch = now(), last_item_at = "
+            + "GREATEST(COALESCE(last_item_at, 'epoch'::timestamptz), COALESCE(#{lastItemAt}, 'epoch'::timestamptz)), "
+            + "item_n = item_n + #{added}, last_error = NULL WHERE id = #{id}")
+    int markChannelFetched(@Param("id") long id, @Param("lastItemAt") java.time.OffsetDateTime lastItemAt,
+                           @Param("added") int added);
+
+    @Update("UPDATE feed_channels SET last_fetch = now(), err_n = err_n + 1, last_error = #{error} "
+            + "WHERE id = #{id}")
+    int markChannelError(@Param("id") long id, @Param("error") String error);
+
     // ── 读数（量重复率用；也是这个方向的第一批"尺子"） ──────────────────────
 
     /** 首见条目数。 */

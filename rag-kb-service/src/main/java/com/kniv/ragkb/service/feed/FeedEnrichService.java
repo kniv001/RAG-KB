@@ -59,6 +59,11 @@ public class FeedEnrichService {
      * （本机只有一个推理槽，实测后台跑 3091ms 用户就要等 3095ms）。
      */
     public synchronized Batch run(int limit) {
+        // **先标模板段**（同一段文字出现在 ≥3 个条目里 = 站点家具）。
+        // 必须在比对之前跑：否则每篇稿子都会去匹配别页的"最新新闻"侧栏，
+        // 白背一份重复率（实测 40 篇里 154 段相似度正好 1.0，全是侧栏）。
+        int boiler = idx.markBoilerplate(props.getBoilerplateMinItems());
+
         List<Map<String, Object>> pending = idx.pendingEnrich(limit);
         if (pending.isEmpty()) {
             return new Batch(0, 0, 0, 0, List.of(), "没有待富化的条目");
@@ -86,7 +91,8 @@ public class FeedEnrichService {
                 log.warn("富化失败 #{}：{}", id, ex.getMessage());
             }
         }
-        log.info("信息流富化：{} 条（新建议题 {} · 判为高度重复 {}）", out.size(), newTopics, demoted);
+        log.info("信息流富化：{} 条（新建议题 {} · 判为高度重复 {} · 模板段标记 {}）",
+                out.size(), newTopics, demoted, boiler);
         return new Batch(pending.size(), out.size(), newTopics, demoted, out, null);
     }
 

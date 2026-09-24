@@ -6,6 +6,7 @@ import com.kniv.ragkb.service.config.FeedProperties;
 import com.kniv.ragkb.service.feed.FeedCrawler;
 import com.kniv.ragkb.service.feed.FeedEnrichService;
 import com.kniv.ragkb.service.feed.FeedIngestService;
+import com.kniv.ragkb.service.feed.FeedPoller;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -38,6 +39,7 @@ public class FeedController {
     private final FeedCrawler crawler;
     private final FeedIngestService ingest;
     private final FeedEnrichService enrich;
+    private final FeedPoller poller;
     private final FeedProperties feedProps;
     private final WebProperties webProps;
 
@@ -53,6 +55,7 @@ public class FeedController {
         m.put("可召回", s.recallable());
         m.put("冷存", s.cold());
         m.put("来源数", s.sources());
+        m.put("上轮抓取", poller.lastRun());
         return R.ok(m);
     }
 
@@ -92,6 +95,23 @@ public class FeedController {
         }
         res.put("明细", rows);
         return R.ok(res);
+    }
+
+    /**
+     * **手动跑一轮**（与定时跑的是同一个方法）。
+     *
+     * <p>存在的理由：定时是第一性的，但调试不能等 30 分钟 —— 而且第一版要看的是
+     * "一轮里到底发生了什么"，那需要在看得见的时刻跑一次。
+     */
+    @PostMapping("/poll")
+    public R<Map<String, Object>> poll() {
+        if (!webProps.isEnabled()) {
+            return R.fail(R.CODE_FORBIDDEN, "联网功能未开启（ragkb.web.enabled=false）");
+        }
+        poller.poll();
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("结果", poller.lastRun());
+        return R.ok(m);
     }
 
     /** 议题榜（按条目数）——"哪件事在升温"最粗的一个视图。 */

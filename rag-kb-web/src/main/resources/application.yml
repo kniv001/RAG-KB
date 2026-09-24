@@ -62,6 +62,17 @@ ragkb:
     topic-sim: ${KB_FEED_TOPIC_SIM:0.80}
     topic-window-days: ${KB_FEED_TOPIC_WINDOW:7}
     enrich-limit: ${KB_FEED_ENRICH_LIMIT:30}
+    # ── 周期抓取 ──────────────────────────────────────────────────────────
+    # **默认关**：它让服务端周期性地主动外发请求，比"点一次抓一次"更该由人明确打开。
+    # ⚠️ 它不能绕过 ragkb.web.enabled —— 那个关着时抓取一律不动（同一个出口）。
+    poll-enabled: ${KB_FEED_POLL:false}
+    poll-interval-ms: ${KB_FEED_POLL_INTERVAL_MS:1800000}   # 30 分钟
+    poll-initial-delay-ms: ${KB_FEED_POLL_INITIAL_MS:120000} # 起来 2 分钟后先跑一轮
+    # **分层推进**：只抓 tier ≤ 这个值的源。默认 1 = 只抓国家级。
+    # 先把国家级跑顺（最干净、最可核对），再放开门户(2)与垂媒(3)。
+    tier-max: ${KB_FEED_TIER_MAX:1}
+    max-per-run: ${KB_FEED_MAX_PER_RUN:40}
+    per-channel-max: ${KB_FEED_PER_CHANNEL:10}
 
   crypto:
     enabled: ${KB_CRYPTO_ENABLED:true}

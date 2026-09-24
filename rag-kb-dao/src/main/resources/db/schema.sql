@@ -383,6 +383,23 @@ CREATE TABLE IF NOT EXISTS feed_segments (
     UNIQUE (item_id, seq)
 );
 
+-- **模板登记表**：站点家具（侧栏、页脚、"最新新闻"列表…）的文本哈希。
+--
+-- 为什么不把标记直接写在 `feed_segments` 上：**段落会重建**（换切分器、改粒度、
+-- 重跑富化），写在段上就随之丢掉了，于是每次重建都要重新"学"一遍哪些是模板 ——
+-- 而重学期间算出来的读数又是脏的。按**文本哈希**登记与段落生命周期无关。
+--
+-- 判据是"同一段文字出现在 ≥N 个**不同条目**里"：一句话在一篇里重复三次是文风，
+-- 出现在 8 篇里只有一种解释 —— 页面模板。
+-- ⚠️ 第一版只认**逐字相同**；日期随页面浮动的侧栏（"最新新闻"常是这种）会漏掉一部分，
+-- 那部分要按相似度再筛（还没做）。所以这一版是"先拦住大头"。
+CREATE TABLE IF NOT EXISTS feed_boilerplate (
+    hash      text PRIMARY KEY,      -- md5(段文本)
+    n_items   integer NOT NULL,      -- 出现在多少个不同条目里
+    sample    text,                  -- 留一段原文，便于人眼核对
+    marked_at timestamptz NOT NULL DEFAULT now()
+);
+
 -- 议题（事件簇）。**按"事件"归并、不按实体**（用户 2026-09-24 定）：
 -- 一个议题 = "谁在什么时候做了什么"；实体只做标签与查询入口，因为
 -- **补充/推翻发生在"某件事的说法"上**，挂在实体上就退化成"这家公司的所有新闻"、时间线也就没了。
@@ -420,3 +437,78 @@ CREATE INDEX IF NOT EXISTS feed_item_topics_topic_idx ON feed_item_topics (topic
 -- 议题不建向量索引：查询带"近 N 天"的时间过滤，而**带过滤的 HNSW 容易走不到索引**；
 -- 议题量级是"每天几十个、窗口内几百个"，顺扫精确且够快。
 CREATE INDEX IF NOT EXISTS feed_topics_recent_idx ON feed_topics (last_seen DESC);
+
+-- ── 信息流的抓取层：发布方 → 频道（RSS/接口）─────────────────────────────────
+--
+-- 为什么分两层：`feed_sources` 是**发布方**（权重 authority / 被推翻率挂在这里），
+-- 一个发布方可以有多个**频道**（要闻/国际/财经/社会 各一个 RSS）。
+-- 层级（tier）挂在**发布方**上 —— "国家级 → 门户 → 垂媒"说的是谁在说，不是哪个栏目。
+ALTER TABLE feed_sources ADD COLUMN IF NOT EXISTS tier smallint NOT NULL DEFAULT 9;
+
+CREATE TABLE IF NOT EXISTS feed_channels (
+    id           bigserial PRIMARY KEY,
+    source_id    bigint NOT NULL REFERENCES feed_sources(id),
+    url          text NOT NULL UNIQUE,      -- RSS / 接口地址
+    label        text,
+    enabled      boolean NOT NULL DEFAULT true,
+    last_fetch   timestamptz,
+    -- 已见过的**最新发布时间**。增量就靠它：只取比它新的条目。
+    -- 用 pubDate 而不是抓取时间：feed 里常常一次给出最近 30 条，按抓取时间会重复抓。
+    last_item_at timestamptz,
+    item_n       bigint NOT NULL DEFAULT 0,
+    err_n        integer NOT NULL DEFAULT 0,
+    last_error   text
+);
+CREATE INDEX IF NOT EXISTS feed_channels_poll_idx ON feed_channels (enabled, last_fetch NULLS FIRST);
+
+COMMENT ON COLUMN feed_channels.last_item_at IS '已见过的最新 pubDate —— 增量抓取的锚点';
+
+-- ── 种子源清单（**实测筛出来的**，不是列出来的）─────────────────────────────
+--
+-- 实测（2026-09-24，本机）：
+--   ✅ 中新网各栏目 RSS：HTTP 200 且 pubDate 是当天 —— **唯一一批活的**
+--   ⚠️ 人民网 RSS：HTTP 200 但 pubDate 停在 2025-06-05（**僵尸 feed**）⇒ 收进来但
+--      enabled=false。留着的价值是"试过、不可用"这条记录本身，免得下次再试一遍
+--   ❌ 404：中国政府网 / 新华网 / 央视网 / 光明网 / 中国日报
+--      ⇒ 中文新闻 RSS 已大面积关停；要扩源得走别的通道（列表页解析 / 官方 API）
+-- ⚠️ **策展字段用 DO UPDATE，不能 DO NOTHING**：这些域名大多在"手动喂网址"那一轮
+-- 就已经建过行（tier 默认 9），DO NOTHING 会**静默什么都不做** ⇒
+-- 5 个中新网频道全是 tier 9，而 `tier-max=1` 的轮询**一个源都不会抓**
+-- （而且不报错，看起来就是"没有新闻"）。实测踩到过一次。
+-- tier/label 是**策展信息**（人定的），种子是它的权威来源，所以这里覆盖。
+INSERT INTO feed_sources (domain, label, tier) VALUES
+    ('chinanews.com.cn', '中国新闻网', 1),
+    ('people.com.cn',    '人民网',     1)
+ON CONFLICT (domain) DO UPDATE SET tier = EXCLUDED.tier, label = EXCLUDED.label;
+
+INSERT INTO feed_channels (source_id, url, label, enabled)
+SELECT id, 'https://www.chinanews.com.cn/rss/scroll-news.xml', '要闻', true
+  FROM feed_sources WHERE domain = 'chinanews.com.cn'
+ON CONFLICT (url) DO NOTHING;
+
+INSERT INTO feed_channels (source_id, url, label, enabled)
+SELECT id, 'https://www.chinanews.com.cn/rss/china.xml', '国内', true
+  FROM feed_sources WHERE domain = 'chinanews.com.cn'
+ON CONFLICT (url) DO NOTHING;
+
+INSERT INTO feed_channels (source_id, url, label, enabled)
+SELECT id, 'https://www.chinanews.com.cn/rss/world.xml', '国际', true
+  FROM feed_sources WHERE domain = 'chinanews.com.cn'
+ON CONFLICT (url) DO NOTHING;
+
+INSERT INTO feed_channels (source_id, url, label, enabled)
+SELECT id, 'https://www.chinanews.com.cn/rss/finance.xml', '财经', true
+  FROM feed_sources WHERE domain = 'chinanews.com.cn'
+ON CONFLICT (url) DO NOTHING;
+
+INSERT INTO feed_channels (source_id, url, label, enabled)
+SELECT id, 'https://www.chinanews.com.cn/rss/society.xml', '社会', true
+  FROM feed_sources WHERE domain = 'chinanews.com.cn'
+ON CONFLICT (url) DO NOTHING;
+
+-- 僵尸 feed：收进来但关掉，并把原因写进 last_error
+INSERT INTO feed_channels (source_id, url, label, enabled, last_error)
+SELECT id, 'http://www.people.com.cn/rss/politics.xml', '人民网·政治', false,
+       '僵尸 feed：HTTP 200 但 pubDate 停在 2025-06-05（2026-09-24 实测）'
+  FROM feed_sources WHERE domain = 'people.com.cn'
+ON CONFLICT (url) DO NOTHING;

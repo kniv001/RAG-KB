@@ -42,23 +42,32 @@ public class FeedCrawler {
     public List<Crawled> crawl(List<String> urls) {
         List<Crawled> out = new ArrayList<>();
         for (int i = 0; i < urls.size(); i++) {
-            String url = urls.get(i);
             if (i > 0) {
                 search.pauseBetweenFetches();
             }
-            try {
-                FetchedPage page = search.fetch(url);
-                // 发布时间：很多页在正文里，抓取层拿不到 ⇒ 先留 null，
-                // **不拿抓取时间冒充发布时间**（两者混了，"当时我们以为是什么"就答不出来了）。
-                FeedIngestService.Ingested r =
-                        ingest.ingest(page.url(), page.title(), page.text(), (Instant) null);
-                out.add(new Crawled(page.url(), page.title(), page.text().length(),
-                        r.id(), r.status(), r.dupOf(), null));
-            } catch (Exception e) {
-                log.warn("信息流抓取失败 {}：{}", url, e.getMessage());
-                out.add(new Crawled(url, null, 0, null, null, null, e.getMessage()));
-            }
+            out.add(crawlOne(urls.get(i), null));
         }
         return out;
+    }
+
+    /**
+     * 抓一条并入库。
+     *
+     * @param publishedAt feed 里给出的发布时间（RSS 的 pubDate）。
+     *                    **从 feed 来的就一定要带上** —— 网页正文里多半抽不到发布时间，
+     *                    而"什么时候发生的"正是这一支最要紧的那一维；
+     *                    抽不到时才留 null，**绝不拿抓取时间冒充**。
+     */
+    public Crawled crawlOne(String url, Instant publishedAt) {
+        try {
+            FetchedPage page = search.fetch(url);
+            FeedIngestService.Ingested r =
+                    ingest.ingest(page.url(), page.title(), page.text(), publishedAt);
+            return new Crawled(page.url(), page.title(), page.text().length(),
+                    r.id(), r.status(), r.dupOf(), null);
+        } catch (Exception e) {
+            log.warn("信息流抓取失败 {}：{}", url, e.getMessage());
+            return new Crawled(url, null, 0, null, null, null, e.getMessage());
+        }
     }
 }
