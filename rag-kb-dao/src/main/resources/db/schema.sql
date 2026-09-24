@@ -365,6 +365,9 @@ ALTER TABLE feed_items ADD COLUMN IF NOT EXISTS nearest_topic_sim real;
 ALTER TABLE feed_items ADD COLUMN IF NOT EXISTS seg_n       integer;
 ALTER TABLE feed_items ADD COLUMN IF NOT EXISTS dup_seg_n   integer;
 ALTER TABLE feed_items ADD COLUMN IF NOT EXISTS enriched_at timestamptz;
+-- 晋升之后变成哪篇文档（NULL = 还没晋升）。**只加这一列，条目本身一个字不改** ——
+-- append-only 管的是事实，晋升是"多写一份可检索的副本"。
+ALTER TABLE feed_items ADD COLUMN IF NOT EXISTS doc_id text;
 
 -- 段落（**粗糙切分**的产物，只为"是不是已有的片段"这件事服务，不承担检索单元的角色）。
 CREATE TABLE IF NOT EXISTS feed_segments (

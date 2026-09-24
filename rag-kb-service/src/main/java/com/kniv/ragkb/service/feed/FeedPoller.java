@@ -86,22 +86,22 @@ public class FeedPoller {
                 break;
             }
             long id = ((Number) ch.get("id")).longValue();
-            String url = str(ch.get("url"));
-            String label = str(ch.get("label")) + "@" + str(ch.get("domain"));
+            String url = FeedValues.str(ch.get("url"));
+            String label = FeedValues.str(ch.get("label")) + "@" + FeedValues.str(ch.get("domain"));
             try {
                 String body = search.fetchRaw(url);
                 // 两种通道：RSS（XML）与站点接口（JSON）。**类型与字段映射都在库里**
                 // （feed_channels.kind / array_path / f_*），换站点只改数据不改代码。
-                List<FeedRss.Entry> entries = "json".equalsIgnoreCase(str(ch.get("kind")))
-                        ? FeedJson.parse(body, str(ch.get("arrayPath")), str(ch.get("fTitle")),
-                                str(ch.get("fLink")), str(ch.get("fDate")))
+                List<FeedRss.Entry> entries = "json".equalsIgnoreCase(FeedValues.str(ch.get("kind")))
+                        ? FeedJson.parse(body, FeedValues.str(ch.get("arrayPath")), FeedValues.str(ch.get("fTitle")),
+                                FeedValues.str(ch.get("fLink")), FeedValues.str(ch.get("fDate")))
                         : FeedRss.parse(body);
                 if (entries.isEmpty()) {
                     feed.markChannelError(id, "这个频道一条条目都取不到（RSS 解析失败？映射不对？）");
                     notes.add(label + "：feed 空");
                     continue;
                 }
-                Instant seen = toInstant(ch.get("lastItemAt"));
+                Instant seen = FeedValues.instant(ch.get("lastItemAt"));
                 // **按时间升序取**（最旧的先抓），锚点只朝前走。
                 //
                 // 为什么不是"最新优先"：锚点是"已见过的最新"，而**未处理的永远更旧** ——
@@ -182,23 +182,6 @@ public class FeedPoller {
         lastRun = String.format("%d 个频道、新入库 %d 条、富化 %d 条、耗时 %.1fs | %s",
                 channels, newItems, enriched, ms / 1000.0, String.join("；", notes));
         log.info("信息流轮询：{}", lastRun);
-    }
-
-    private static Instant toInstant(Object o) {
-        if (o == null) {
-            return null;
-        }
-        if (o instanceof OffsetDateTime odt) {
-            return odt.toInstant();
-        }
-        if (o instanceof java.sql.Timestamp ts) {
-            return ts.toInstant();
-        }
-        return null;
-    }
-
-    private static String str(Object o) {
-        return o == null ? "" : o.toString();
     }
 
     private static String shorten(String s) {

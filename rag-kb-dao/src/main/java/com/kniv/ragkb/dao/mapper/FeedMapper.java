@@ -127,6 +127,37 @@ public interface FeedMapper extends BaseMapper<FeedItem> {
             + "WHERE id = #{id}")
     int markChannelError(@Param("id") long id, @Param("error") String error);
 
+    // ── 晋升（信息流 → 知识库文档）──────────────────────────────────────────
+
+    /**
+     * 够格的晋升候选。
+     *
+     * <p>三条规则都写在 SQL 里而不是 Java 里：它们描述的是**数据状态**（可召回、非转载、
+     * 议题够大），放在一处能一眼看全，也便于将来用一条 SQL 回答"为什么这条没进库"。
+     *
+     * <p>⚠️ **别名加引号**（`AS "publishedAt"`）：PostgreSQL 会把未加引号的折成小写，
+     * 而 MyBatis 的 map 键就是结果集里的名字 —— 这个坑本项目已踩两次。
+     */
+    @Select("""
+            SELECT i.id, i.title, i.body, i.url, i.published_at AS "publishedAt",
+                   t.item_n AS "topicN"
+            FROM feed_items i
+            JOIN feed_item_topics e ON e.item_id = i.id
+            JOIN feed_topics t ON t.id = e.topic_id
+            WHERE i.status = 1 AND i.dup_of IS NULL AND i.doc_id IS NULL
+              AND t.item_n >= #{minTopicItems}
+            ORDER BY t.item_n DESC, i.published_at DESC NULLS LAST
+            LIMIT #{limit}
+            """)
+    List<java.util.Map<String, Object>> promotable(@Param("limit") int limit,
+                                                   @Param("minTopicItems") int minTopicItems);
+
+    @Update("UPDATE feed_items SET doc_id = #{docId} WHERE id = #{id}")
+    int markPromoted(@Param("id") long id, @Param("docId") String docId);
+
+    @Select("SELECT count(*) FROM feed_items WHERE doc_id IS NOT NULL")
+    long countPromoted();
+
     // ── 读数（量重复率用；也是这个方向的第一批"尺子"） ──────────────────────
 
     /** 首见条目数。 */

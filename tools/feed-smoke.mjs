@@ -11,9 +11,11 @@
  *   node tools/feed-smoke.mjs --stats-only                 # 只看读数，不抓
  *   node tools/feed-smoke.mjs --poll                       # 手动跑一轮定时抓取（与定时器同一个方法）
  *   node tools/feed-smoke.mjs --enrich [--limit 60]         # 手动跑一批富化（切段+重复+议题）
+ *   node tools/feed-smoke.mjs --promote [--real]            # 晋升（默认只试跑；--real 才真做）
+ *   node tools/feed-smoke.mjs --ask "最近金价怎么样？"        # 问一句，验"晋升之后真检索得到"
  */
 import fs from 'node:fs';
-import { makeClient } from './kb-client.mjs';
+import { makeClient, readSse } from './kb-client.mjs';
 
 const BASE = process.env.KB_BASE || 'http://127.0.0.1:8080';
 const args = process.argv.slice(2);
@@ -61,6 +63,41 @@ if (has('enrich')) {
     console.log(`  #${it.id}  ${it['段数']} 段 / 重复 ${it['重复段']}（${it['重复率']}）  议题 ${it['议题']}${it['新议题'] ? '（新）' : ''}`);
   }
   await stats();
+  process.exit(0);
+}
+
+// ── 晋升：把够格的条目变成知识库文档（这一步之后才能被问答检索到）──────
+// **默认只试跑**：它是目前唯一会立刻影响母项目检索结果的动作（几百条新闻会去争召回名额）。
+if (has('promote')) {
+  const dry = !has('real');
+  const r = await c.call('POST', '/api/feed/promote',
+    { limit: parseInt(arg('limit', '10'), 10), minTopicItems: parseInt(arg('min-topic', '2'), 10),
+      dryRun: dry }, { token: TOKEN });
+  const d = r.body?.data || {};
+  console.log(`候选 ${d['候选']} · 已晋升 ${d['已晋升']}` + (d['说明'] ? ` · ${d['说明']}` : ''));
+  for (const x of (d['文档'] || []).slice(0, 12)) console.log('   ', String(x).slice(0, 56));
+  await stats();
+  process.exit(0);
+}
+
+// ── 问一句：验"晋升之后真的检索得到"（这条线的出端尺子）──────────────
+if (has('ask')) {
+  const q = arg('ask');
+  const t0 = Date.now();
+  const st = await c.openStream('POST', '/api/chat/stream', { question: q, strategy: 'agent' },
+    { token: TOKEN });
+  let answer = '', sources = [], statsEv = null;
+  await readSse(st.response, (name, raw) => {
+    let d; try { d = JSON.parse(raw); } catch { d = raw; }
+    const dec = st.decrypt(d);
+    if (name === 'answer') answer += String(dec.t ?? '');
+    else if (name === 'stats') statsEv = dec;
+    else if (name === 'done') sources = dec.sources || [];
+  });
+  console.log(`用时 ${((Date.now() - t0) / 1000).toFixed(1)}s　装入 ${statsEv?.promptTokens ?? '（缓存命中）'} tok`);
+  console.log('答：' + answer.split('\n').join(' ').slice(0, 300));
+  console.log('来源：');
+  for (const [i, x] of sources.slice(0, 8).entries()) console.log('   [' + (i + 1) + ']', String(x.docName || x.name || x.title || '').slice(0, 46));
   process.exit(0);
 }
 

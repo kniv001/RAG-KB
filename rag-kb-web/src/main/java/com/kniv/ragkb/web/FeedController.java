@@ -7,6 +7,7 @@ import com.kniv.ragkb.service.feed.FeedCrawler;
 import com.kniv.ragkb.service.feed.FeedEnrichService;
 import com.kniv.ragkb.service.feed.FeedIngestService;
 import com.kniv.ragkb.service.feed.FeedPoller;
+import com.kniv.ragkb.service.feed.FeedPromoteService;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -40,6 +41,7 @@ public class FeedController {
     private final FeedIngestService ingest;
     private final FeedEnrichService enrich;
     private final FeedPoller poller;
+    private final FeedPromoteService promote;
     private final FeedProperties feedProps;
     private final WebProperties webProps;
 
@@ -55,6 +57,7 @@ public class FeedController {
         m.put("可召回", s.recallable());
         m.put("冷存", s.cold());
         m.put("来源数", s.sources());
+        m.put("已晋升为文档", s.promoted());
         m.put("上轮抓取", poller.lastRun());
         return R.ok(m);
     }
@@ -114,6 +117,29 @@ public class FeedController {
         return R.ok(m);
     }
 
+    /**
+     * **晋升**：把够格的信息流条目变成知识库文档（**这一步之后它们才能被问答检索到**）。
+     *
+     * <p>先 {@code dryRun} 看会晋升哪些，再真跑 —— 因为它是**目前唯一会立刻影响
+     * 母项目检索结果**的动作（几百条新闻会去争那几个召回名额）。
+     */
+    @PostMapping("/promote")
+    public R<Map<String, Object>> promote(@RequestBody(required = false) PromoteBody body) {
+        int limit = body != null && body.getLimit() != null ? body.getLimit() : feedProps.getPromoteLimit();
+        int minTopic = body != null && body.getMinTopicItems() != null
+                ? body.getMinTopicItems() : feedProps.getPromoteMinTopicItems();
+        boolean dry = body == null || Boolean.TRUE.equals(body.getDryRun());
+        FeedPromoteService.Result r = promote.promote(limit, minTopic, dry);
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("候选", r.candidates());
+        m.put("已晋升", r.promoted());
+        m.put("文档", r.docIds());
+        if (r.note() != null) {
+            m.put("说明", r.note());
+        }
+        return R.ok(m);
+    }
+
     /** 议题榜（按条目数）——"哪件事在升温"最粗的一个视图。 */
     @GetMapping("/topics")
     public R<List<Map<String, Object>>> topics() {
@@ -156,5 +182,13 @@ public class FeedController {
     @Data
     public static class EnrichBody {
         private Integer limit;
+    }
+
+    @Data
+    public static class PromoteBody {
+        private Integer limit;
+        private Integer minTopicItems;
+        /** 默认 true —— 不显式给 false 就只试跑。**这个默认是刻意的**：它是唯一会立刻改动母项目检索的动作。 */
+        private Boolean dryRun;
     }
 }

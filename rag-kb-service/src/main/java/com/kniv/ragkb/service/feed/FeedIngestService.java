@@ -135,7 +135,7 @@ public class FeedIngestService {
 
     /** 读数。**近重复率是这一支的第一个关键数**：它决定"事件归并层"要不要做、做多细。 */
     public record Stats(long total, long unique, long dup, double dupRate,
-                        long recallable, long cold, long sources) {
+                        long recallable, long cold, long sources, long promoted) {
     }
 
     public Stats stats() {
@@ -145,7 +145,7 @@ public class FeedIngestService {
         return new Stats(total, uniq, dup, total == 0 ? 0 : (double) dup / total,
                 feed.countByStatus(FeedGate.Status.RECALLABLE.code()),
                 feed.countByStatus(FeedGate.Status.COLD.code()),
-                feed.countSources());
+                feed.countSources(), feed.countPromoted());
     }
 
     private Long ensureSource(String domain) {
