@@ -648,6 +648,36 @@ public class AgenticRagService {
      * 规划输出的形状。交给提供方做语法约束，模型便无法产出这个形状之外的任何东西 ——
      * 连「好的，我来帮你拆解」这种开场白都发不出来。
      */
+    /**
+     * **按角度拆**（开关 {@code aspects}，默认关）：把问题拆成"要从哪几个角度回答"，
+     * 每个角度带一个检索查询。
+     *
+     * <p>与 {@link #PLAN_PROMPT} 的区别不是措辞，而是**产物多了一层结构**：
+     * 那个只产出"检索查询"，查询之间是**平权**的，召回来的段落拍成一堆；
+     * 这个产出「角度 + 查询」，于是召回可以**按角度分筐、按筐给名额**。
+     *
+     * <p>为什么这件事重要（2026-09-24 实测）：拍平之后**谁声音大谁占满名额** ——
+     * 问"金价最近怎么样"时，召回 24 段里 7 段是同一件事的新闻、只有 1 段是用户自己的资料。
+     * 按角度分筐，每个角度至少有自己的一份。
+     */
+    private static final String PLAN_ASPECTS_PROMPT = """
+            你是知识库检索规划器。先想清楚：要回答这个问题，需要**从哪几个角度**取信息
+            （比如"是什么/为什么/怎么做/谁说的/什么时候/有什么限制"），再为每个角度写一个检索查询。
+
+            硬性要求：
+            1. **1~3 个角度**，角度之间必须真的不同；问题简单就给 1 个，不要为凑数硬拆。
+            2. 每个查询必须自包含，不能出现「它」「这个」「上面提到的」这类指代。
+            3. 查询用词要贴近资料里可能出现的说法，不要改写成抽象概念。
+            4. 角度名要短（不超过 8 个字），能一眼看出这个角度在问什么。
+            5. 只输出 JSON，不要解释、不要加代码块标记。
+
+            输出格式：{"aspects":[{"name":"角度名","query":"检索查询"},{"name":"角度名","query":"检索查询"}]}""";
+
+    private static final String ASPECTS_SCHEMA = """
+            {"type":"object","properties":{"aspects":{"type":"array","items":{"type":"object",
+            "properties":{"name":{"type":"string"},"query":{"type":"string"}},
+            "required":["name","query"]}}},"required":["aspects"]}""";
+
     private static final String PLAN_SCHEMA = """
             {"type":"object","properties":{"queries":{"type":"array","items":{"type":"string"}}},"required":["queries"]}""";
 
@@ -800,21 +830,33 @@ public class AgenticRagService {
         boolean enough = false;
         // 开关关着 ⇒ 不判定（null ⇒ answerSystem 走原提示词），**一次额外调用都不发**
         String category = null;
+        // **角度分筐**（开关，默认关）：角度 → 它召回的段。见 rankByAspect。
+        Map<String, List<ChunkHit>> byAspect = new LinkedHashMap<>();
         for (round = 1; round <= cfg.getMaxRounds(); round++) {
             // ① 规划
+            List<Aspect> aspects;
+            if (props.getAgent().isAspects()) {
+                aspects = planAspects(ref, question, hist);
+                queries = aspects.stream().map(Aspect::query).toList();
+            } else {
+                aspects = queries.stream().map(q -> new Aspect("", q)).toList();
+            }
             onEvent.accept(AgentEvent.plan(round, queries));
 
             // ② 检索
-            for (String q : queries) {
-                List<ChunkHit> hits = retriever.search(q, mode, docId, cfg.getTopKPerQuery());
+            for (Aspect a : aspects) {
+                List<ChunkHit> hits = retriever.search(a.query(), mode, docId, cfg.getTopKPerQuery());
+                byAspect.computeIfAbsent(a.name(), k -> new ArrayList<>()).addAll(hits);
                 for (ChunkHit h : hits) {
                     collected.putIfAbsent(h.getId(), h);
                 }
-                onEvent.accept(AgentEvent.retrieve(round, q, hits.size(), sourceNames(hits)));
+                onEvent.accept(AgentEvent.retrieve(round, a.query(), hits.size(), sourceNames(hits)));
             }
             tried.addAll(queries);
 
-            List<ChunkHit> contexts = rank(collected.values());
+            List<ChunkHit> contexts = props.getAgent().isAspects()
+                    ? rankByAspect(byAspect, collected)
+                    : rank(collected.values());
 
             // ③ 评估
             Assess assess;
@@ -848,9 +890,11 @@ public class AgenticRagService {
             }
         }
 
-        List<ChunkHit> contexts = rank(collected.values());
-        String answer = answer(ref, question, contexts, hist, category, onEvent);
-        return new AgentResult(answer, contexts, round, tried);
+        List<ChunkHit> finalContexts = props.getAgent().isAspects()
+                ? rankByAspect(byAspect, collected)
+                : rank(collected.values());
+        String answer = answer(ref, question, finalContexts, hist, category, onEvent);
+        return new AgentResult(answer, finalContexts, round, tried);
     }
 
     // ---------------- 经典单轮模式（对照与降级） ----------------
@@ -942,6 +986,27 @@ public class AgenticRagService {
 
     private List<String> plan(ProviderRegistry.Ref ref, String question, String missing,
                               List<String> tried, HistoryContext hist) {
+        try {
+            String reply = json(ref, PLAN_PROMPT, planUser(question, missing, tried, hist), 0.2,
+                    PLAN_SCHEMA);
+            JsonNode node = JsonExtract.parseObject(mapper, reply);
+            List<String> queries = JsonExtract.stringArray(node, "queries", props.getAgent().getQueriesPerRound());
+            if (!queries.isEmpty()) {
+                return queries;
+            }
+            log.warn("规划未产出可解析的查询，降级为直接用原问题。模型输出片段：{}", truncate(reply));
+        } catch (Exception e) {
+            log.warn("规划失败，降级为直接用原问题：{}", e.getMessage());
+        }
+        return List.of(question);
+    }
+
+    /**
+     * 规划用的 user 消息。**两个规划器（查询 / 角度）共用一份** ——
+     * 它承载的是"追问要能解指代"这件事（对话背景三层 + 最近几轮），
+     * 复制两份必然有一天只改了一处，而症状是"某一类追问检索跑偏"。
+     */
+    private String planUser(String question, String missing, List<String> tried, HistoryContext hist) {
         StringBuilder user = new StringBuilder();
         List<ChatMessage> history = hist.turns();
         // 三层按可靠性递减排列：摘要在最前（最粗），原文在最后（最准）。
@@ -971,18 +1036,46 @@ public class AgenticRagService {
                     .append(String.join("、", tried));
         }
 
+        return user.toString();
+    }
+
+    /** 一个角度：名字（给人看/给日志看）+ 它的检索查询。 */
+    public record Aspect(String name, String query) {
+    }
+
+    /**
+     * 按角度拆。**任何一步失败都退回"把原问题当一个角度"** —— 与规划器同一条规矩：
+     * 规划只是优化，不能因为它的失败让整次问答失败。
+     */
+    private List<Aspect> planAspects(ProviderRegistry.Ref ref, String question,
+                                     HistoryContext hist) {
         try {
-            String reply = json(ref, PLAN_PROMPT, user.toString(), 0.2, PLAN_SCHEMA);
+            String reply = json(ref, PLAN_ASPECTS_PROMPT, planUser(question, null, null, hist), 0.2,
+                    ASPECTS_SCHEMA);
             JsonNode node = JsonExtract.parseObject(mapper, reply);
-            List<String> queries = JsonExtract.stringArray(node, "queries", props.getAgent().getQueriesPerRound());
-            if (!queries.isEmpty()) {
-                return queries;
+            JsonNode arr = node == null ? null : node.get("aspects");
+            if (arr != null && arr.isArray()) {
+                List<Aspect> out = new ArrayList<>();
+                for (JsonNode a : arr) {
+                    String q = a.path("query").asText("").strip();
+                    if (q.isEmpty()) {
+                        continue;
+                    }
+                    String name = a.path("name").asText("").strip();
+                    out.add(new Aspect(name.isEmpty() ? q : name, q));
+                    if (out.size() >= props.getAgent().getQueriesPerRound()) {
+                        break;
+                    }
+                }
+                if (!out.isEmpty()) {
+                    return out;
+                }
             }
-            log.warn("规划未产出可解析的查询，降级为直接用原问题。模型输出片段：{}", truncate(reply));
+            log.warn("角度规划没产出可解析的 angles，降级为单个角度。输出片段：{}", truncate(reply));
         } catch (Exception e) {
-            log.warn("规划失败，降级为直接用原问题：{}", e.getMessage());
+            log.warn("角度规划失败，降级为单个角度：{}", e.getMessage());
         }
-        return List.of(question);
+        return List.of(new Aspect("整体", question));
     }
 
     private record Assess(boolean enough, String reason, String missing) {
@@ -1434,7 +1527,88 @@ public class AgenticRagService {
                 .thenComparing(h -> h.getDistance() == null ? 0.0 : h.getDistance())
                 .thenComparing(h -> h.getHits() == null ? 0 : -h.getHits()));
         int cap = props.getAgent().getMaxContexts();
-        return list.size() > cap ? new ArrayList<>(list.subList(0, cap)) : list;
+        List<ChunkHit> out = list.size() > cap ? new ArrayList<>(list.subList(0, cap)) : list;
+        // **这条日志是"挤占"的读数**，与 rankByAspect 里那条同格式 ——
+        // 两条路都报"几段 / 几篇文档"，才比得出"分筐"到底有没有把名额摊开。
+        // 不记的话只能看最终答案好不好，而答案好不好有一半是生成那边的功劳。
+        long docs = out.stream().map(ChunkHit::getDocId).filter(java.util.Objects::nonNull)
+                .distinct().count();
+        log.info("拍平装配：{} 段 / {} 篇文档", out.size(), docs);
+        return out;
+    }
+
+    /**
+     * **按角度分筐装配**（开关 {@code aspects} 打开时走这里，见 PLAN_ASPECTS_PROMPT）。
+     *
+     * <p>规则只有三条，刻意保持机械（**没有一处模型判断**，所以可复现、可解释）：
+     * <ol>
+     *   <li><b>先按筐分名额</b>：{@code maxContexts} 个段位在角度之间平分，余数给靠前的角度。
+     *       筐内按原有排序（距离 + 命中查询数）取；</li>
+     *   <li><b>跨筐不重复</b>：一个段已经在别的筐里被取了，这个筐就跳过它
+     *       （同一段被多个角度命中是常事，重复装进去等于白占名额）；</li>
+     *   <li><b>余位回填</b>：某些筐不够（召回本来就少）时，空出来的段位由**全局**最好的段补上 ——
+     *       否则"按角度分"会变成"为了公平白白浪费名额"。</li>
+     * </ol>
+     *
+     * <p>为什么要有它（2026-09-24 实测）：拍平成一堆之后**谁的声音大谁占满名额** ——
+     * 问"金价最近怎么样"时召回里 7 段是同一件事的新闻、只有 1 段是用户自己的资料。
+     * 分筐之后每个角度至少有自己的位置，同一件事的重复表述挤不掉别的角度。
+     */
+    private List<ChunkHit> rankByAspect(Map<String, List<ChunkHit>> byAspect,
+                                        Map<Long, ChunkHit> collected) {
+        int cap = props.getAgent().getMaxContexts();
+        List<String> names = new ArrayList<>(byAspect.keySet());
+        if (names.isEmpty() || cap <= 0) {
+            return rank(collected.values());
+        }
+        int base = Math.max(1, cap / names.size());
+        int extra = cap - base * names.size();      // 余数给靠前的角度
+
+        List<ChunkHit> out = new ArrayList<>();
+        Set<Long> taken = new HashSet<>();
+        List<int[]> fill = new ArrayList<>();       // [筐序号, 拿了几个]（给日志用）
+        List<String> notes = new ArrayList<>();
+        for (int i = 0; i < names.size(); i++) {
+            int quota = base + (i < extra ? 1 : 0);
+            List<ChunkHit> bucket = new ArrayList<>(byAspect.get(names.get(i)));
+            bucket.sort(Comparator
+                    .comparing((ChunkHit h) -> h.getDistance() == null ? 1 : 0)
+                    .thenComparing(h -> h.getDistance() == null ? 0.0 : h.getDistance())
+                    .thenComparing(h -> h.getHits() == null ? 0 : -h.getHits()));
+            int n = 0;
+            for (ChunkHit h : bucket) {
+                if (n >= quota || out.size() >= cap) {
+                    break;
+                }
+                if (h.getId() != null && !taken.add(h.getId())) {
+                    continue;       // 已经在别的筐里取过
+                }
+                out.add(h);
+                n++;
+            }
+            fill.add(new int[]{i, n});
+            notes.add((names.get(i).isEmpty() ? "（未命名）" : names.get(i)) + " " + n);
+        }
+        // 余位回填：全局排序补齐（多数是"某些角度召回少"造成的空位）
+        if (out.size() < cap) {
+            for (ChunkHit h : rank(collected.values())) {
+                if (out.size() >= cap) {
+                    break;
+                }
+                if (h.getId() != null && !taken.add(h.getId())) {
+                    continue;
+                }
+                out.add(h);
+            }
+        }
+        // **覆盖率必须记**：这一层要回答的问题是"每个角度是否都拿到了自己的料"，
+        // 不记的话只能看最终答案好不好，而那是下一个环节的事。
+        long docs = out.stream().map(ChunkHit::getDocId).filter(java.util.Objects::nonNull)
+                .distinct().count();
+        log.info("角度装配：{} 段 / {} 篇文档（最后回填 {} 段）｜{}",
+                out.size(), docs, out.size() - fill.stream().mapToInt(x -> x[1]).sum(),
+                String.join(" · ", notes));
+        return out;
     }
 
     private List<String> sourceNames(List<ChunkHit> hits) {

@@ -16,6 +16,7 @@ import json
 import os
 import re
 import sys
+from collections import Counter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOLS = os.path.dirname(HERE)
@@ -221,6 +222,31 @@ def score(bench_name, model, paths=None, quiet=False, tag=""):
         if len(st) < len(first["results"]):
             print(f"  ⚠ 只有 {len(st)}/{len(first['results'])} 题带 token 数（其余是**缓存命中**，"
                   f"上面的数只对真跑的那几题成立）")
+    # ── 召回摊开度（2026-09-24 加）────────────────────────────────────────
+    #
+    # **为什么必须有这个视图**：2026-09-24 量到"拍平召回"的形状 —— 一题召回涉及的
+    # **不同文档数中位只有 2 篇**、而**单篇最大占比中位 56%**。也就是说一半以上的名额
+    # 被同一篇文档占着，同一件事的多种表述会把别的角度挤掉。
+    #
+    # 而"答案好不好"看不见这件事：答案可能依然漂亮，只是它只用了库里的一个角落。
+    # 所以单列一列 **摊开度**：不同文档数 + 单篇最大占比（两者一起看 ——
+    # 只看文档数会被"多召了几段无关的"骗过去）。
+    srcs = [r.get("sources") or [] for r in first["results"]]
+    docs_n, max_share = [], []
+    for src in srcs:
+        ids = [x.get("docId") for x in src if x.get("docId")]
+        if not ids:
+            continue
+        c = Counter(ids)
+        docs_n.append(len(c))
+        max_share.append(max(c.values()) / len(ids))
+    if docs_n:
+        m = len(docs_n) // 2
+        print("\n  召回摊开度：不同文档 中位 " + str(sorted(docs_n)[m]) + " 篇"
+              f"（{min(docs_n)}~{max(docs_n)}）"
+              f"　单篇最大占比 中位 {100*sorted(max_share)[len(max_share)//2]:.0f}%")
+        print("  （单篇占比高 = 同一个来源把名额占住了；分筐那类改动就是冲着它去的）")
+
     # ── 判据命中率（只有多次运行时才给）──────────────────────────────────
     #
     # **为什么必须有这个视图**：2026-09-22 发现答案侧基准已经**饱和** ——

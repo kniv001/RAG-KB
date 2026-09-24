@@ -74,6 +74,7 @@ function Reset-Prod {
     # 生产留在**旧路**上 —— 与下面 KB_CONTRACT_IN_CODE 那条是同一个坑。
     $env:KB_SENT_WINDOW = 'true'
     $env:KB_JEV_PICK = 'false'
+    $env:KB_ASPECTS = 'false'
     # 逐块挑句：**0 = 生产默认（走全局 top-20）**，转正后这里要跟着改成新的 k。
     $env:KB_SENT_CHUNK_K = '0'
     # ⚠️ **这个按"当前默认"复位，不是按 false** —— 2026-09-22 起契约进代码是**默认开**的，
