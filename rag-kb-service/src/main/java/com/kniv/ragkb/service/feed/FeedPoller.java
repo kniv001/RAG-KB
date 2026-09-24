@@ -109,10 +109,19 @@ public class FeedPoller {
                 // 那些更旧的条目**永远落在锚点之下、再也抓不到**，而且完全不报错。
                 // 升序取则天然不会漏：处理到哪，锚点就走到哪，下一轮从那儿接着走。
                 // 代价是突发时先处理稍旧的（而 5 频道 × 10 条/轮 的吞吐，积压几轮就追平）。
+                // **冷启动取最新、之后按序补齐**：
+                //  · 首轮（没见过任何条目）：取**最新**的一批 —— 否则新源会先啃几个月的积压，
+                //    而"最新政策什么时候进得来"是接手一个源时最要紧的事（实测踩过：
+                //    gov.cn 的 60 条积压按升序啃，前三轮进来的全是 4 月的旧政策、被闸判了冷存）；
+                //  · 之后：按**时间升序**，锚点只前进，绝不漏（见下）。
+                boolean firstTime = seen == null;
                 List<FeedRss.Entry> candidates = entries.stream()
                         .filter(e -> seen == null || (e.publishedAt() != null && e.publishedAt().isAfter(seen)))
-                        .sorted(Comparator.comparing(FeedRss.Entry::publishedAt,
-                                Comparator.nullsLast(Comparator.naturalOrder())))
+                        .sorted(firstTime
+                                ? Comparator.comparing(FeedRss.Entry::publishedAt,
+                                        Comparator.nullsLast(Comparator.reverseOrder()))
+                                : Comparator.comparing(FeedRss.Entry::publishedAt,
+                                        Comparator.nullsLast(Comparator.naturalOrder())))
                         .toList();
                 // **抓之前先查 URL 知不知道** —— 一条 HTTP 换一次查库，很划算；
                 // 而且这是"取回同一条又抓一遍"的唯一防线（feed 会连着几轮都给出同一个链接）。
@@ -122,7 +131,8 @@ public class FeedPoller {
                         .toList();
 
                 int added = 0;
-                int skipped = candidates.size() - fresh.size();
+                int known = (int) candidates.stream().filter(e -> feed.idByUrl(e.link()) != null).count();
+                int skipped = known;
                 Instant newest = seen;
                 for (FeedRss.Entry e : fresh) {
                     if (budget <= 0) {
@@ -141,9 +151,16 @@ public class FeedPoller {
                     }
                 }
                 // 升序取 ⇒ 锚点就是"取到的最新一条"，只朝前走，不会漏。
-                feed.markChannelFetched(id, newest == null ? null
-                        : OffsetDateTime.ofInstant(newest, ZoneId.systemDefault()), added);
-                int left = Math.max(0, candidates.size() - skipped - fresh.size());
+                // ⚠️ **首轮例外：不写锚点**。首轮取的是最新那批（见上），如果顺手把锚点推到最新，
+                // 中间那些更旧的条目就**永远落在锚点之下**、再也补不进来 —— 这正是"锚点只前进"
+                // 这条规矩要防的事，只不过冷启动时更容易撞上。留 NULL ⇒ 下一轮从头按升序补齐。
+                if (!firstTime) {
+                    feed.markChannelFetched(id, newest == null ? null
+                            : OffsetDateTime.ofInstant(newest, ZoneId.systemDefault()), added);
+                } else {
+                    feed.markChannelFetched(id, null, added);
+                }
+                int left = Math.max(0, candidates.size() - known - fresh.size());
                 channels++;
                 notes.add(label + "：" + entries.size() + " 条 · 待抓 " + candidates.size()
                         + "（已知 " + skipped + "、本轮上限外 " + left + "）· 入库 " + added);

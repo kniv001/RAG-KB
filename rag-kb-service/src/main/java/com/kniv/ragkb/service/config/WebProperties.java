@@ -36,6 +36,20 @@ public class WebProperties {
      */
     private List<String> backends = List.of("so360", "bing");
 
+    /**
+     * **抓取路径的额外 CA**（classpath 资源名，逗号分隔）。
+     *
+     * <p>为什么需要：中文站点有一大批用 **CFCA** 签证书，而 JDK 的 cacerts 里一条都没有
+     * ⇒ Java 侧一律 PKIX 失败（curl/浏览器读的是 Windows 证书库，所以能过）。
+     * 这类 CA 只影响**抓取**，所以不导入 JDK 信任库（那会影响这台机器上所有 JVM 程序），
+     * 只挂在抓取用的 HttpClient 上，见 {@code FetchHttp}。
+     *
+     * <p>⚠️ **必须按名列出**，不能"扫目录"：跑的是 fat jar，classpath 目录是 {@code jar:} 协议、
+     * **列举不出内容**。第一版就是只写了目录列举，于是 jar 里那张 CFCA 证书**静默没被加载**，
+     * 而日志还打了一句"没有额外 CA，只用 JDK 默认（这不会有任何副作用）" —— 看着一切正常。
+     */
+    private List<String> extraCa = List.of("certs/cfca-ev-root.cer");
+
     /** 抓取时伪装的 UA。用默认的 Java UA 很多站点会直接拒绝 */
     private String userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             + "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";

@@ -68,6 +68,19 @@ public final class FeedJson {
             out.add(new FeedRss.Entry(title == null ? "" : title.strip(),
                     link.strip(), FeedRss.parseTime(text(n, dateKey))));
         }
+        // **必须留下这条**：接口"取到了但一条都用不上"时，症状与"这个源没新闻"一模一样，
+        // 而两者的处置完全不同（前者是映射配错了）。第一版就是只返回空列表，
+        // 于是 gov.cn 显示成"feed 空"，看起来像源头没内容 —— 实际是字段名对不上。
+        if (out.isEmpty() && !arr.isEmpty()) {
+            java.util.List<String> keys = new java.util.ArrayList<>();
+            arr.get(0).fieldNames().forEachRemaining(keys::add);
+            log.warn("JSON 接口取到 {} 条，但按映射（title={} link={} date={}）一条都用不上；"
+                            + "第一条实际的字段是 {}",
+                    arr.size(), titleKey, linkKey, dateKey, keys);
+        } else {
+            log.info("JSON 接口：数组 {} 条 → 可用 {} 条（title={} link={} date={}）",
+                    arr.size(), out.size(), titleKey, linkKey, dateKey);
+        }
         return out;
     }
 

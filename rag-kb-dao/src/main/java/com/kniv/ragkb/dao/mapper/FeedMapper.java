@@ -101,12 +101,20 @@ public interface FeedMapper extends BaseMapper<FeedItem> {
      * 一轮的抓取预算有限时，先保证层级高的源被覆盖。
      * {@code NULLS FIRST} 让没抓过的排在抓过的前面（冷启动先铺满）。
      */
-    @Select("SELECT c.id, c.url, c.label, c.kind, c.array_path AS arrayPath, c.f_title AS fTitle, "
-            + "c.f_link AS fLink, c.f_date AS fDate, c.source_id AS sourceId, "
-            + "c.last_item_at AS lastItemAt, s.domain, s.tier "
-            + "FROM feed_channels c JOIN feed_sources s ON s.id = c.source_id "
-            + "WHERE c.enabled AND s.tier <= #{tierMax} "
-            + "ORDER BY s.tier ASC, c.last_fetch ASC NULLS FIRST")
+    // ⚠️ **别名必须加双引号** —— PostgreSQL 把未加引号的别名折成小写（`AS fTitle` → `ftitle`），
+    // 而 MyBatis 的 map 键就是**结果集里的名字**，于是 Java 侧 `get("fTitle")` 永远拿到 null。
+    // 症状极隐蔽：映射变成空串 ⇒ 条目全被丢掉 ⇒ 报"feed 空"（看起来像源头没新闻）。
+    // **同一个坑本项目已踩两次**（前一次是 FeedIndexMapper 的 `itemN`）——
+    // 凡是从 map 里按驼峰名取值，SQL 别名就一律加引号。
+    @Select("""
+            SELECT c.id, c.url, c.label, c.kind, c.array_path AS "arrayPath",
+                   c.f_title AS "fTitle", c.f_link AS "fLink", c.f_date AS "fDate",
+                   c.source_id AS "sourceId", c.last_item_at AS "lastItemAt",
+                   s.domain, s.tier
+            FROM feed_channels c JOIN feed_sources s ON s.id = c.source_id 
+            WHERE c.enabled AND s.tier <= #{tierMax}
+            ORDER BY s.tier ASC, c.last_fetch ASC NULLS FIRST
+            """)
     List<java.util.Map<String, Object>> pollableChannels(@Param("tierMax") int tierMax);
 
     @Update("UPDATE feed_channels SET last_fetch = now(), last_item_at = "

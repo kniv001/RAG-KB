@@ -284,22 +284,16 @@ public class WebSearchService {
         requireEnabled();
         assertPublicHost(url);
         try {
-            org.jsoup.Connection.Response res = Jsoup.connect(url)
-                    .userAgent(props.getUserAgent())
-                    .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-                    .timeout(props.getTimeoutSeconds() * 1000)
-                    .maxBodySize(props.getMaxPageBytes())
-                    .followRedirects(true)
-                    // RSS 的 Content-Type 不是 HTML，这一条不放开会直接被 jsoup 拒掉
-                    .ignoreContentType(true)
-                    .ignoreHttpErrors(false)
-                    .execute();
-            String finalUrl = res.url().toString();
-            if (!finalUrl.equals(url)) {
-                assertPublicHost(finalUrl);      // 重定向之后**再查一次**
+            FetchHttp.configure(props.getExtraCa());
+            FetchHttp.Result res = FetchHttp.get(url, props.getUserAgent(),
+                    props.getTimeoutSeconds(), props.getMaxPageBytes());
+            if (!res.finalUrl().equals(url)) {
+                assertPublicHost(res.finalUrl());      // 重定向之后**再查一次**
             }
             return res.body();
         } catch (IOException e) {
+            throw new IllegalStateException("抓取失败：" + e.getMessage(), e);
+        } catch (Exception e) {
             throw new IllegalStateException("抓取失败：" + e.getMessage(), e);
         }
     }
@@ -319,15 +313,25 @@ public class WebSearchService {
 
     // ---------------- 内部 ----------------
 
+    /**
+     * 抓 HTML 并解析成 DOM。
+     *
+     * <p>HTTP 那一步走 {@link FetchHttp}（自带"JDK 默认 ∪ certs/ 里的额外 CA"）而不是
+     * {@code Jsoup.connect} —— 后者用 {@code HttpsURLConnection}，SSLSocketFactory 只能全局设，
+     * 而我们需要的是**只影响抓取路径**的信任面（见 FetchHttp 的类注释）。
+     * jsoup 仍然负责解析：**编码按页面的 meta 判定**，比响应头靠谱（中文站常写错）。
+     */
     private Document fetchDocument(String url) throws IOException {
-        return Jsoup.connect(url)
-                .userAgent(props.getUserAgent())
-                .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-                .timeout(props.getTimeoutSeconds() * 1000)
-                .maxBodySize(props.getMaxPageBytes())
-                .followRedirects(true)
-                .ignoreContentType(false)   // 非 HTML 的直接失败，别把二进制当文本读
-                .get();
+        try {
+            FetchHttp.configure(props.getExtraCa());
+            FetchHttp.Result r = FetchHttp.get(url, props.getUserAgent(),
+                    props.getTimeoutSeconds(), props.getMaxPageBytes());
+            return Jsoup.parse(r.body(), r.finalUrl());
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException(e.getMessage(), e);
+        }
     }
 
     /**

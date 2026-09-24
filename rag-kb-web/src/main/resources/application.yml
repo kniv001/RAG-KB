@@ -70,7 +70,9 @@ ragkb:
     poll-initial-delay-ms: ${KB_FEED_POLL_INITIAL_MS:120000} # 起来 2 分钟后先跑一轮
     # **分层推进**：只抓 tier ≤ 这个值的源。默认 1 = 只抓国家级。
     # 先把国家级跑顺（最干净、最可核对），再放开门户(2)与垂媒(3)。
-    tier-max: ${KB_FEED_TIER_MAX:1}
+    # 2 = 国家级 + 门户/垂媒。2026-09-24 实测后放到 2：国家级只有中新社一家还在供货，
+    # 门户层也只有界面新闻一家（新浪 RSS 停在 2018 年、网易/搜狐/澎湃/环球全空）。
+    tier-max: ${KB_FEED_TIER_MAX:2}
     max-per-run: ${KB_FEED_MAX_PER_RUN:40}
     per-channel-max: ${KB_FEED_PER_CHANNEL:10}
 

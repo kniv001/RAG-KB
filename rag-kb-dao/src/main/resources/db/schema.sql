@@ -535,6 +535,23 @@ SELECT id, 'https://www.gov.cn/pushinfo/v150203/pushinfo.json', '政策推送', 
   FROM feed_sources WHERE domain = 'gov.cn'
 ON CONFLICT (url) DO NOTHING;
 
+-- **界面新闻**（tier 2 门户/财经垂媒）：RSS 是活的（30 条、pubDate 当天）。
+-- 门户层的实测结果同样惨：新浪 RSS 停在 **2018 年**、网易/搜狐/澎湃/环球的 RSS 全是空响应
+-- ⇒ **门户层目前只有这一家可用**（2026-09-24 实测）。
+INSERT INTO feed_sources (domain, label, tier) VALUES ('jiemian.com', '界面新闻', 2)
+ON CONFLICT (domain) DO UPDATE SET tier = EXCLUDED.tier, label = EXCLUDED.label;
+
+INSERT INTO feed_channels (source_id, url, label)
+SELECT id, 'https://a.jiemian.com/index.php?m=article&a=rss', '要闻', true
+  FROM feed_sources WHERE domain = 'jiemian.com'
+ON CONFLICT (url) DO NOTHING;
+
+-- 中新网还有几个栏目是活的（要闻/国内/国际/财经/社会之外）
+INSERT INTO feed_channels (source_id, url, label)
+SELECT id, 'https://www.chinanews.com.cn/rss/importnews.xml', '要闻·补充', true
+  FROM feed_sources WHERE domain = 'chinanews.com.cn'
+ON CONFLICT (url) DO NOTHING;
+
 -- 僵尸 feed：收进来但关掉，并把原因写进 last_error
 INSERT INTO feed_channels (source_id, url, label, enabled, last_error)
 SELECT id, 'http://www.people.com.cn/rss/politics.xml', '人民网·政治', false,
