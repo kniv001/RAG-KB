@@ -81,6 +81,14 @@ function Reset-Prod {
     # 硬写 false 会让每次实验结束都把生产留在**旧路**上（正是本脚本第一段防的那种残留）。
     # 复位 = 回到生产真实默认，不是回到 false。
     $env:KB_CONTRACT_IN_CODE = 'true'
+    # ⚠️ **结构性修复（2026-09-24）**：把**本次实验用的那个开关删掉**，让它回到 yml 默认。
+    #
+    # 为什么必须有这条：上面那张清单是**手工维护**的，必须与"本次传了什么开关"保持同步 ——
+    # 而 2026-09-24 跑 `-Switch KB_TOP_K` 时清单里没有它，于是**生产被留在 top-k=24 上**
+    # （实测装入 token 3206 → 6694，翻倍，而没有任何报错）。这正是本脚本开头那段
+    # 「实验脚本不该改变生产行为」防的事，只是这次漏在了"清单不全"上。
+    # 删掉变量比"再补一行"可靠：**清单要么别维护、要么就得维护全**，而后者靠人记。
+    Remove-Item -Path "Env:$Switch" -ErrorAction SilentlyContinue
     Start-Process -FilePath $java -ArgumentList '-jar', $jar `
         -WorkingDirectory $repo -WindowStyle Hidden
     Start-Sleep -Seconds 25
