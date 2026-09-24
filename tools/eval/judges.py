@@ -502,6 +502,13 @@ def judge(kind, answer, sources, question, cites=None):
         r["标注了通用知识"] = marks_general(answer)
     elif kind == "chitchat":                    # 【甲】与知识库无关
         r["没误报「知识库没有」"] = not declares_missing(answer)
+    elif kind == "capability":                  # 【甲·自身能力】问助手/知识库自己
+        # **为什么单列一类**（2026-09-24 实测）：问「你能帮我做什么」时，
+        # 模型去检索"AI 助手功能"、检索不到，于是正确地说了"知识库中没有" ——
+        # **它没错，是契约没给这一类出口**。而它的判据与 chitchat 同形
+        # （唯一的失败模式就是误报"没有"），所以判据可以复用，只是**题型要分开记**：
+        # 混进 chitchat 会让"闲聊答得好不好"与"能力类答得对不对"挤进同一个数字。
+        r["没误报「知识库没有」"] = not declares_missing(answer)
     return r
 
 
@@ -532,4 +539,7 @@ PASS = {
     "grounded-partial": ["走对了出口", "无标签泄漏", "没抄提示词", "没整段照抄"],
     "ungrounded": ["声明了没有", "标注了通用知识", "无标签泄漏", "没抄提示词"],
     "chitchat": ["没误报「知识库没有」", "无标签泄漏", "没抄提示词"],
+    # 【甲·自身能力】：唯一的失败模式与 chitchat 同形（误报"知识库没有"），
+    # 但分开记 —— 见上面 capability 分支的注释。
+    "capability": ["没误报「知识库没有」", "无标签泄漏", "没抄提示词"],
 }

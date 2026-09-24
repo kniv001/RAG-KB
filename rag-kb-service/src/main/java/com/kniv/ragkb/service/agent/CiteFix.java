@@ -40,11 +40,30 @@ import java.util.regex.Pattern;
  */
 final class CiteFix {
 
-    /** 引用的最长可能长度（`[12.34]` 才 7 个字符，留足余量）。 */
-    private static final int MAX = 12;
+    /**
+     * 引用的最长可能长度。
+     *
+     * <p>一开始取 12（`[12.34]` 才 7 个字符，够用）。2026-09-24 实测撞到**连号引用**
+     * `[1,2,3,4,5]`（11 个字符，刚好压线）—— 而更长的连号会被当成"不是引用"原样放出去。
+     * 所以放到 24：代价只是"最多多攒 24 个字符才决定要不要放"，而放出去的那一支
+     * 本来就是原样输出（不会吞字）。
+     */
+    private static final int MAX = 24;
 
     /** 句子级：`[4.3]` / `⟨4.3⟩` / `[4．3]`（全角点）。 */
     private static final Pattern SENT = Pattern.compile("[\\[⟨]\\s*(\\d{1,2})\\s*[.．]\\s*(\\d{1,2})\\s*[\\]⟩]");
+
+    /**
+     * **连号引用**：`[1,2,3]` / `[1、2]` / `[1，2，3]` —— 模型一次把几个来源列在一起。
+     *
+     * <p>2026-09-24 实测：一条**完全正确**的答案写成 `习近平于…抵达华盛顿 [1,2,3,4,5]`，
+     * 而判据正则 {@code \[(\d{1,2})\]} 认不出这种写法 ⇒ **好答案被判成"缺引用"**。
+     * 这与 `[4.3]`（句子级引用）是**同一件事的第二次**：模型写了契约之外的引用变体。
+     *
+     * <p>处理方式照旧 —— **在出口收敛**：展开成 `[1][2][3]`，判据、前端、历史数字一概不动。
+     */
+    private static final Pattern LIST =
+            Pattern.compile("[\\[⟨]\\s*(\\d{1,2}(?:\\s*[,，、]\\s*\\d{1,2})+)\\s*[\\]⟩]");
 
     private final StringBuilder hold = new StringBuilder();
     /** 每条 {段号, 句号, **在正文里的偏移**} —— 偏移是给判据用的：
@@ -97,6 +116,19 @@ final class CiteFix {
     }
 
     private String resolve(String raw) {
+        // **先试连号**（`[1,2,3]`）：它比句子级更常见于"一句话有几个出处"的写法，
+        // 而且它的形态（逗号分隔的数字）不会被 SENT 误匹配，两者的顺序无碍 —— 只是为了读起来清楚。
+        Matcher l = LIST.matcher(raw);
+        if (l.matches()) {
+            StringBuilder b = new StringBuilder();
+            for (String piece : l.group(1).split("[,，、]")) {
+                String t = piece.strip();
+                if (!t.isEmpty()) {
+                    b.append('[').append(t).append(']');
+                }
+            }
+            return b.length() == 0 ? raw : b.toString();
+        }
         Matcher m = SENT.matcher(raw);
         if (!m.matches()) {
             return raw;                      // 不是句子级引用 ⇒ 原样（块级 [n] 也走这里）
