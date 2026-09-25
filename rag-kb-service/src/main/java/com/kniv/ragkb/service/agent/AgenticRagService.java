@@ -1187,6 +1187,10 @@ public class AgenticRagService {
                     b.append(s.getText()).append('\n');
                 }
                 ctxTexts.add(b.toString());
+                // **顺手把它挂到命中上**（2026-09-25）—— 出到 SSE 的 sources 里，
+                // 判据才知道"模型到底看到了哪些字"。不挂的话判据只能拿整块比，
+                // 实测会多报 36% 的"该引没引"（4/11 是模型从没见过那个值）。见 ChunkHit#injected
+                h.setInjected(b.toString());
             } else {
                 ctxTexts.add(h.getContent());
             }
@@ -1538,6 +1542,16 @@ public class AgenticRagService {
         m.put("seq", h.getSeq());
         m.put("distance", h.getDistance());
         m.put("score", h.getScore());
+        // 这里带上 injected 是**为了完整性**：缓存行里存下"那一次到底注入了什么"。
+        // ⚠️ 实测澄清（2026-09-25，本来以为回放要靠它）：**回放路径并不读这一列** ——
+        // 命中缓存时 `AgentResult.sources` 仍来自**本次**检索的 ChunkHit
+        //（检索在缓存检查之前就跑完了，而答案键里含 sentKey ⇒ 选句与当初一致，
+        // 所以 injected 也是同一份）。也就是说这列目前**没人消费** ——
+        // "没人消费的字段等于不存在"那条教训的又一例；留着是因为它有审计价值
+        //（将来要回答"那次到底给模型看了什么"，只有这里记得住）。
+        if (h.getInjected() != null && !h.getInjected().isBlank()) {
+            m.put("injected", h.getInjected());
+        }
         return m;
     }
 

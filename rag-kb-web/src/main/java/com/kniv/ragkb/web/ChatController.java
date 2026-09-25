@@ -169,6 +169,12 @@ public class ChatController {
             m.put("hits", h.getHits());
             m.put("preview", h.getContent() == null ? "" :
                     h.getContent().substring(0, Math.min(200, h.getContent().length())));
+            // **这一次实际注入的字**（分层注入时是块内挑中的那几句）—— 见 ChunkHit#injected。
+            // 出口带上它，判据/前端才知道"模型看到的是哪一段"，而不是拿整块去猜。
+            // 刻意**不写进 messages 表**（那是给 UI 回显来源用的，没必要为它把每行撑大 2KB）。
+            if (h.getInjected() != null && !h.getInjected().isBlank()) {
+                m.put("injected", h.getInjected());
+            }
             out.add(m);
         }
         return out;

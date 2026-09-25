@@ -284,10 +284,16 @@ def _values(clause):
 
 
 def _source_texts(sources):
-    """召回来源 → {编号: 去掉空白的正文}（找不到正文就退回 preview）。"""
+    """召回来源 → {编号: **模型真看到的那些字**}（去掉空白）。
+
+    **优先级：`injected` > 块正文**（2026-09-25 加）。分层注入只把块里挑中的几句给模型，
+    拿整块去比会**多报**"该引没引"——实测 14 题里多报 4/11（那 4 个值模型从没见过）。
+    仪器必须比的是"它看到了什么"，不是"库里有什么"。
+    （`injected` 由出口带上来，见 `ChunkHit#injected`；老落盘结果没有这一项，会退回块正文。）
+    """
     texts = {}
     for i, s in enumerate(sources or [], 1):
-        t = s.get("_full")
+        t = s.get("injected") or s.get("_full")
         if t is None:
             try:
                 import os
@@ -312,7 +318,7 @@ def citation_local(answer, sources, min_len=6):
     """
     texts = _source_texts(sources)
     checked, bad = 0, []
-    for m in _CLAUSE.finditer(answer or ""):
+    for m in _CLAUSE.finditer(_attach_cites(answer)):
         clause = m.group(0)
         ids = [int(x) for x in re.findall(r"\[(\d{1,2})\]", clause)]
         vals = _values(clause)
@@ -338,6 +344,19 @@ def citation_local(answer, sources, min_len=6):
 # ⚠️ **只报数、不当判据**（第一版刻意如此）：数字撞车是常见现象（年份、序号、
 # 短数字），把它做成硬判据会凭空造失败。先量它在真实答案上的分布，再谈要不要升级。
 _CLAUSE_ANY = re.compile(r"[^。；;\n]+")
+
+# **引用标在句号之后**：`…9月25日。[2][8]` ⇒ `…9月25日[2][8]。`
+# 为什么（2026-09-25 实测）：中文答案常把出处标在**句末句号之后**，而子句是按标点切的，
+# 于是那半句变成"有值、没引用"的样子 —— **两个判据各错一边**：
+#   · `uncited_values` **多报**"该引没引"（其实标了；实测 nl-g5 就是这么来的）
+#   · `citation_local` **漏检**（它只查句内带引用的子句 ⇒ 这半句从来没被查过）
+# 实测 1355 条答案里 **62 条（5%）** 有这个形态。挪一下位置，两边同时归位。
+_TRAIL_CITE = re.compile(r"([。；;])([ \t]*)((?:\[\d{1,2}\])+)")
+
+
+def _attach_cites(answer):
+    """把跟在标点**之后**的引用挪到标点**之前**（见 `_TRAIL_CITE`）。"""
+    return _TRAIL_CITE.sub(lambda m: m.group(3) + m.group(1), answer or "")
 
 # **这一半必须比 `_VALUE` 更严** —— 两轮实测定下来的（2026-09-25，1327 条真实答案）：
 #   第一版直接复用 `_values`（它允许"≥2 位的裸数字"）⇒ 324 条命中，误伤成灾：
@@ -369,7 +388,7 @@ def uncited_values(answer, sources):
     """
     texts = _source_texts(sources)
     out = []
-    for m in _CLAUSE_ANY.finditer(answer or ""):
+    for m in _CLAUSE_ANY.finditer(_attach_cites(answer)):
         clause = m.group(0)
         if re.search(r"\[\d{1,2}\]", clause):
             continue                       # 带引用的交给 citation_local
