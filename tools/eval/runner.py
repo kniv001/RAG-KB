@@ -303,17 +303,18 @@ def run(bench_name, model, limit=0, repeat=1, tag="", only=""):
     paths = []
     for r in range(repeat):
         t = (f"__r{r+1}" if repeat > 1 else "") + tag
-        # **第 2 次起必须先清答案缓存** —— 否则它会原样命中上一次的答案：
-        # 思考为空、没有 stats、耗时是回放的。**指标看起来只是"变小了"，不报错。**
-        # 实测（2026-09-23，`--repeat 2` 的臂 A/B）：第 2 次 21 题里 9~10 题是回放，
-        # 于是"思考变长 5/变短 16"变成"8/7"—— **一次显著的结果被回放稀释成噪声**。
-        # 与「整臂静默变旧」（ab.ps1 不删旧落盘 + 采集端续跑）是同一族的坑：
-        # **仪器把"没跑"伪装成"跑出了零效应"。**
-        if r > 0:
-            import subprocess as _sp
-            _sp.run(["node", os.path.join(TOOLS, "clear-answers.mjs")],
-                    cwd=TOOLS, check=False, stdout=_sp.DEVNULL)
-            print("（已清答案缓存，避免第 %d 次变成回放）" % (r + 1))
+        # **每次采集前都要清答案缓存 —— 第 1 次也要**（2026-09-25 修）。
+        # 原来只在 `r > 0` 清，理由写得很对（"否则它会原样命中上一次的答案：
+        # 思考为空、没有 stats、耗时是回放的，指标看起来只是变小了、不报错"），
+        # 但**漏了一种情形**：上一次是**另一个 run**（不是本 run 的第 1 次），
+        # 它留在缓存里的答案照样会被第 1 次原样命中 —— 实测 `--repeat 2` 的第 1 遍
+        # **14 题里 11 题是回放**（上一轮刚问过同样 14 题），于是"两遍样本"实际只有一遍新。
+        # 判据是"这遍有没有 stats"，而**报告里不会写** —— 又是一次"仪器把没跑伪装成跑了"。
+        import subprocess as _sp
+        _sp.run(["node", os.path.join(TOOLS, "clear-answers.mjs")],
+                cwd=TOOLS, check=False, stdout=_sp.DEVNULL)
+        if repeat > 1:
+            print("（已清答案缓存，第 %d/%d 次是真跑）" % (r + 1, repeat))
         print(f"—— 采集 {bench_name} × {model}{tag}" + (f"（第 {r+1}/{repeat} 次）" if repeat > 1 else "") + " ——")
         paths.append(collect(bench_name, model, limit, t, only=only))
         # **每跑完一次就判一次**：分段式输出 —— 不等全部跑完才知道结果
