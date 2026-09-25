@@ -48,14 +48,16 @@ public final class FeedGate {
     }
 
     /** 参数。默认值都是"先宽后紧"：宁可先放进来（冷存），也别在第一版就把数据丢掉。 */
-    public record Config(int minChars, double minCjkRatio, Duration maxAge, List<String> blockedDomains) {
+    public record Config(int minChars, double minCjkRatio, Duration maxAge, List<String> blockedDomains,
+                         int listingMinChars, double listingMaxDensity) {
 
         public static Config defaults() {
             return new Config(
                     200,                                  // 正文短于 200 字：多为导航页/JS 壳/反爬页
                     0.30,                                 // 中日韩字符占比低于三成
                     Duration.ofDays(30),                  // 抓到的旧闻：冷存，不直接进召回池
-                    List.of("localhost", "127.0.0.1"));   // 域名黑名单（内网地址由 SSRF 检查兜底）
+                    List.of("localhost", "127.0.0.1"),    // 域名黑名单（内网地址由 SSRF 检查兜底）
+                    1500, 1.0);                           // 列表页判据（见 check 里的返工记录）
         }
     }
 
@@ -100,6 +102,29 @@ public final class FeedGate {
         // 数量很少；真要治它，得靠**链接密度**（列表页满是 <a>）—— 而那要求在抽取层保留
         // 链接计数，是另一个改动，等有真实需求再说。
 
+        // **列表页/门户页**：长，但几乎没有句子。
+        //
+        // ⚠️ 这条判据**返工过一次**，两次的差别只在阈值（记下来，因为过程比结论值钱）：
+        //   · 第一版卡 `< 3/千字`，在**手挑的 10 个样本**上是 10/10 —— 于是当时写了"精度 10/10"；
+        //     跑进真实管线后**只命中 2 次，两次都是真文章**（李强通稿句式短、句号少，密度 1.8）。
+        //     两类分布**重叠**（真列表页 0.0~2.6 / 通稿 1.8）⇒ 判据被回退。
+        //   · 现在卡 `< 1.0/千字`，是在**真实管线全部 718 条**上量的：
+        //     **6 条命中、6 条全是列表页、0 条误伤**（4 个门户首页密度 0.0/0.6/0.0/0.0，
+        //     另 2 条是「台风路径实时发布系统」与「中新网滚动新闻」——也是列表页）。
+        //     **通稿那两条（1.8）安全落在阈值之上。**
+        // ⇒ 教训：**判据要在真实管线的数据上量**；手挑样本里没有的那一类，就是判据的盲区。
+        //
+        // 只判 **COLD**（可见性）—— 万一误判，行还在、可回捞。
+        int n = text.length();
+        if (n > cfg.listingMinChars()) {
+            double density = (countChar(text, '。') + countChar(text, '；')) * 1000.0 / n;
+            if (density < cfg.listingMaxDensity()) {
+                return new Verdict(Status.COLD, "像列表页：正文 " + n + " 字但句号密度只有 "
+                        + String.format(Locale.ROOT, "%.1f", density) + "/千字（阈值 "
+                        + cfg.listingMaxDensity() + "）");
+            }
+        }
+
         if (publishedAt != null && now != null
                 && publishedAt.isBefore(now.minus(cfg.maxAge()))) {
             long days = Duration.between(publishedAt, now).toDays();
@@ -131,6 +156,16 @@ public final class FeedGate {
             }
         }
         return total == 0 ? 0 : (double) cjk / total;
+    }
+
+    private static int countChar(String s, char c) {
+        int n = 0;
+        for (int i = 0; i < s.length(); i++) {
+            if (s.charAt(i) == c) {
+                n++;
+            }
+        }
+        return n;
     }
 
     /** 汉字（含扩展 A）＋ 中文标点区间。够用即可 —— 这里判的是"是不是中文内容"。 */
