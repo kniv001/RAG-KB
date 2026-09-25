@@ -78,11 +78,74 @@ RERANK_FEWSHOT = (
     "问：Redis 挂了重启后数据还在吗？\n片段：Kubernetes 调度器先过滤节点再打分。\n"
     "这段能直接回答上面的问题吗？\n答：否\n")
 
+# ── 判类用的那句问法（**可换**，2026-09-26 加）────────────────────────────
+# 现在的这句「能**直接回答**」对**部分可答**的题过严：解/答整个问题需要多块**合起来**，
+# 单独问哪一块都是"不能"。下面那句问的是**有没有用**而不是**能不能答完**。
+ASK_DIRECT = "这段能直接回答上面的问题吗？"
+ASK_PARTIAL = "这段与问题有关、能提供部分信息吗？"
 
-def judge_relevance(question, snippet, topn=20, timeout=300):
-    """精排用的二值判断（形状与 FEWSHOT 不同，必须换示范）。"""
-    prompt = RERANK_FEWSHOT + (f"问：{question}\n片段：{snippet[:300]}\n"
-                              "这段能直接回答上面的问题吗？\n答：")
+# 问法换了，**示范必须跟着换** —— 形状不匹配会让靶子掉到 16~17 名（上面那条教训）。
+RERANK_FEWSHOT_PARTIAL = (
+    "问：Redis 挂了重启后数据还在吗？\n片段：RDB 是某一时刻的全量快照，AOF 记录每一条写命令。\n"
+    "这段与问题有关、能提供部分信息吗？\n答：是\n"
+    "问：Redis 挂了重启后数据还在吗？\n片段：Kubernetes 调度器先过滤节点再打分。\n"
+    "这段与问题有关、能提供部分信息吗？\n答：否\n")
+
+FEWSHOT_OF = {ASK_DIRECT: RERANK_FEWSHOT, ASK_PARTIAL: RERANK_FEWSHOT_PARTIAL}
+
+# ③ **在"整批材料"这一层问**（2026-09-26）—— 前两种都是逐块问、代码取或，
+# 而"逐块问"对部分可答题天然不成立：**没有任何单独一块**能回答整个问题，
+# 合起来才行。换个粒度问的是同一件事，但语义对得上。
+#
+# ⚠️ **示范里必须有"只答了一部分也算是"的例子** —— 边界是由示范画的，
+# 只给"完整可答=是 / 完全无关=否"的话，部分可答会落在中间、读数听天由命。
+ASK_MATERIAL = "以上资料合起来能回答这个问题吗？"
+RERANK_FEWSHOT_MATERIAL = (
+    "问：Redis 挂了重启后数据还在吗？\n"
+    "资料：\nRDB 是某一时刻的全量快照。\nAOF 记录每一条写命令。\n"
+    "以上资料合起来能回答这个问题吗？\n答：是\n"
+    "问：Redis 挂了重启后数据还在吗？\n"
+    "资料：\nKubernetes 调度器先过滤节点再打分。\nPod 的 QoS 分三类。\n"
+    "以上资料合起来能回答这个问题吗？\n答：否\n")
+FEWSHOT_OF[ASK_MATERIAL] = RERANK_FEWSHOT_MATERIAL
+
+
+def judge_material(question, material, topn=20, timeout=300):
+    """**整批材料这一层**的二值判断（判类用；部分可答 = 是）。
+
+    与 `judge_relevance` 的差别只在粒度：那个逐块问、调用方取或；
+    这个一次问全部材料。为什么值得试：部分可答题里**没有任何单独一块**能回答整问，
+    逐块取或必然判【丙】—— 而实测 10 道部分可答题有 6 道栽在这上面。
+    """
+    prompt = (RERANK_FEWSHOT_MATERIAL
+              + f"问：{question}\n资料：\n{material[:1500]}\n{ASK_MATERIAL}\n答：")
+    body = {"model": CHAT, "prompt": prompt, "raw": True, "stream": False, "think": False,
+            "logprobs": True, "top_logprobs": topn,
+            "options": {"temperature": 0, "num_predict": 1, "num_ctx": 4096}}
+    req = urllib.request.Request(OLLAMA + "/api/generate",
+                                 data=json.dumps(body).encode("utf-8"),
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        d = json.load(r)
+    lp = (d.get("logprobs") or [{}])[0].get("top_logprobs") or []
+    m = {}
+    for t in lp:
+        for k in {t["token"], t["token"].strip()}:
+            m[k] = max(m.get(k, float("-inf")), t["logprob"])
+    a, b = m.get("是"), m.get("否")
+    return (math.exp(a) / (math.exp(a) + math.exp(b))) if (a is not None and b is not None) else None
+
+
+def judge_relevance(question, snippet, topn=20, timeout=300, ask=ASK_DIRECT):
+    """精排用的二值判断（形状与 FEWSHOT 不同，必须换示范）。
+
+    `ask` 换的是**那句问法的措辞**（示范随之换，否则形状不匹配 —— 见上面那条教训）。
+    为什么要能换（2026-09-26）：判类用的是这条判断的"取或"，
+    而「能**直接回答**吗」对**部分可答**的问题过严（没有单独一块能回答整个问题），
+    于是 10 道部分可答题里 6 道被判成【丙】，答案开口就是"知识库中没有"。
+    """
+    few = FEWSHOT_OF[ask]
+    prompt = few + (f"问：{question}\n片段：{snippet[:300]}\n{ask}\n答：")
     body = {"model": CHAT, "prompt": prompt, "raw": True, "stream": False, "think": False,
             "logprobs": True, "top_logprobs": topn,
             "options": {"temperature": 0, "num_predict": 1, "num_ctx": 4096}}

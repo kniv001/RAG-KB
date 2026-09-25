@@ -321,9 +321,33 @@ public class AgenticRagService {
         return switch (v.trim().toLowerCase()) {
             case "line" -> PARTIAL_LINE;
             case "branch" -> PARTIAL_BRANCH;
+            case "bing" -> PARTIAL_BING;
             default -> "";
         };
     }
+
+    /**
+     * **挂在【丙】这一路**的补丁（2026-09-26 的实验）。
+     *
+     * <p>为什么换到这一路：上一轮把措辞挂在【乙】，而实测"答案说知识库没有"的题
+     * **几乎全是判成【丙】的**（判丙 237 条样本，说没有 **237/237 = 100%**；
+     * 10 道部分可答题里 6 道判丙）。**挂错了层，所以没送到靶子上**（token 数一字不差，
+     * 见"实验作废的那一次"）。
+     *
+     * <p>为什么不在判类上治：三种问法都量过了 —— 逐块「能直接回答」是唯一能把"该丙"压住的
+     * （≤0.308），而该判乙的两道是 0.311/0.320，**中间几乎没有缝**；换成「有关」或
+     * 「整批材料合起来能不能答」，该判丙的 5 道会全翻成乙。⇒ 阈值/问法救不了，
+     * 只能在**判成丙之后的处置**上补：材料里有的照答照引，缺的才说缺。
+     */
+    private static final String PARTIAL_BING = """
+
+            ⇒ **若上面【参考资料】里有相关段落（哪怕只答得上一部分）**：
+              用它们按【乙】的方式答那部分，引用处标 [编号]；
+              只对**确实没答**的那部分写「资料里没给 X」。
+            ⇒ **不要**因为答不全就说「知识库中没有」——
+              "库里有没有这方面的资料"与"资料答不答得全"是**两件事**，
+              把它说成前者，用户会以为该换个问法或去补资料，而其实答案就在手边。
+            """;
 
     /** 写法一：在【乙】里补一句边界（解开"直说资料没给"与"不要提知识库中没有"的矛盾）。 */
     private static final String PARTIAL_LINE = """
@@ -357,7 +381,9 @@ public class AgenticRagService {
         String rule = switch (category) {
             case "甲" -> CONTRACT_JIA;
             case "乙" -> CONTRACT_YI + partialHint();      // 这一档只对【乙】有意义（部分可答）
-            default -> CONTRACT_BING;
+            // 【丙】也挂同一套（`off` 时为空）—— **实测"说知识库没有"的题几乎全是判丙的**，
+            // 上一轮挂在【乙】等于没送到靶子上（见 partialHint 与 PARTIAL_BING 的注释）
+            default -> CONTRACT_BING + partialHint();
         };
         return rule + thinkTail();
     }
