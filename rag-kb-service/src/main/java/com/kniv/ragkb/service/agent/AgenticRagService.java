@@ -381,9 +381,9 @@ public class AgenticRagService {
         String rule = switch (category) {
             case "甲" -> CONTRACT_JIA;
             case "乙" -> CONTRACT_YI + partialHint();      // 这一档只对【乙】有意义（部分可答）
-            // 【丙】也挂同一套（`off` 时为空）—— **实测"说知识库没有"的题几乎全是判丙的**，
-            // 上一轮挂在【乙】等于没送到靶子上（见 partialHint 与 PARTIAL_BING 的注释）
-            default -> CONTRACT_BING + partialHint();
+            // 【丙】**拼装**（第一拍按开关选）：实测"说知识库没有"的题几乎全是判丙的，
+            // 而**加一句不生效**（12/12 没改）⇒ 只能改结构。见 contractBing()
+            default -> contractBing() + partialHint();
         };
         return rule + thinkTail();
     }
@@ -707,19 +707,66 @@ public class AgenticRagService {
     }
 
     /** 代码判定为【丙】（**没有**资料）。 */
-    private static final String CONTRACT_BING = """
+    private static final String BING_HEAD = """
             你是个人知识库助手。
 
             **本次类型已由系统判定，直接照做，不要再去分析、判断或复述类别：**
             【丙】知识性问题，但知识库没有相关资料。
             ⇒ 不要只回一句「资料中没有相关内容」就结束，那样对用户毫无帮助。按这个结构回答：
+            """;
+
+    /**
+     * 【丙】的第一拍 —— **默认版**：先声明没有。
+     *
+     * <p>⚠️ 这一拍正是实测的病灶（2026-09-26）：判丙的答案「说知识库没有」是 **237/237 = 100%**，
+     * 而其中相当一部分题目的资料**确实有一部分**（`grounded-partial`）。
+     */
+    private static final String BING_BEAT1_PLAIN = """
               ① 第一句先说明知识库中没有这方面的资料。若上面给了【知识库主题概览】，
                  顺便点出库里**确实覆盖**的相关方向（「没有 X，但有 Y 和 Z 两个方向」）。
+            """;
+
+    /**
+     * 【丙】的第一拍 —— **改写版**（开关 {@code partial-hint=lead}）：**先看资料里有什么**。
+     *
+     * <p>为什么是改这一拍、而不是再加一句（2026-09-26 实测）：加一句**不生效** ——
+     * 在【丙】契约后面挂「不要因为答不全就说知识库中没有」+ 给出替代说法，
+     * 12 条答案**一条都没改**（说没有 12/12 → 12/12）。症结在**结构**：
+     * 三段式的第一拍就是"先声明没有"，一句附加说明压不过被反复强化的模板。
+     * 与「禁止复述」那次同形 —— 那边生效的也不是"禁止"，而是**换任务**。
+     *
+     * <p>⚠️ 无资料那一支**原样保留**（它是【丙】的本分）：资料里确实没有时才说"知识库中没有"。
+     * 实测护栏：`ungrounded` 那 6 道（基准说库里真没有）必须**继续声明**，不许被这一改带走。
+     */
+    private static final String BING_BEAT1_LEAD = """
+              ① **先看【参考资料】里有没有相关段落**：
+                 · **有**（哪怕只答得上一部分）⇒ 就用它们**按【乙】的方式答那部分**，
+                   引用处标 [编号]；然后再说还缺什么（措辞用「**资料里没给 X**」）。
+                   **这时不要说「知识库中没有」** —— 那会让人以为整份资料都不相关，
+                   而答案其实就在手边。
+                 · **确实没有** ⇒ 第一句说明知识库中没有这方面的资料。若上面给了【知识库主题概览】，
+                   顺便点出库里**确实覆盖**的相关方向（「没有 X，但有 Y 和 Z 两个方向」）。
+            """;
+
+    private static final String BING_TAIL = """
               ② 然后基于你自己的通用知识作答，尽量具体、有条理。
               ③ 明确标注这部分是通用知识、并非来自用户的知识库（例如另起一行写
                  「以下为通用知识，未引用你的知识库」）。
               通用知识里没有把握的内容直说不知道，不要为了显得完整而编。
-            """ + CONTRACT_COMMON;
+            """;
+
+    /**
+     * 【丙】契约（**拼装的，不是复制的**）—— 第一拍按开关选。
+     *
+     * <p>刻意不写成两份完整的契约文本：这个项目在"复制粘贴的提示词忘了同步"上栽过，
+     * 所以三拍各只有一份来源，改哪拍改哪段。
+     */
+    private String contractBing() {
+        String beat1 = "lead".equalsIgnoreCase(
+                props.getAgent().getPartialHint() == null ? "" : props.getAgent().getPartialHint().trim())
+                ? BING_BEAT1_LEAD : BING_BEAT1_PLAIN;
+        return BING_HEAD + beat1 + BING_TAIL + CONTRACT_COMMON;
+    }
 
     /**
      * 规划输出的形状。交给提供方做语法约束，模型便无法产出这个形状之外的任何东西 ——
