@@ -22,15 +22,15 @@
 ## 为什么缓存要按内容锚
 
 向量缓存按位置对齐的话，语料一重建就**静默错位**（实测过：661 条里 438 条错、不报错、
-只让所有指标一起变低）。所以 `_sentence_vecs.json` 里存的是
-`{stamp, hashes, vecs}` —— **hash 列表逐个比对**，对不上就重建。
+只让所有指标一起变低）。所以 `_sentence_vecs.json` 按**嵌进去的那串字的哈希**寻址
+（`sent_index.embed_and_cache` 里唯一一份实现，本脚本只是调用方）——
+加文档只算新句子，而不是整份作废重算。
 
 用法：
     python tools/sent-recall.py multihop-25
     python tools/sent-recall.py multihop-25 --k 5,10,20,50,100 --chunk-k 12
 """
-import io
-import json
+import hashlib
 import os
 import re
 import sys
@@ -40,41 +40,43 @@ sys.path.insert(0, HERE)
 
 from ruler import corpus                                    # noqa: E402
 from ruler import cases as cases_mod                        # noqa: E402
+import sent_index                                           # noqa: E402
 
-VECFILE = os.path.join(HERE, "_sentence_vecs.json")
 BUDGETS = (5, 10, 20, 50, 100, 200)
 
 
 def load_sentences(C):
-    """读句子表，并**核对语料戳** —— 戳不一致就是陈旧，直接拒跑（不猜）。"""
+    """读句子表，并**逐块核对内容锚** —— 对不上就是陈旧，直接拒跑（不猜）。
+
+    2026-09-25 之前核的是**全库语料戳**，那个戳"加一篇文档就变" ⇒ 语料一动整表就报陈旧，
+    哪怕只有几块真的变了。现在核的是**每行所据的块内容锚**
+    （`md5(chunks.content)[:12]`，与 SQL 侧同一个算法）—— 它只在该块正文变了时才变。
+    """
     rows = corpus.psql_rows(
-        "SELECT id, chunk_id, seq, text, sent_hash, stamp FROM sentences ORDER BY chunk_id, seq")
+        "SELECT id, chunk_id, seq, text, sent_hash, chunk_hash FROM sentences ORDER BY chunk_id, seq")
     if not rows:
         raise SystemExit("sentences 表是空的 —— 先跑 python tools/build-sentences.py")
-    stamps = {r[5] for r in rows}
-    if stamps != {C.stamp}:
-        raise SystemExit(f"句子表的语料戳 {stamps} 与当前语料 {C.stamp} 不一致 ——"
-                         f"重建：python tools/build-sentences.py")
+    want = {cid: hashlib.md5(b.encode("utf-8")).hexdigest()[:12]
+            for cid, b in zip(C.ids, C.body)}
+    seen = set()
+    stale = {}
+    for r in rows:
+        seen.add(r[1])
+        w = want.get(r[1])
+        if w is None or r[5] != w:
+            stale[r[1]] = stale.get(r[1], 0) + 1
+    missing = [cid for cid in want if cid not in seen]
+    if stale or missing:
+        raise SystemExit(
+            f"句子索引与语料对不上：**陈旧 {len(stale)} 块（{sum(stale.values())} 行）**、"
+            f"**没有句子 {len(missing)} 块**\n  例：陈旧 {list(stale)[:3]}　缺 {missing[:3]}\n"
+            f"  ⇒ 重建：python tools/build-sentences.py（增量，只重切这几块）")
     return rows
 
 
 def vecs(C, S):
-    """句子向量：**按内容锚**的缓存（stamp + 逐条 hash）。"""
-    hashes = [s[4] for s in S]
-    d = None
-    if os.path.exists(VECFILE):
-        try:
-            d = json.load(io.open(VECFILE, encoding="utf-8"))
-        except Exception as e:
-            print(f"！{os.path.basename(VECFILE)} 读不动（{e}）")
-    if d and d.get("stamp") == C.stamp and d.get("hashes") == hashes:
-        return d["vecs"]
-    why = "戳不同" if not d or d.get("stamp") != C.stamp else "**逐条 hash 对不上**（表被重建过）"
-    print(f"重建句子向量（{why}，{len(S)} 句）…", flush=True)
-    v = corpus.embed([s[3] for s in S])
-    io.open(VECFILE, "w", encoding="utf-8").write(
-        json.dumps({"stamp": C.stamp, "hashes": hashes, "vecs": v}))
-    return v
+    """句子向量：委托 `sent_index`（**按内容锚**，只有一份实现）。"""
+    return sent_index.embed_and_cache([s[3] for s in S])
 
 
 def target_sentences(C, cs, S):

@@ -301,7 +301,8 @@ public class RagProperties {
          * （句子可寻址），这正是"只禁止不给替代 ⇒ 模型换个方式做同一件事"那条教训的应用。
          *
          * <p>依赖 `sentences` 表（`python tools/build-sentences.py` 建）。
-         * 表为空或语料戳过期时**退回原样注入整块**，不会静默变成"没资料"。
+         * 表为空或这块查不到句子（索引陈旧／这块切不出句子）时**退回原样注入整块**，
+         * 不会静默变成"没资料"。
          */
         private boolean sentAddr = false;
 
@@ -332,8 +333,10 @@ public class RagProperties {
          * ⇒ **时间不变**。⇒ 这条的价值在**上下文预算**（少占 1134 token 窗口、
          * 离 {@code generationReserveTokens} 那道悬崖更远），不在省时间。
          *
-         * <p>⚠️ 依赖 `sentences` 表（`python tools/build-sentences.py`）。表空 / 语料戳过期 /
-         * 这块切不出句子 ⇒ **退回整块并打日志**，不会静默变成"这块没有内容"。
+         * <p>⚠️ 依赖 `sentences` 表（`python tools/build-sentences.py`）。表空 / 这块没句子
+         * （索引陈旧／切不出句子）⇒ **退回整块并打日志**，不会静默变成"这块没有内容"。
+         * 索引是否与语料对齐由**块内容锚**回答（`python tools/ruler.py audit` 会打出来），
+         * Java 侧**不按锚过滤** —— 它只按"这块有没有句子"退让。
          */
         private boolean sentWindow = true;
 

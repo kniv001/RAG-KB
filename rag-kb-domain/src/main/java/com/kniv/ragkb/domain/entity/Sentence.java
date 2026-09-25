@@ -53,8 +53,14 @@ public class Sentence {
     /** {@code sha1(去空白后的正文)[:12]} —— **按内容锚定**，不靠位置。 */
     private String sentHash;
 
-    /** 建这份索引时的**语料戳**；与当前语料戳不一致即为陈旧。 */
-    private String stamp;
+    /**
+     * **这一行所据的块内容锚**：{@code md5(chunks.content)[:12]}。
+     *
+     * <p>与块内容对不上（或为 NULL）即为陈旧 —— 判定是**一句 SQL 的事**，不必重建。
+     * 2026-09-25 之前这一列叫 {@code stamp} 且存的是**全库语料戳**：
+     * 那个戳"加一篇文档就变"，于是整个索引动辄显得陈旧（见 schema.sql 里那段说明）。
+     */
+    private String chunkHash;
 
     private OffsetDateTime builtAt;
 }

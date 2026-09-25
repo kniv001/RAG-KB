@@ -228,8 +228,15 @@ COMMENT ON COLUMN memory_items.src_conv IS '最早写下这条的会话，便于
 -- 为什么区间要存 char_start/char_end：展开时必须**逐字原样**取出，
 -- 而不是靠模型或靠"再切一遍" —— 再切一遍就可能与当初切的不一致。
 --
--- 为什么存 sent_hash：本项目吃过"一切按位置对齐的缓存会随重建静默错位"的亏
+-- 为什么存 sent_hash / chunk_hash：本项目吃过"一切按位置对齐的缓存会随重建静默错位"的亏
 --（向量缓存那次，661 条里 438 条错位且不报错）。**按内容锚定**是这里的纪律。
+--
+-- ⚠️ `chunk_hash` 原先叫 `stamp` 且存的是**全库语料戳**（2026-09-25 换的）。为什么换：
+-- 那个戳是"块数 + 每块正文哈希"的哈希 —— **加一篇或删一篇文档它就变**，于是晋升 40 篇
+-- 新闻之后，904 块里只有 243 块是新的，**整个索引却显示"陈旧"**，一重建就要重算
+-- 10052 句向量（几分钟显存）。换成逐块锚之后，"这一行还有效吗"变成**一句 SQL 能回答的
+-- 事实**（`left(md5(chunks.content),12)` 比一下即可，见 `sent_index.freshness`），
+-- 而不是"要重建才知道"。
 --
 -- ⚠️ 地址（供模型引用）用 **块内序号 `[3.2]`**（第 3 段的第 2 句），
 -- 因为那个地址**只需在这一次提示词里唯一**；全局 id 只在库内用。
@@ -243,17 +250,22 @@ CREATE TABLE IF NOT EXISTS sentences (
     kind        text    NOT NULL DEFAULT 'sent',   -- sent/table/code/head
     text        text    NOT NULL,
     sent_hash   text    NOT NULL,          -- sha1(去空白后的正文)[:12]
-    stamp       text    NOT NULL,          -- 建这份索引时的**语料戳**
+    chunk_hash  text,                      -- **这一行所据的块内容锚**：md5(chunks.content)[:12]
     built_at    timestamptz NOT NULL DEFAULT now(),
     UNIQUE (chunk_id, seq)
 );
+
+-- 2026-09-25：`stamp`（全库语料戳）→ `chunk_hash`（逐块内容锚）。两条都幂等。
+-- NULL = 这一行还没按新口径重算过 ⇒ **当作陈旧**（`IS DISTINCT FROM` 认得出 NULL）。
+ALTER TABLE sentences ADD COLUMN IF NOT EXISTS chunk_hash text;
+ALTER TABLE sentences DROP COLUMN IF EXISTS stamp;
 
 CREATE INDEX IF NOT EXISTS idx_sentences_doc   ON sentences (doc_id);
 CREATE INDEX IF NOT EXISTS idx_sentences_hash  ON sentences (sent_hash);
 CREATE INDEX IF NOT EXISTS idx_sentences_chunk ON sentences (chunk_id);
 
 COMMENT ON TABLE sentences IS '句子级索引：带字符区间的可寻址切片，供"地址计划→代码展开"使用';
-COMMENT ON COLUMN sentences.stamp IS '建索引时的语料戳；与当前语料戳不一致即为陈旧，需重建';
+COMMENT ON COLUMN sentences.chunk_hash IS '这一行所据的块内容锚 md5(chunks.content)[:12]；与块对不上（或为 NULL）即为陈旧';
 
 -- 句子向量：**分层注入**用（块召回 → 块内按问题对句子排序 → 只注入那几句）。
 --

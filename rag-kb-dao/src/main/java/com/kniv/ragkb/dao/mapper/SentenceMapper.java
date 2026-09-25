@@ -46,7 +46,7 @@ public interface SentenceMapper extends BaseMapper<Sentence> {
      */
     @Select("""
             <script>
-            SELECT id, chunk_id, doc_id, seq, char_start, char_end, kind, text, sent_hash, stamp
+            SELECT id, chunk_id, doc_id, seq, char_start, char_end, kind, text, sent_hash, chunk_hash
             FROM sentences
             WHERE chunk_id IN
             <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
@@ -79,9 +79,9 @@ public interface SentenceMapper extends BaseMapper<Sentence> {
      */
     @Select("""
             <script>
-            SELECT id, chunk_id, doc_id, seq, char_start, char_end, kind, text, sent_hash, stamp
+            SELECT id, chunk_id, doc_id, seq, char_start, char_end, kind, text, sent_hash, chunk_hash
             FROM (
-              SELECT id, chunk_id, doc_id, seq, char_start, char_end, kind, text, sent_hash, stamp,
+              SELECT id, chunk_id, doc_id, seq, char_start, char_end, kind, text, sent_hash, chunk_hash,
                      row_number() OVER (PARTITION BY chunk_id
                                         ORDER BY embedding &lt;=&gt; #{q}::vector) AS rn
               FROM sentences
