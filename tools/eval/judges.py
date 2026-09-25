@@ -283,12 +283,8 @@ def _values(clause):
     return out
 
 
-def citation_local(answer, sources, min_len=6):
-    """逐子句查「结论里的具体值在不在它所引的那块里」。
-
-    返回 (查过的子句数, 对不上的子句列表)。**对不上 ≠ 一定错** ——
-    概括性表述本来就不含具体值；所以只报数，由人看。
-    """
+def _source_texts(sources):
+    """召回来源 → {编号: 去掉空白的正文}（找不到正文就退回 preview）。"""
     texts = {}
     for i, s in enumerate(sources or [], 1):
         t = s.get("_full")
@@ -305,6 +301,16 @@ def citation_local(answer, sources, min_len=6):
             except Exception:
                 t = s.get("preview") or ""
         texts[i] = re.sub(r"\s+", "", t)
+    return texts
+
+
+def citation_local(answer, sources, min_len=6):
+    """逐子句查「结论里的具体值在不在它所引的那块里」。
+
+    返回 (查过的子句数, 对不上的子句列表)。**对不上 ≠ 一定错** ——
+    概括性表述本来就不含具体值；所以只报数，由人看。
+    """
+    texts = _source_texts(sources)
     checked, bad = 0, []
     for m in _CLAUSE.finditer(answer or ""):
         clause = m.group(0)
@@ -317,6 +323,67 @@ def citation_local(answer, sources, min_len=6):
         if miss:
             bad.append((clause.strip()[:60], ids, miss[:3]))
     return checked, bad
+
+
+# ── 引用局部性的**另一半**：该引没引 ────────────────────────────────────
+# 上面那半只看**带 [n] 的子句** ⇒ 一句一个引用都没有的话**从缝里漏过去**。
+# 症状（2026-09-25 实测）：一道题的答案列了四个**来自资料**的数字
+# （15金 / 6金 / 5金 / 1金），一个 `[n]` 都没标 —— 而判据只能报一句 `有引用=False`，
+# **说不出"哪几句该引没引"**，于是看着像"没检索到"，其实是**引用纪律**。
+#
+# 契约对这件事有明确的两句：「引用【参考资料】的地方用 [编号] 标注；
+# 通用知识部分不要标 [编号]，否则会让人误以为有出处」。所以判据是：
+#   **值在召回资料里 + 这句没有任何引用 = 该引没引**（值不在资料里 = 通用知识，本来就不该标）
+#
+# ⚠️ **只报数、不当判据**（第一版刻意如此）：数字撞车是常见现象（年份、序号、
+# 短数字），把它做成硬判据会凭空造失败。先量它在真实答案上的分布，再谈要不要升级。
+_CLAUSE_ANY = re.compile(r"[^。；;\n]+")
+
+# **这一半必须比 `_VALUE` 更严** —— 两轮实测定下来的（2026-09-25，1327 条真实答案）：
+#   第一版直接复用 `_values`（它允许"≥2 位的裸数字"）⇒ 324 条命中，误伤成灾：
+#     · 裸数字撞车：`10` / `100` / `1000` / `20` / `85` —— 随便一块里都有，纯巧合
+#     · **复合字面量被切碎**：时间戳 `'2023-10-01 12:00:00'` ⇒ `['2023','10','01','12']`；
+#       引用计数 `参考资料（1-13）` ⇒ `['13']`
+#   第二版收紧成"只认带单位的数字" ⇒ 156 条；剩下的误伤就一种：**量词当单位**（`1个`）。
+#   所以第三版把"哪些算单位"**写成白名单**（不再用 `[一-鿿]{1,3}` 放行一切汉字）：
+#   量词（个/条/项/次/种/位/名/份）信息量太低，任何文本里都有 —— 排除。
+# 代价是漏掉一些真裸数字/真量词值 —— 这一条是**读数**不是判据，**宁可少报也不要噪音**。
+_UNIT_STRICT = re.compile(
+    r"(?<![A-Za-z0-9.:/\-])"                       # 前面不能是字母/数字/小数点/冒号/斜杠/连字符
+    r"(\d+(?:\.\d+)?[ \t]*"
+    r"(?:秒|分钟|小时|天|年|月|日|周|倍|层|亿|万|金|人|岁|字|页|位次"
+    r"|%|ms|s|sec|min|h|KB|MB|GB|TB|kb|mb|gb|bit|byte|n|p))"
+    r"(?![0-9])")                                  # 后面不能直接跟数字（`10-30` / `1.5.2`）
+
+
+def _values_strict(clause):
+    """**带单位的**具体值 —— 专供"该引没引"这条用（见 `_UNIT_STRICT` 的取舍说明）。"""
+    clause = re.sub(r"\[\d{1,2}\]", " ", clause)
+    return [re.sub(r"\s+", "", v) for v in _UNIT_STRICT.findall(clause)]
+
+
+def uncited_values(answer, sources):
+    """没标引用、但**召回资料里确实有**的**带单位**具体值。
+
+    返回 [(子句, [值...], [它出现在哪几块...])]。空列表 = 该引的都引了。
+    """
+    texts = _source_texts(sources)
+    out = []
+    for m in _CLAUSE_ANY.finditer(answer or ""):
+        clause = m.group(0)
+        if re.search(r"\[\d{1,2}\]", clause):
+            continue                       # 带引用的交给 citation_local
+        vals = _values_strict(clause)
+        if not vals:
+            continue
+        found = {}
+        for v in vals:
+            where = [i for i, t in texts.items() if v in t]
+            if where:
+                found[v] = where
+        if found:
+            out.append((clause.strip()[:70], list(found), sorted({i for w in found.values() for i in w})))
+    return out
 
 
 # ── 按题型给判据 ────────────────────────────────────────────────────────
@@ -476,6 +543,17 @@ def judge(kind, answer, sources, question, cites=None):
         # **引用全对**做成布尔，供 gate 用。它只查**带 [n] 的子句** ⇒
         # 标了「以下为通用知识」的部分天然豁免（那部分本来就不该有编号）。
         r["引用全对"] = (len(badc) == 0)
+    # **该引没引**（引用局部性的另一半）：值在资料里、而这句一个 [n] 都没有。
+    # 为什么要有它（2026-09-25）：上面那半只看带引用的子句 ⇒ 一句引用都没有的话
+    # **整句从缝里漏过去**，症状是判据只说「有引用=False」，**说不出哪几句该引没引** ——
+    # 看着像"没检索到"，其实是**引用纪律**（实测那道亚运金牌题：四个来自资料的数字，
+    # `数字落地=1/1` 全过、一个 [n] 都没标）。
+    # ⚠️ **只报数，不进 PASS**：数字撞车是常见现象，做成硬判据会凭空造失败
+    #（第一版 324 条里大半是误伤，收紧到"带单位的白名单值"后 chitchat/capability 归零）。
+    uv = uncited_values(answer, sources)
+    if uv:
+        r["未标引用的资料值"] = sum(len(v) for _, v, _ in uv)
+        r["_未标引用"] = [f"{v}←块{w}" for _, v, w in uv[:3]]
     vr = verbatim_ratio(answer, sources)
     if vr is not None:
         r["逐字重合"] = f"{100*vr:.0f}%"
