@@ -114,6 +114,7 @@ def embed_and_cache(texts, force=False):
     model = model_id()
     d = _load_cache()
     keyed = d.get("keyed") if isinstance(d.get("keyed"), dict) else None
+    dirty = False                                           # 有"新算的/换代了"才落盘，见函数尾
 
     if keyed is None and d.get("vecs") and d.get("hashes"):
         # 老格式：{stamp, hashes, vecs}（**位置对齐**）。不按位置搬，按 hash 查 ——
@@ -132,12 +133,15 @@ def embed_and_cache(texts, force=False):
                 hit += 1
         print(f"  缓存是老格式（位置对齐，{n0} 条）—— 按内容 hash 搬过来 {hit} 条"
               f"，其余重算（位置一个都不信）")
+        dirty = True                                        # 搬迁要落盘，否则下次又搬一遍
     if keyed is None:
         keyed = {}
+        dirty = True
 
     if d.get("model") not in (None, model) and keyed:
         print(f"！缓存是 {d.get('model')} 算的，而库里的模型是 {model} —— 整份重算")
         keyed = {}
+        dirty = True
 
     uniq = list(dict.fromkeys(texts))                       # 去重（同一句可能出现在多处）
     missing = [t for t in uniq if _vec_key(t) not in keyed]
@@ -148,9 +152,14 @@ def embed_and_cache(texts, force=False):
               f"{len(uniq) - len(missing)}，**新算 {len(missing)}**…", flush=True)
         for t, v in zip(missing, corpus.embed(missing)):
             keyed[_vec_key(t)] = v
+        dirty = True
 
-    io.open(VECFILE, "w", encoding="utf-8").write(
-        json.dumps({"model": model, "keyed": keyed}))
+    # **没变就不重写** —— 这个文件 ~138MB，每次调用都写一遍是白花几秒；
+    # 更要紧的是**写不是原子的**：中途崩掉就是整份缓存没了（下次全量重算）。
+    # 所以只在"真算了新的 / 格式换代了 / 换了模型"时才落盘。
+    if dirty or force:
+        io.open(VECFILE, "w", encoding="utf-8").write(
+            json.dumps({"model": model, "keyed": keyed}))
     return [keyed[_vec_key(t)] for t in texts]
 
 
