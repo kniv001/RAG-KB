@@ -174,7 +174,10 @@ public class OllamaProvider extends AbstractProvider {
                             ns(n, "prompt_eval_duration"),
                             n.path("eval_count").asLong(0),
                             ns(n, "eval_duration"),
-                            ns(n, "total_duration")));
+                            ns(n, "total_duration"),
+                            // **截断标记**：'length' = 撞上了 num_predict 上限。
+                            // 此前整个被丢掉 ⇒ 保险丝生效时表现成"等两分钟、拿到空白"。
+                            n.path("done_reason").asText("")));
                 }
             } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
                 // 单行解析失败不应中断整段回答，跳过即可

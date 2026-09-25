@@ -1486,6 +1486,23 @@ public class AgenticRagService {
                     fix.count(), fix.citeStr());
         }
         com.kniv.ragkb.provider.ChatStats st = stats.get();
+        // **保险丝生效时必须有人知道**（2026-09-25）：
+        // 撞上 num_predict 上限时，模型把全部预算花在思考上、**正文一个字都没有** ——
+        // 实测用户等 114 秒拿到空白，而日志里**没有任何一行**说明发生了什么。
+        // 三件事一起做：记 WARN（可检索）、把状态随 stats 发出去、**别让前端收到空正文**。
+        if (st.truncated()) {
+            // 正文用 out 攒（见方法开头），所以"空不空"看它
+            boolean blank = out.length() == 0;
+            log.warn("回答撞上长度上限（num_predict）：生成 {} token、耗时 {} ms，正文 {} 字{}",
+                    st.evalTokens(), st.evalMs(), out.length(),
+                    blank ? " —— **空正文**，已替模型给出一句说明" : "");
+            if (blank) {
+                String note = "（本次回答撞上长度上限被截断：模型把预算全用在推理上、没产出正文。"
+                        + "换个更具体的问法、或把这题拆开再问，通常就能答出来。）";
+                onEvent.accept(AgentEvent.answerToken(note));
+                out.append(note);
+            }
+        }
         if (st.promptTokens() > 0 || st.evalTokens() > 0) {
             // 单独一条事件，不动 done 的载荷 —— 客户端不认识就忽略
             onEvent.accept(AgentEvent.of(AgentEvent.STATS,

@@ -24,7 +24,18 @@ package com.kniv.ragkb.provider;
  * @param totalMs      模型侧总耗时
  */
 public record ChatStats(long loadMs, long promptTokens, long promptMs,
-                        long evalTokens, long evalMs, long totalMs) {
+                        long evalTokens, long evalMs, long totalMs, String doneReason) {
+
+    /**
+     * **是不是被长度上限截断的**（Ollama 的 {@code done_reason == "length"}）。
+     *
+     * <p>为什么要单列它（2026-09-25 实测）：跑飞保险丝（{@code num_predict=8192}）**确实拦住了一次跑飞**
+     * —— 但**没有任何一处看这个字段**，于是那次的表现是"用户等 114 秒、拿到一片空白"。
+     * 保险丝生效了，而**没人知道它生效了**。
+     */
+    public boolean truncated() {
+        return "length".equalsIgnoreCase(doneReason);
+    }
 
     /** 生成速率（token/秒）；没有生成就返回 0。 */
     public double tokensPerSecond() {
@@ -32,6 +43,6 @@ public record ChatStats(long loadMs, long promptTokens, long promptMs,
     }
 
     public static ChatStats none() {
-        return new ChatStats(0, 0, 0, 0, 0, 0);
+        return new ChatStats(0, 0, 0, 0, 0, 0, "");
     }
 }
