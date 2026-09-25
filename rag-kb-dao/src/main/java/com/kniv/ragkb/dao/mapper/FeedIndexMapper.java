@@ -135,9 +135,26 @@ public interface FeedIndexMapper {
     int linkItemTopic(@Param("itemId") long itemId, @Param("topicId") long topicId,
                       @Param("sim") float sim);
 
-    @Select("SELECT COALESCE(label, '(未命名)') AS label, item_n AS n, "
-            + "first_seen AS f, last_seen AS l, id "
-            + "FROM feed_topics ORDER BY item_n DESC, last_seen DESC LIMIT #{limit}")
+    /**
+     * 议题榜。**成员数按实际在册的条目数算，不信 {@code item_n} 那个计数器**。
+     *
+     * <p>为什么（2026-09-25 实测）：把 4 个门户页条目判成冷存之后，榜上**它们还在** ——
+     * 因为 `item_n` 是"加入时 +1"的计数器，条目退出可见性它**不会减**。
+     * 症状是"已经判死的垃圾还挂在'哪件事在升温'上"，而**没有任何地方会报错**。
+     * 同理，冷存的条目也不该出现在榜上（不召回的东西不算"在升温"）。
+     *
+     * <p>{@code item_n} 仍然留在表里（它是议题的历史规模，用于别处），但**榜只信实际计数**。
+     */
+    @Select("""
+            SELECT COALESCE(t.label, '(未命名)') AS label, count(*) AS n, t.id,
+                   min(t.first_seen) AS f, max(t.last_seen) AS l
+            FROM feed_topics t
+            JOIN feed_item_topics e ON e.topic_id = t.id
+            JOIN feed_items i ON i.id = e.item_id AND i.status = 1
+            GROUP BY t.id, t.label
+            ORDER BY count(*) DESC, max(t.last_seen) DESC
+            LIMIT #{limit}
+            """)
     List<Map<String, Object>> topTopics(@Param("limit") int limit);
 
     @Select("SELECT embedding::text FROM feed_topics WHERE id = #{id}")
