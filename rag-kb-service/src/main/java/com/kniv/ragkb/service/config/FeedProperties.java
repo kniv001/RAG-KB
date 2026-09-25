@@ -92,6 +92,9 @@ public class FeedProperties {
      */
     private int promoteMinRepeats = 3;
 
+    /** 一轮给几个议题起名。一条 = 一次模型调用，所以要封顶。 */
+    private int labelLimit = 20;
+
     /** 一次晋升几条。**显式上限**：每条都要切分 + 向量化，是 GPU 活。 */
     private int promoteLimit = 20;
 

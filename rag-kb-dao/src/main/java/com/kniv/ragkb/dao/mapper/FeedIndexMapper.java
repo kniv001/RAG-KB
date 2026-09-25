@@ -142,4 +142,32 @@ public interface FeedIndexMapper {
 
     @Select("SELECT embedding::text FROM feed_topics WHERE id = #{id}")
     String topicEmbeddingText(@Param("id") long id);
+
+    // ── 议题命名（label）────────────────────────────────────────────────────
+
+    /**
+     * 还没起名的议题 + 它们的成员标题（最多 8 条，最近的在前）。
+     *
+     * <p>用 {@code chr(10)} 拼行而不是 SQL 的换行转义：本项目的工具链今天已经被
+     * "转义序列被吃掉"咬了五次（`\r?\n` 变成真的 CR/LF 之类）—— **能不写转义就不写**。
+     */
+    @Select("""
+            SELECT t.id,
+                   string_agg(x.title, chr(10) ORDER BY x.published_at DESC NULLS LAST) AS titles,
+                   count(*) AS n
+            FROM feed_topics t
+            JOIN (
+              SELECT e.topic_id, left(i.title, 60) AS title, i.published_at
+              FROM feed_item_topics e JOIN feed_items i ON i.id = e.item_id
+              WHERE i.title IS NOT NULL AND i.title <> ''
+            ) x ON x.topic_id = t.id
+            WHERE t.label IS NULL
+            GROUP BY t.id
+            ORDER BY count(*) DESC, t.id
+            LIMIT #{limit}
+            """)
+    List<Map<String, Object>> unlabeledTopics(@Param("limit") int limit);
+
+    @Update("UPDATE feed_topics SET label = #{label} WHERE id = #{id}")
+    int setTopicLabel(@Param("id") long id, @Param("label") String label);
 }

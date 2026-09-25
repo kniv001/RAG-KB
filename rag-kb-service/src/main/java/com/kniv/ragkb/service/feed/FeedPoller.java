@@ -46,6 +46,7 @@ public class FeedPoller {
     private final FeedMapper feed;
     private final FeedCrawler crawler;
     private final FeedEnrichService enrich;
+    private final FeedTopicLabelService labeler;
     private final WebSearchService search;
     private final FeedProperties props;
     private final WebProperties webProps;
@@ -174,13 +175,17 @@ public class FeedPoller {
         // 抓完之后富化（切段 + 议题）。**它要 GPU**，内部会等静默；
         // 有用户请求在跑就直接放弃这一轮，不抢 —— 摘要/轮次笔记都是这个规矩。
         int enriched = 0;
+        int labeled = 0;
         if (newItems > 0) {
             FeedEnrichService.Batch b = enrich.run(props.getEnrichLimit());
             enriched = b.done();
+            // **抓完顺手给新议题起名** —— 不起名的话议题只能显示成「议题 56（12 条）」，
+            // 而"哪件事在升温"这句话要的就是那个名字。同样要模型 ⇒ 也走 GpuGate。
+            labeled = labeler.labelPending(props.getLabelLimit()).labeled();
         }
         long ms = System.currentTimeMillis() - t0;
-        lastRun = String.format("%d 个频道、新入库 %d 条、富化 %d 条、耗时 %.1fs | %s",
-                channels, newItems, enriched, ms / 1000.0, String.join("；", notes));
+        lastRun = String.format("%d 个频道、新入库 %d 条、富化 %d 条、命名议题 %d 个、耗时 %.1fs | %s",
+                channels, newItems, enriched, labeled, ms / 1000.0, String.join("；", notes));
         log.info("信息流轮询：{}", lastRun);
     }
 

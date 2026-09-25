@@ -13,6 +13,8 @@
  *   node tools/feed-smoke.mjs --enrich [--limit 60]         # 手动跑一批富化（切段+重复+议题）
  *   node tools/feed-smoke.mjs --promote [--real]            # 晋升（默认只试跑；--real 才真做）
  *   node tools/feed-smoke.mjs --ask "最近金价怎么样？"        # 问一句，验"晋升之后真检索得到"
+ *   node tools/feed-smoke.mjs --label [--limit 20]          # 给未命名的议题起名
+ *   node tools/feed-smoke.mjs --topics                     # 议题榜（哪件事在升温）"
  */
 import fs from 'node:fs';
 import { makeClient, readSse } from './kb-client.mjs';
@@ -63,6 +65,26 @@ if (has('enrich')) {
     console.log(`  #${it.id}  ${it['段数']} 段 / 重复 ${it['重复段']}（${it['重复率']}）  议题 ${it['议题']}${it['新议题'] ? '（新）' : ''}`);
   }
   await stats();
+  process.exit(0);
+}
+
+// ── 给议题起名（label 之前一直是 NULL，议题只能显示成「议题 56（12 条）」）──
+if (has('label')) {
+  const r = await c.call('POST', '/api/feed/label',
+    { limit: parseInt(arg('limit', '20'), 10) }, { token: TOKEN });
+  const d = r.body?.data || {};
+  console.log(`待命名 ${d['待命名']} · 已命名 ${d['已命名']}` + (d['说明'] ? ` · ${d['说明']}` : ''));
+  console.log('名字：' + (d['名字'] || []).join('　'));
+  process.exit(0);
+}
+
+// ── 议题榜：哪件事在升温 ────────────────────────────────────────────────
+if (has('topics')) {
+  const r = await c.call('GET', '/api/feed/topics', undefined, { token: TOKEN });
+  const rows = r.body?.data || [];
+  for (const t of rows) {
+    console.log(`  ${String(t.n).padStart(3)} 条  「${t.label}」`);
+  }
   process.exit(0);
 }
 

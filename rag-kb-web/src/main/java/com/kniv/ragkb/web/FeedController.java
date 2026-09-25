@@ -8,6 +8,7 @@ import com.kniv.ragkb.service.feed.FeedEnrichService;
 import com.kniv.ragkb.service.feed.FeedIngestService;
 import com.kniv.ragkb.service.feed.FeedPoller;
 import com.kniv.ragkb.service.feed.FeedPromoteService;
+import com.kniv.ragkb.service.feed.FeedTopicLabelService;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -42,6 +43,7 @@ public class FeedController {
     private final FeedEnrichService enrich;
     private final FeedPoller poller;
     private final FeedPromoteService promote;
+    private final FeedTopicLabelService labeler;
     private final FeedProperties feedProps;
     private final WebProperties webProps;
 
@@ -134,6 +136,21 @@ public class FeedController {
         m.put("候选", r.candidates());
         m.put("已晋升", r.promoted());
         m.put("文档", r.docIds());
+        if (r.note() != null) {
+            m.put("说明", r.note());
+        }
+        return R.ok(m);
+    }
+
+    /** **给议题起名**（`label` 在此之前一直是 NULL，所以议题只能显示成「议题 56（12 条）」）。 */
+    @PostMapping("/label")
+    public R<Map<String, Object>> label(@RequestBody(required = false) EnrichBody body) {
+        int limit = body != null && body.getLimit() != null ? body.getLimit() : 20;
+        FeedTopicLabelService.Result r = labeler.labelPending(limit);
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("待命名", r.pending());
+        m.put("已命名", r.labeled());
+        m.put("名字", r.labels());
         if (r.note() != null) {
             m.put("说明", r.note());
         }
