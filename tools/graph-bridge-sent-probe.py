@@ -105,6 +105,30 @@
 ⇒ **想让跨文档真的赚钱，得先把那条边做细**：按**文档级**聚类（或把簇数从 11 提到 30~50、
 不做标签合并），再回来看"同主题不同文档"这条边值多少。
 现在这个粒度下，跨文档**赚不到**。
+
+## ⭐⭐⭐ 子议题（用户追问"像板块里的子板块"，2026-09-26）
+
+把块重新聚成细簇（`--kmeans K`，k-means++，秒级）：
+
+| 方案 | 靶句命中 | 注入句 | 块 |
+|---|---|---|---|
+| 基线（全局 top-20） | 107/127 | 20 | 8 |
+| 逐块 5 句 | 113 | 39 | 8 |
+| 粗簇 K=11 **整簇** | 122 | **767** | 168 |
+| 细簇 K=40 整簇 | 121 | 209 | 49 |
+| **细簇 K=80 整簇** | **121** | **145** | 34 |
+| 细簇 K=80 按质心路由 1/2/3 簇 | 105 / 116 / 119 | 52 / 112 / 159 | 13/24/37 |
+| **两级（先板块→再子板块）1/2/3 子** | **87 / 94 / 97** | 50/95/136 | 10/20/31 |
+| **相邻块** | **120** | **72** | 16 |
+
+三条读法：
+1. **子议题确实把"整簇补全"从不可承受变成可承受**：767 句 → **145 句**，而命中几乎不掉
+   （122 → 121）⇒ 用户的直觉对：**簇变细，一条边才带得动**。
+2. **但它仍输给一条更廉价的规则**：相邻块 120@**72** 句 vs 子议题整簇 121@**145** 句 ——
+   命中差 1，代价差一倍。
+3. ⚠️ **把子议题当"路由"是有害的，两级尤其**：先挑板块、再在板块里挑子板块 ⇒
+   **87 / 94 / 97，全部低于基线 107**。原因：**上层板块太粗，当过滤器就把对的子板块滤掉了**。
+   单层质心路由也差（K=80 取 1 簇 = 105 < 107）—— "簇质心像不像"与"哪块里有答案"不是一回事。
 """
 import hashlib
 import importlib.util
@@ -135,7 +159,7 @@ def _load(name):
 def main():
     arg = lambda k, d: (sys.argv[sys.argv.index(f"--{k}") + 1]        # noqa: E731
                         if f"--{k}" in sys.argv else d)
-    _opts = {"--k", "--hop", "--floor", "--m", "--perblock", "--edges", "--qref"}
+    _opts = {"--k", "--hop", "--floor", "--m", "--perblock", "--edges", "--qref", "--kmeans", "--kmsel"}
     names = [a for i, a in enumerate(sys.argv[1:])
              if not a.startswith("--") and sys.argv[1:][i - 1] not in _opts] or \
         ["multihop-127", "xdoc-8"]
@@ -148,6 +172,9 @@ def main():
     # **结构边**（有类型的边，而不是"像不像"）：doc=同文档；adj=相邻块；tree=同一主题簇
     edges = [x for x in arg("edges", "").split(",") if x.strip()]
     q_ref = int(arg("qref", "5"))          # 结构边那一档统一用逐块 5 句（今天量出的较优结构）
+    # **子议题**：把块重新聚成 K 个细簇（现有主题树只有 11 簇 / 877 块、平均 82 块一簇 ⇒ 做边太粗）
+    kms = [int(x) for x in arg("kmeans", "").split(",") if x.strip()]
+    kmsels = [int(x) for x in arg("kmsel", "1").split(",")]   # 路由取几个簇
 
     import sent_index
     sr = _load("sent-recall")
@@ -230,6 +257,35 @@ def main():
                 pool, size=min(need, len(pool)), replace=False))
         return out
 
+    def kmeans(V, K, iters=25, seed=0):
+        """朴素 k-means（877×1024、K≤80 ⇒ 秒级；k-means++ 初始化）。"""
+        rng = np.random.default_rng(seed)
+        Ctr = V[rng.choice(len(V), 1)].copy()
+        for _ in range(K - 1):                      # k-means++：按距离平方挑下一个质心
+            d = 1 - (V @ Ctr.T).max(axis=1)
+            p = np.clip(d, 0, None) ** 2
+            Ctr = np.vstack([Ctr, V[rng.choice(len(V), p=p / p.sum())]])
+        for _ in range(iters):
+            lab = (V @ Ctr.T).argmax(axis=1)
+            for j in range(K):
+                m = lab == j
+                if m.any():
+                    Ctr[j] = V[m].mean(axis=0)
+        lab = (V @ Ctr.T).argmax(axis=1)
+        Ctr /= (np.linalg.norm(Ctr, axis=1, keepdims=True) + 1e-9)
+        return lab, Ctr
+
+    KM = {}
+    if kms and 11 not in kms:       # 两级路由要用父簇：无论传没传，都算一份 K=11
+        lab0, ctr0 = kmeans(V, 11)
+        KM[11] = (lab0, ctr0)
+        print(f"  （两级路由的父簇：K=11）")
+    for K in kms:
+        lab, ctr = kmeans(V, K)
+        KM[K] = (lab, ctr)
+        sizes = np.bincount(lab, minlength=K)
+        print(f"  细簇 K={K}：{K} 簇，每簇块数 中位 {int(np.median(sizes))}、最大 {int(sizes.max())}")
+
     for name in names:
         cs = cases_mod.load(name, C)
         tgt, unresolved = sr.target_sentences(C, cs, S6)
@@ -258,6 +314,45 @@ def main():
                     ok += bool(set().union(*groups) & sel) if groups else False
                     inj.append(len(sel))
                 print(f"      逐块{q}句：{ok:>3}/{len(tgt):<4}{int(np.median(inj)):>6} 句")
+            # **细簇补全**：召回块 → 它所属的**整个细簇** → 每块 q_ref 句
+            for K in kms:
+                lab, ctr = KM[K]
+                for mode in ("whole", "route", "route2"):
+                  for kmsel in kmsels:
+                    ok, inj, nblk = 0, [], []
+                    for cid, qq, groups in tgt:
+                        qv = np.array(QV[qq], dtype=np.float32)
+                        pick = [int(i) for i in np.argsort(-(V @ qv))[:k]]
+                        if mode == "whole":
+                            cl = {int(lab[p]) for p in pick}
+                            cand = set(int(i) for i in np.where(np.isin(lab, list(cl)))[0])
+                        elif mode == "route":       # 路由：按质心相似度取前 kmsel 个簇
+                            top = np.argsort(-(ctr @ qv))[:kmsel]
+                            cand = set(int(i) for i in np.where(np.isin(lab, top))[0])
+                        else:
+                            # **两级**（用户提法：板块 → 子板块）：先按**父簇**质心挑 1 个板块，
+                            # 再只在这个板块内按**子簇**质心挑 kmsel 个子板块，取它们的块
+                            l11, c11 = KM[11]
+                            p_star = int(np.argmax(c11 @ qv))
+                            par_of = l11[np.argmax(ctr @ c11.T, axis=1)]   # 每个细簇归哪个父簇
+                            sub = [j for j in range(len(ctr)) if par_of[j] == p_star]
+                            if not sub:
+                                sub = list(range(len(ctr)))
+                            sub.sort(key=lambda j: -float(ctr[j] @ qv))
+                            keep_sub = sub[:kmsel]
+                            cand = set(int(i) for i in np.where(np.isin(lab, keep_sub))[0])
+                        sel = set()
+                        for p in cand:
+                            idx = np.where(chunk_of == id_of[p])[0]
+                            if len(idx):
+                                sel |= set(int(i) for i in idx[np.argsort(-(SV[idx] @ qv))[:q_ref]])
+                        ok += bool(set().union(*groups) & sel) if groups else False
+                        inj.append(len(sel))
+                        nblk.append(len(cand))
+                    tag = f"{kmsel}子" if mode == "route2" else (str(kmsel) if mode == "route" else "")
+                    print(f"      细簇K={K} {mode}{tag}："
+                          f"{ok:>3}/{len(tgt):<4}{int(np.median(inj)):>6} 句"
+                          f"　块 {int(np.median(nblk))}")
             # **结构边**：选句结构固定在"逐块 q_ref 句"，只换"块从哪来"
             for kind in edges:
                 ok, inj, nblk = 0, [], []
