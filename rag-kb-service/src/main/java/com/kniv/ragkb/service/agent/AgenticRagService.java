@@ -297,8 +297,52 @@ public class AgenticRagService {
     }
 
     private String answerSystem() {
-        return ANSWER_SYSTEM + thinkTail();
+        return ANSWER_SYSTEM + partialHint() + thinkTail();
     }
+
+    /**
+     * 「**资料只答了一部分**」那一档的措辞（A/B 用，默认空 = 一字不改）。
+     *
+     * <p>两种写法针对同一个实测病灶：`grounded-partial` 里 11% 的答案
+     * **说"知识库没有" + 却引用了资料里的值**。根因是 `CONTRACT_YI` 内部两句话打架 ——
+     * 「资料里确实没给的具体值，直说资料没给」 vs 「不要提『知识库中没有』」，
+     * 模型用后者的措辞说了前者的事。两版都**明确"部分"该怎么说**，区别在**放在哪**：
+     * <ul>
+     *   <li>{@code line}：塞在【乙】的规矩后面，解开那两句话的矛盾</li>
+     *   <li>{@code branch}：单列一档，更显眼但**多一档要守**</li>
+     * </ul>
+     * 依据与实测见 {@code RagProperties.Agent#partialHint}。
+     */
+    private String partialHint() {
+        String v = props.getAgent().getPartialHint();
+        if (v == null) {
+            return "";
+        }
+        return switch (v.trim().toLowerCase()) {
+            case "line" -> PARTIAL_LINE;
+            case "branch" -> PARTIAL_BRANCH;
+            default -> "";
+        };
+    }
+
+    /** 写法一：在【乙】里补一句边界（解开"直说资料没给"与"不要提知识库中没有"的矛盾）。 */
+    private static final String PARTIAL_LINE = """
+
+            ⇒ **资料只答了一部分**时（最常见）：把答了的那部分按上面正常答，引用处标 [编号]；
+              没答的那部分写「**资料里没有给 X**」——
+              **不要**写成「知识库中没有 X 的资料」（那会读成"整份资料都不相关"），
+              也**不要**把资料里已经有的值改标成通用知识。
+            """;
+
+    /** 写法二：把"部分"单列一档（更显眼，但模型要多守一条规则）。 */
+    private static final String PARTIAL_BRANCH = """
+
+            【乙·部分】资料只答了问题的一部分 —— **这是最常见的情形**
+            ⇒ 按【乙】答它答了的那部分，引用处标 [编号]；**不要**整题降级成【丙】。
+            ⇒ 只对**确实没答**的那部分说明缺什么，措辞用「资料里没给 X」，
+              **不要**写「知识库中没有 X 的资料」。
+            ⇒ 已经出现在资料里的值仍然标 [编号]，**不要**改标成通用知识。
+            """;
 
     /** 真正要发出去的那份系统提示。{@code category} 由 {@link #jevCategory} 判出。
      *
@@ -312,7 +356,7 @@ public class AgenticRagService {
         }
         String rule = switch (category) {
             case "甲" -> CONTRACT_JIA;
-            case "乙" -> CONTRACT_YI;
+            case "乙" -> CONTRACT_YI + partialHint();      // 这一档只对【乙】有意义（部分可答）
             default -> CONTRACT_BING;
         };
         return rule + thinkTail();

@@ -165,6 +165,9 @@ ragkb:
       # 真正显著的是"不再复述类别"：标签泄漏 7/105 → 0/105（Fisher p≈0.014）。
       # 回退：把这里或环境变量设成 false 即可，一行。
       contract-in-code: ${KB_CONTRACT_IN_CODE:true}
+      # 「资料只答了一部分」那一档的措辞：off（默认，一字不改）/ line（在【乙】里补一句边界）/
+      # branch（把"部分"单列一档）。依据与判据见 RagProperties.Agent#partialHint。
+      partial-hint: ${KB_PARTIAL_HINT:off}
       # 推理时不许复述【参考资料】原文（默认关）。
       # 依据：思考里**中位 38% 的字能对上注入材料里的某一句话**（4~45%，由题型决定），
       # 且集中在前 1/3（40%/36%/24%）—— 那些字已经在提示词里，再写一遍不产生新信息。
