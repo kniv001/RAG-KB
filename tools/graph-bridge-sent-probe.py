@@ -49,6 +49,33 @@
   换成靶句只有 **114**。块进来了 ≠ 答案要的那句进来了。
 · 相似度地板（0.45 / 0.6）**完全不起作用** —— top-10 邻句全在 0.6 以上，
   余弦在句级几乎是"稠密图"，没有区分力。这正是"松判据不区分"的又一例。
+
+## ⭐ 结构边：真正的答案（用户 2026-09-26 追问"换成语义相似度行不行"）
+
+**先澄清**：这里的边**本来就是语义相似度**（bge-m3 的 embedding 余弦），不是字面相似。
+所以"换成语义"没得换 —— 真正的分野是 **"相似度边（稠密、没区分力）" vs "结构/类型边（稀疏、有类型）"**。
+
+四种边都量了（选句结构固定为"逐块 q 句"，判据=靶句，multihop-127，k=8）：
+
+| 配置 | 靶句命中 | 注入句 | 块数 |
+|---|---|---|---|
+| 基线（全局 top-20） | 107/127 | 20 | 8 |
+| 逐块 5 句（只召回块） | 113 | 39 | 8 |
+| 语义 kNN 图 +10 邻句 | 114 | 88 | — |
+| **相邻块 seq±1 · 每块 5 句** | **120** | **72** | 16 |
+| 同文档 · 每块 5 句 | 121 | 198 | 43 |
+| 同簇（`tree_nodes`）· 每块 5 句 | **122** | **499** | 111 |
+| **随机块**（对照）· 每块 5 句 | 113 | 113 | 24 |
+
+三条读法：
+1. **结构边 > 相似度边**：相邻块 120@72 完胜语义图 114@88（命中更高、代价更低）
+2. **随机对照证明增益来自"边有信息"**，不是"加得多"：随机 24 块 / 113 句 ⇒ 命中一点没动
+3. **边越宽越贵**：同簇最好（122）但拖进 111 块 / 499 句；每块句数 q 的曲线也很陡
+   （相邻块：q=2 → 109@32、q=3 → 113@46、q=5 → 120@72）
+
+⇒ **结论修正**：不是"建不建图"的问题，而是 **"加一条文档补全规则"** ——
+召回命中某块时，把它 `seq±1` 的相邻块也带上（每块再取 top-5 句）。
+它**不需要任何持久化的边表**（`seq±1` 就是一条 WHERE 条件），也不是分布式的东西。
 """
 import hashlib
 import importlib.util
@@ -79,7 +106,7 @@ def _load(name):
 def main():
     arg = lambda k, d: (sys.argv[sys.argv.index(f"--{k}") + 1]        # noqa: E731
                         if f"--{k}" in sys.argv else d)
-    _opts = {"--k", "--hop", "--floor", "--m"}
+    _opts = {"--k", "--hop", "--floor", "--m", "--perblock", "--edges", "--qref"}
     names = [a for i, a in enumerate(sys.argv[1:])
              if not a.startswith("--") and sys.argv[1:][i - 1] not in _opts] or \
         ["multihop-127", "xdoc-8"]
@@ -89,6 +116,9 @@ def main():
     floors = [float(x) for x in arg("floor", "0.0,0.45,0.6").split(",")]
     # **逐块配额**：每块各出自己最相关的 q 句（而不是全局共享一个 M 窗口）
     quotas = [int(x) for x in arg("perblock", "").split(",") if x.strip()]
+    # **结构边**（有类型的边，而不是"像不像"）：doc=同文档；adj=相邻块；tree=同一主题簇
+    edges = [x for x in arg("edges", "").split(",") if x.strip()]
+    q_ref = int(arg("qref", "5"))          # 结构边那一档统一用逐块 5 句（今天量出的较优结构）
 
     import sent_index
     sr = _load("sent-recall")
@@ -128,6 +158,49 @@ def main():
         NB[h] = (idx, sim)
     print(f"邻句表已算好（{'/'.join(str(h) for h in hops)}）")
 
+    # 结构边要用的两张表：块 id → 簇 id（主题树），簇 id → 块 id 列表
+    block_cluster, cluster_chunks = {}, {}
+    if "tree" in edges:
+        for tid, ids in corpus.psql_rows("SELECT id, chunk_ids FROM tree_nodes"):
+            members = [int(c) for c in (ids or "").strip("{}").split(",") if c.strip()]
+            cluster_chunks[tid] = members
+            for c in members:
+                block_cluster[c] = tid
+    doc_pos = {}                                  # 文档 → 该文档的块位置
+    for i in range(C.n):
+        doc_pos.setdefault(C.doc[i], []).append(i)
+
+    def reached_blocks(pick, kind):
+        """从召回块出发，**按边的类型**一跳能到达的块（位置集合，含召回自己）。
+
+        · `doc`  —— 同文档的全部块（结构边：这份文档一起被召回）
+        · `adj`  —— 同文档里 seq 相差 ≤1 的块（结构边：上下文连续）
+        · `tree` —— 同一**主题簇**里的块（这是"长索引"那半边：议题 → 块）
+        · `rand` —— 对照组：同样多但**随机**的块（用来判"是不是加块就有用"）
+        """
+        out = set(pick)
+        if kind == "doc":
+            for i in pick:
+                out |= set(doc_pos.get(C.doc[i], []))
+        elif kind == "adj":
+            for i in pick:
+                for j in doc_pos.get(C.doc[i], []):
+                    if abs(int(C.seq[j]) - int(C.seq[i])) <= 1:
+                        out.add(j)
+        elif kind == "tree":
+            for i in pick:
+                tid = block_cluster.get(int(C.ids[i]))
+                for b in cluster_chunks.get(tid, []):
+                    if b in pos_of:
+                        out.add(pos_of[b])
+        elif kind == "rand":
+            need = max(0, 3 * len(pick) - len(out))
+            pool = np.setdiff1d(np.arange(C.n), np.fromiter(out, dtype=int),
+                                assume_unique=False)
+            out |= set(int(x) for x in np.random.default_rng(0).choice(
+                pool, size=min(need, len(pool)), replace=False))
+        return out
+
     for name in names:
         cs = cases_mod.load(name, C)
         tgt, unresolved = sr.target_sentences(C, cs, S6)
@@ -156,6 +229,24 @@ def main():
                     ok += bool(set().union(*groups) & sel) if groups else False
                     inj.append(len(sel))
                 print(f"      逐块{q}句：{ok:>3}/{len(tgt):<4}{int(np.median(inj)):>6} 句")
+            # **结构边**：选句结构固定在"逐块 q_ref 句"，只换"块从哪来"
+            for kind in edges:
+                ok, inj, nblk = 0, [], []
+                for cid, qq, groups in tgt:
+                    qv = np.array(QV[qq], dtype=np.float32)
+                    pick = [int(i) for i in np.argsort(-(V @ qv))[:k]]
+                    blocks = reached_blocks(pick, kind)
+                    sel = set()
+                    for p in blocks:
+                        idx = np.where(chunk_of == id_of[p])[0]
+                        if not len(idx):
+                            continue
+                        sel |= set(int(i) for i in idx[np.argsort(-(SV[idx] @ qv))[:q_ref]])
+                    ok += bool(set().union(*groups) & sel) if groups else False
+                    inj.append(len(sel))
+                    nblk.append(len(blocks))
+                print(f"      边【{kind}】：{ok:>3}/{len(tgt):<4}{int(np.median(inj)):>6} 句"
+                      f"　（块 {int(np.median(nblk))} 个）")
             for fl in floors:
                 for h in hops:
                     ok = inj_tot = 0
