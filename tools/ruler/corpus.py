@@ -51,12 +51,26 @@ def norm(s):
     return re.sub(r"\s+", "", unescape(s))
 
 
+def _sql_file(tag):
+    """把 SQL 落到一个 **本进程独占** 的文件上，交给 `psql -f`。
+
+    ⚠️ 文件名里**必须带 pid**（2026-09-25 修）：原先固定叫 `_ruler_<tag>.sql`，
+    于是它成了**跨进程的汇合点** —— 两个工具同时跑（后台尺子 + 手工重建），
+    一个写到一半、另一个在读，症状是
+    `psql:..._ruler_corpus.sql:2: ERROR: syntax error at or near "OIN"`
+    （`JOIN` 被截断）或**行数悄悄不对**。
+    实测代价：一次 `news-live` 的判分整个崩掉，而采集那边**已经跑完了**（白跑 4 分钟）。
+    这类"仪器互相踩"的坑与本项目其它坑同族：**坏了不报错，或报一个与真因无关的错**。
+    """
+    return os.path.join(TOOLS, f"_ruler_{tag}_{os.getpid()}.sql")
+
+
 def psql_rows(sql, tag="corpus"):
     # **结尾分号要剥掉**：本函数把查询包进 `COPY (...)`，而 `COPY (SELECT ...;)` 是语法错误。
     # 2026-09-22 踩到：调用方带了个分号 ⇒ 每条查询都报错，而**报错信息只进 stderr**，
     # 函数返回空列表 ⇒ 被读成"表里没有"。（那次我以为"非零退出"就是判据，见下。）
     sql = sql.strip().rstrip(";")
-    f = os.path.join(TOOLS, f"_ruler_{tag}.sql")
+    f = _sql_file(tag)
     io.open(f, "w", encoding="utf-8").write(f"COPY ({sql}) TO STDOUT;")
     env = dict(os.environ)
     env["PGPASSWORD"] = io.open(PGPASS, encoding="utf-8").read().strip()
@@ -69,7 +83,9 @@ def psql_rows(sql, tag="corpus"):
     # 还没修对的那种。
     err = r.stderr.decode("utf-8", "replace")
     if r.returncode != 0 or "ERROR" in err.upper():
-        raise RuntimeError(f"psql 失败（退出码 {r.returncode}）：{err[:400]}")
+        # **失败时把 SQL 留着并写出路径** —— 查这种错第一步就是看那条语句长什么样
+        raise RuntimeError(f"psql 失败（退出码 {r.returncode}）：{err[:400]}\nSQL 留在 {f}")
+    os.unlink(f)                       # 成功即清（否则一次运行一个进程名，越积越多）
     raw = r.stdout.decode("utf-8", "replace")
     # `\r` 不去掉的话，每行最后一个字段永远比不中（2026-09-20 踩过：全场 0 命中）
     return [[unescape(x) for x in ln.rstrip("\r").split("\t")]
@@ -83,7 +99,7 @@ def psql_script(sql_text, tag="exec"):
     这里尤其要紧：写操作如果静默失败，读回来会是"表是空的"，
     而那是本项目最贵的一类误读（`psql` 在 SQL 出错时**退出码仍然是 0**）。
     """
-    f = os.path.join(TOOLS, f"_ruler_{tag}.sql")
+    f = _sql_file(tag)
     io.open(f, "w", encoding="utf-8").write(sql_text)
     env = dict(os.environ)
     env["PGPASSWORD"] = io.open(PGPASS, encoding="utf-8").read().strip()
@@ -93,7 +109,8 @@ def psql_script(sql_text, tag="exec"):
                        capture_output=True, env=env)
     err = r.stderr.decode("utf-8", "replace")
     if r.returncode != 0 or "ERROR" in err.upper():
-        raise RuntimeError(f"psql 写失败（退出码 {r.returncode}）：{err[:600]}")
+        raise RuntimeError(f"psql 写失败（退出码 {r.returncode}）：{err[:600]}\nSQL 留在 {f}")
+    os.unlink(f)
     return r.stdout.decode("utf-8", "replace")
 
 
