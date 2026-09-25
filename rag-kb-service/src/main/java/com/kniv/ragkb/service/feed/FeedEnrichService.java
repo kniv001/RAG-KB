@@ -40,6 +40,7 @@ import java.util.Map;
 public class FeedEnrichService {
 
     private final FeedIndexMapper idx;
+    private final com.kniv.ragkb.dao.mapper.FeedMapper feed;
     private final EmbeddingService embedding;
     private final GpuGate gpuGate;
     private final FeedProperties props;
@@ -64,6 +65,11 @@ public class FeedEnrichService {
         // 白背一份重复率（实测 40 篇里 154 段相似度正好 1.0，全是侧栏）。
         int boiler = idx.markBoilerplate(props.getBoilerplateMinItems());
 
+        // **先算一次行频**（"哪些行是站点家具"），本批共用 —— 见 FeedText 的类注释：
+        // 实测界面新闻的快讯条目**84% 是家具**，嵌入被模板主导 ⇒ 19 条毫不相干的快讯
+        // 互相相似度 0.93+、被并成一簇。**在切分与嵌入之前洗掉它**，是这条链上最早的一处。
+        Map<String, Integer> lineFreq = FeedText.lineFrequency(feed.allBodies());
+
         List<Map<String, Object>> pending = idx.pendingEnrich(limit);
         if (pending.isEmpty()) {
             return new Batch(0, 0, 0, 0, List.of(), "没有待富化的条目");
@@ -79,7 +85,7 @@ public class FeedEnrichService {
         for (Map<String, Object> row : pending) {
             long id = ((Number) row.get("id")).longValue();
             try {
-                Enriched e = one(id, str(row.get("title")), str(row.get("body")));
+                Enriched e = one(id, str(row.get("title")), str(row.get("body")), lineFreq);
                 out.add(e);
                 if (e.newTopic()) {
                     newTopics++;
@@ -101,8 +107,11 @@ public class FeedEnrichService {
         return idx.topTopics(limit);
     }
 
-    private Enriched one(long id, String title, String body) {
-        List<FeedSegmenter.Seg> segs = FeedSegmenter.split(body);
+    private Enriched one(long id, String title, String body, Map<String, Integer> lineFreq) {
+        // **洗家具要在切分之前**：切分器会把"短行攒够再切"，
+        // 家具与正文一旦被攒进同一段，就再也分不开了。
+        String cleaned = FeedText.strip(body, lineFreq, props.getPromoteMinRepeats());
+        List<FeedSegmenter.Seg> segs = FeedSegmenter.split(cleaned);
         if (segs.isEmpty()) {
             idx.updateEnriched(id, VectorTypeHandler.toLiteral(new float[1024]),
                     embedding.modelColumn(), 0, 0, null);
