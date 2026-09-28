@@ -49,14 +49,15 @@ def cmd_audit():
 
 
 def cmd_health(argv):
-    """**基准体检** —— 语料长大了，题还成不成立？三张网一起打。
+    """**基准体检** —— 语料长大了、管线改口径了，题还成不成立？四张网。
 
-    三张网**互为盲区**（详见 `runner.audit_bench` 与 `bench-material-probe.py`）：
+    四张网**互为盲区**（详见 `runner.audit_bench` 与 `bench-material-probe.py`）：
       ① **声明式**（本命令内）—— 题面写的 `must_find` / `breaks_if_found` 摘录，纯语料、最快
       ② **行为式**（`bench-rot-probe.py`）—— 模型"声明没有"的比例；要**跑过**才有读数
       ③ **材料式**（`bench-material-probe.py`）—— 生产那条路给这道题剩几句；**要应用在跑**
+      ④ **覆盖率**（`bench-coverage-probe.py`）—— 题**该往哪长**（前三张只管"坏没坏"）
     只有 ① 能在**不跑模型、不起应用**的情况下随时跑 —— 所以体检默认只做 ①，
-    另两张按需要单独跑（命令里会打出来）。
+    另三张按需要单独跑（命令里会打出来）。
     """
     import subprocess
     only = [a for a in argv if not a.startswith("--")]
@@ -70,9 +71,10 @@ def cmd_health(argv):
             print(e)
         print()
     print(f"—— 声明式：{len(names)} 个基准，通过 {len(names) - bad} 个 ——")
-    print("另两张网（按需要单独跑）：")
-    print("  ② 行为式：python tools/eval/bench-rot-probe.py     （要跑过才有读数）")
-    print("  ③ 材料式：python tools/eval/bench-material-probe.py <基准>  （要应用在跑；9 秒/题）")
+    print("另三张网（按需要单独跑）：")
+    print("  ② 行为式：  python tools/eval/bench-rot-probe.py            （要跑过才有读数）")
+    print("  ③ 材料式：  python tools/eval/bench-material-probe.py <基准> （要应用在跑；9 秒/题）")
+    print("  ④ 覆盖率：  python tools/eval/bench-coverage-probe.py       （题该往哪长）")
     return bad
 
 
