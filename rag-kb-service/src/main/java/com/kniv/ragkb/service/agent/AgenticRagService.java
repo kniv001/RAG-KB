@@ -1488,7 +1488,11 @@ public class AgenticRagService {
                 ls.removeIf(s -> s.getSim() == null || s.getSim() < fl);
             }
             sentMap.values().removeIf(List::isEmpty);
-            contexts.removeIf(h -> !sentMap.containsKey(h.getId()));
+            // ⚠️ `sentMap` 上面被**重新赋值**过 ⇒ 不是 effectively final ⇒ 不能在 lambda 里捕获。
+            // 第一版写的就是 `contexts.removeIf(h -> !sentMap.containsKey(...))`，
+            // 于是**编译不过** —— 而那次构建又被"服务模块跳过重编"掩盖了（见下方教训）。
+            final Map<Long, List<com.kniv.ragkb.domain.entity.Sentence>> kept = sentMap;
+            contexts.removeIf(h -> !kept.containsKey(h.getId()));
             int alive = sentMap.values().stream().mapToInt(List::size).sum();
             log.info("材料地板 {}（{}）：过滤后剩 {} 句 / {} 块", fl, question.length() > 20
                     ? question.substring(0, 20) : question, alive, contexts.size());
