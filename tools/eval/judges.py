@@ -316,6 +316,33 @@ def _source_texts(sources):
     return texts
 
 
+# ── 数字写法归一（2026-09-29 加）────────────────────────────────────────
+# **为什么要有它**：`aq-p4` 的答案写「初始拥塞窗口是 **1** 个报文段」，而资料里写的是
+# 「先设置 cwnd=1，…只发送**一个**报文段」—— **同一件事的两种写法**，而这一条判据原本
+# 要求**字面**包含 ⇒ 判成"值对不上"⇒ 连带 `引用全对=False` ⇒ `走对了出口=False`。
+#
+# **先量了分布才动它**（`tools/eval/cite-fp-probe.py`，125 份落盘 / 462 个「引用对不上」）：
+#   · 真缺（判据该抓的）441 = **95.5%**   ← 判据本身是对的
+#   · **数字写法 14 = 3.0%**（且 14 个**全部集中在 aq-p4 同一道题**上）
+#   · 截断 7 = 1.5%（值后面粘了个字，见下）
+#
+# **只做 1~9 的单个数字**：再大的数（十/百/万/两）写法差异太大，
+# 放宽到那里就不是"同一件事的两种写法"，而会让判据开始接受**真的不一样**的值。
+# 方向也只有一个（汉字 → 数字）：**规范形只能往一边倒** ——
+# 探针第一版把 `1→一` 与 `一→1` 同时做了，两边互换完还是不一样，于是这一类报了 0 个。
+_CN_NUM = {"一": "1", "二": "2", "三": "3", "四": "4", "五": "5",
+           "六": "6", "七": "7", "八": "8", "九": "9"}
+
+
+def _num_norm(s):
+    return "".join(_CN_NUM.get(c, c) for c in s)
+
+
+def _covers(value, text):
+    """值 `value` 是否出现在 `text` 里 —— **比较前两边都过一遍数字归一**。"""
+    return value in text or _num_norm(value) in _num_norm(text)
+
+
 def citation_local(answer, sources, min_len=6):
     """逐子句查「结论里的具体值在不在它所引的那块里」。
 
@@ -331,7 +358,7 @@ def citation_local(answer, sources, min_len=6):
         if not ids or not vals:
             continue
         checked += 1
-        miss = [v for v in vals if not any(v in texts.get(i, "") for i in ids)]
+        miss = [v for v in vals if not any(_covers(v, texts.get(i, "")) for i in ids)]
         if miss:
             bad.append((clause.strip()[:60], ids, miss[:3]))
     return checked, bad
@@ -403,7 +430,7 @@ def uncited_values(answer, sources):
             continue
         found = {}
         for v in vals:
-            where = [i for i, t in texts.items() if v in t]
+            where = [i for i, t in texts.items() if _covers(v, t)]
             if where:
                 found[v] = where
         if found:
@@ -527,7 +554,7 @@ def sentence_citation_local(cites, sources, answer):
         if not vals:
             continue                     # 概括性表述不含具体值 ⇒ 这一条不适用
         checked += 1
-        miss = [v for v in vals if v not in texts[key]]
+        miss = [v for v in vals if not _covers(v, texts[key])]
         if miss:
             bad.append((clause.strip()[:50], f"[{n}.{m}]", miss[:3]))
     return checked, bad
