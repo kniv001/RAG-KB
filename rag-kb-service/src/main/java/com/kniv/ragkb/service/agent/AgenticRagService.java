@@ -206,8 +206,9 @@ public class AgenticRagService {
             // 形状与意图相反：**最相关的块被截成几句，最不相关的块反而装全文**。
             // 逐块挑句让每个有句子的块都至少出一句，退路只剩"真的没句子"。
             all = (k > 0)
-                    ? sentences.topPerChunkInChunks(ids, vec, model, k)
-                    : sentences.topInChunks(ids, vec, model, props.getAgent().getSentWindowM());
+                    ? sentences.topPerChunkInChunks(ids, vec, model, k, props.getAgent().isSentNoHead())
+                    : sentences.topInChunks(ids, vec, model, props.getAgent().getSentWindowM(),
+                            props.getAgent().isSentNoHead());
         } else {
             all = sentences.listByChunks(ids);
         }

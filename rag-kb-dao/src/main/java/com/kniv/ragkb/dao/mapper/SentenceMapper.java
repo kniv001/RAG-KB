@@ -53,6 +53,7 @@ public interface SentenceMapper extends BaseMapper<Sentence> {
             <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
               AND embed_model = #{model}
               AND embedding IS NOT NULL
+              <if test="noHead">AND kind &lt;&gt; 'head'</if>
             ORDER BY embedding &lt;=&gt; #{q}::vector
             LIMIT #{limit}
             </script>
@@ -60,7 +61,8 @@ public interface SentenceMapper extends BaseMapper<Sentence> {
     List<Sentence> topInChunks(@Param("ids") Collection<Long> ids,
                                @Param("q") String vectorLiteral,
                                @Param("model") String embedModel,
-                               @Param("limit") int limit);
+                               @Param("limit") int limit,
+                               @Param("noHead") boolean noHead);
 
     /**
      * **逐块挑句**：每个块各出它自己最相关的 {@code k} 句。
@@ -91,6 +93,7 @@ public interface SentenceMapper extends BaseMapper<Sentence> {
               <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
                 AND embed_model = #{model}
                 AND embedding IS NOT NULL
+                <if test="noHead">AND kind &lt;&gt; 'head'</if>
             ) t
             WHERE rn &lt;= #{k}
             ORDER BY chunk_id, rn
@@ -99,5 +102,6 @@ public interface SentenceMapper extends BaseMapper<Sentence> {
     List<Sentence> topPerChunkInChunks(@Param("ids") Collection<Long> ids,
                                        @Param("q") String vectorLiteral,
                                        @Param("model") String embedModel,
-                                       @Param("k") int k);
+                                       @Param("k") int k,
+                                       @Param("noHead") boolean noHead);
 }
