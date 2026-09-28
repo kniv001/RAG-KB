@@ -452,11 +452,19 @@ public class AgenticRagService {
         double med = sorted.get(sorted.size() / 2);
         // **没触发也要打**（2026-09-28 补）：第一轮实验里"触发行数 0"，
         // 而报告上看不出是"判据没过"还是"sim 根本没映射进来" —— 仪器不响时的静默最难查。
-        log.info("代码判相关性[{}]：句 {} 条，最高 {} / 中位 {} / 差 {}（阈值 {}）⇒ {}",
+        // **地板存活数**（2026-09-28 加）：把"有没有"从**判断**换成**过滤**的那条路要用它 ——
+        // 「材料低于地板就不进提示词」之后，"有没有"不再是判断而是**事实**
+        //（提示词里还剩几句）。这里先把存活数打出来，好在真管线上标定地板，
+        // 免得又犯"拿离线集合当系统的集合"那个错（今天犯过四次）。
+        String alive = "0.55:" + sims.stream().filter(v -> v >= 0.55).count()
+                + " 0.60:" + sims.stream().filter(v -> v >= 0.60).count()
+                + " 0.65:" + sims.stream().filter(v -> v >= 0.65).count()
+                + " 0.70:" + sims.stream().filter(v -> v >= 0.70).count();
+        log.info("代码判相关性[{}]：句 {} 条，最高 {} / 中位 {} / 差 {}（阈值 {}）⇒ {}｜地板存活 {}",
                 question.length() > 24 ? question.substring(0, 24) : question,
                 sims.size(), String.format("%.3f", max), String.format("%.3f", med),
                 String.format("%.3f", max - med), props.getAgent().getRelMargin(),
-                (max - med >= props.getAgent().getRelMargin()) ? "触发" : "不触发");
+                (max - med >= props.getAgent().getRelMargin()) ? "触发" : "不触发", alive);
         if (max - med < props.getAgent().getRelMargin()) {
             return "";                       // 没有"明显比其余更相关"的句子 ⇒ 交给【丙】照旧
         }
