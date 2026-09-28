@@ -374,6 +374,17 @@ public class AgenticRagService {
      *  **行为与从前一字不差**。
      */
     private String answerSystem(String category) {
+        return answerSystem(category, "");
+    }
+
+    /**
+     * 真正要发出去的那份系统提示（带**代码判出来的相关性**）。
+     *
+     * <p>`relHint` 非空 = 代码已确认【参考资料】里有相关片段，并点名了要引用的地址。
+     * 这一句**只加在【丙】上**：全天实测的失败都长在"判丙之后"那一段
+     * （判丙的答案 100% 开口说"知识库没有"），而【乙】那半边从来不出问题。
+     */
+    private String answerSystem(String category, String relHint) {
         // category == null ⇒ 没判定（开关关着，或 Jev 信号不可用）⇒ 走原来的提示词
         if (!props.getAgent().isContractInCode() || category == null) {
             return answerSystem();
@@ -383,9 +394,73 @@ public class AgenticRagService {
             case "乙" -> CONTRACT_YI + partialHint();      // 这一档只对【乙】有意义（部分可答）
             // 【丙】**拼装**（第一拍按开关选）：实测"说知识库没有"的题几乎全是判丙的，
             // 而**加一句不生效**（12/12 没改）⇒ 只能改结构。见 contractBing()
-            default -> contractBing() + partialHint();
+            default -> contractBing() + partialHint() + relHint;
         };
         return rule + thinkTail();
+    }
+
+    /**
+     * **代码判「有没有相关段落」** —— 判据是**相对量**，判断不由模型做。
+     *
+     * <p>为什么必须由代码判（2026-09-26 全线实测）：凡是"让模型自己判断有没有"的改法
+     * 都在同一处翻车 —— Jev 判类把 6/10 部分可答题判成【丙】；把逐块问法换成「有关」
+     * 或整批材料问「合起来能不能答」，该判丙的 5 道全翻成乙；在【丙】契约后加一句
+     * "不要这么说"，12 条答案一条没改；改第一拍、把判断交给模型，**护栏被打破**
+     * （真没有资料的 3 道被它判成"有"，于是不再声明、拿不相关资料硬答）。
+     *
+     * <p>判据：注入句的 `最高相似度 − 该题中位相似度 ≥ relMargin`（默认 0.22）。
+     * 相对量**自归一化**，换语料不必重标定；26 题实测 0 误判 + 抓住 3/4 的"判丙有害"。
+     *
+     * @return 追加到【丙】契约后面的一句（不需要就说空串）
+     */
+    private String relHintOf(List<ChunkHit> contexts,
+                             Map<Long, List<com.kniv.ragkb.domain.entity.Sentence>> sentMap) {
+        String mode = props.getAgent().getPartialHint();
+        if (mode == null || !"code".equalsIgnoreCase(mode.trim())) {
+            return "";
+        }
+        List<Double> sims = new ArrayList<>();
+        for (List<com.kniv.ragkb.domain.entity.Sentence> ls : sentMap.values()) {
+            for (com.kniv.ragkb.domain.entity.Sentence s : ls) {
+                if (s.getSim() != null) {
+                    sims.add(s.getSim());
+                }
+            }
+        }
+        if (sims.size() < 5) {
+            return "";                       // 样本太少，不判（宁可不帮，也别乱指）
+        }
+        List<Double> sorted = new ArrayList<>(sims);
+        java.util.Collections.sort(sorted);
+        double max = sorted.get(sorted.size() - 1);
+        double med = sorted.get(sorted.size() / 2);
+        if (max - med < props.getAgent().getRelMargin()) {
+            return "";                       // 没有"明显比其余更相关"的句子 ⇒ 交给【丙】照旧
+        }
+        // 点名要引用的地址：⟨块号.句号⟩ —— 块号 = 它在 contexts 里的位置 + 1，
+        // 与提示词里渲染地址的那一处**必须一致**（不一致等于指错地方）
+        List<String> addr = new ArrayList<>();
+        for (int i = 0; i < contexts.size(); i++) {
+            List<com.kniv.ragkb.domain.entity.Sentence> ls = sentMap.get(contexts.get(i).getId());
+            if (ls == null) {
+                continue;
+            }
+            for (com.kniv.ragkb.domain.entity.Sentence s : ls) {
+                if (s.getSim() != null && s.getSim() >= max - 0.03) {
+                    addr.add("⟨" + (i + 1) + "." + s.getSeq() + "⟩");
+                }
+            }
+        }
+        if (addr.isEmpty()) {
+            return "";
+        }
+        log.info("代码判相关性：最高 {} / 中位 {} / 差 {} ≥ {}　点名的句子 {}",
+                String.format("%.3f", max), String.format("%.3f", med),
+                String.format("%.3f", max - med), props.getAgent().getRelMargin(), addr);
+        return "\n⇒ **系统已确认**：上面【参考资料】里有与问题直接相关的片段（" + String.join("、", addr)
+                + "）。**先引用它们**说清资料里说了什么（引用处标 [编号]），**再说**还缺什么；\n"
+                + "  **不要**回答「知识库中没有」——「库里有没有这方面的资料」与"
+                + "「资料答不答得全」是两件事。\n";
     }
 
     private static final String ANSWER_SYSTEM = """
@@ -1290,6 +1365,9 @@ public class AgenticRagService {
             sentMap = selectSentences(question, contexts);
             sentKey = sentKeyOf(sentMap);
         }
+        // **代码判"有没有相关段落"**（`partial-hint=code`）：判断由代码做，
+        // 模型只负责引用 —— 详见 relHintOf 的注释（全天所有失败都出在"让模型自己判"上）
+        String relHint = relHintOf(contexts, sentMap);
 
         int reserve = props.getAgent().getGenerationReserveTokens();
         int budget = Math.max(1024,
@@ -1500,7 +1578,7 @@ public class AgenticRagService {
                 ref.providerId(), ref.model(), TEMPERATURE,
                 // 系统提示的哈希进键 —— 改提示词（含"思考形状"这类开关）自动失效，
                 // 而不是继续拿旧提示词跑出来的答案。见 CacheService.answerKey。
-                CacheService.hash(answerSystem(category) + "|" + answerPathTag()
+                CacheService.hash(answerSystem(category, relHint) + "|" + answerPathTag()
                         // **长期记忆必须进键** —— 它变了答案就可能变。
                         // 不进键的症状是"记忆明明更新了，回答却还是旧的"，
                         // 而且因为缓存命中不报错，**看起来像记忆没生效**。
@@ -1533,7 +1611,7 @@ public class AgenticRagService {
         }
 
         List<ChatMessage> messages = new ArrayList<>();
-        messages.add(ChatMessage.system(answerSystem(category)));
+        messages.add(ChatMessage.system(answerSystem(category, relHint)));
         // 历史放在资料之前：事实依据仍来自资料，历史只用来理解指代
         if (history != null) {
             messages.addAll(history);
