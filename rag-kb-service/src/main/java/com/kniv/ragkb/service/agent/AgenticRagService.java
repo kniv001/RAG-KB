@@ -408,13 +408,29 @@ public class AgenticRagService {
      * "不要这么说"，12 条答案一条没改；改第一拍、把判断交给模型，**护栏被打破**
      * （真没有资料的 3 道被它判成"有"，于是不再声明、拿不相关资料硬答）。
      *
-     * <p>判据：注入句的 `最高相似度 − 该题中位相似度 ≥ relMargin`（默认 0.22）。
-     * 相对量**自归一化**，换语料不必重标定；26 题实测 0 误判 + 抓住 3/4 的"判丙有害"。
+     * <p>⚠️ **判据本身已被实测否定**（2026-09-28，29 题在线标定，见下）——
+     * 代码留在开关后（默认 off），**不要当它有效**：
+     * <pre>
+     *   档                 "最高−中位" 的分布        过 0.22 的
+     *   grounded（有）      0.026 ~ 0.298            3 道（aq-g6 / nl-g3 / nl-g4）
+     *   grounded-partial   0.035 ~ 0.159            0 道
+     *   ungrounded（真没有） 0.034 ~ 0.142            0 道
+     * </pre>
+     * 触发的三道**全是"有资料"的题**（本就判乙、加了也没用），而所有部分可答与真没有
+     * 都在 0.16 以下 ⇒ **在真管线上分不开那两类**。原因是注入集是**按相似度截断的 top-20**，
+     * 中位天然被抬高、差被压扁。
+     * （标定时我自己踩过一次：离线用"召回块里**所有**句"算，尺度完全不同 ——
+     * 这是同一天第四次"仪器比错了对象"，前三次：整块 vs 注入句、引用标在句号后、
+     * 以及测 36% 那次用了含回放的样本。）
+     *
+     * <p>⇒ **结论**："这段资料能不能答这个问题"这个判断，用现有信号（Jev 概率 / 绝对余弦 /
+     * 相对余弦）**都分不开**（三个都量过了）。它不是调参问题，是**信号不在那里**。
      *
      * @return 追加到【丙】契约后面的一句（不需要就说空串）
      */
     private String relHintOf(List<ChunkHit> contexts,
-                             Map<Long, List<com.kniv.ragkb.domain.entity.Sentence>> sentMap) {
+                             Map<Long, List<com.kniv.ragkb.domain.entity.Sentence>> sentMap,
+                             String question) {
         String mode = props.getAgent().getPartialHint();
         if (mode == null || !"code".equalsIgnoreCase(mode.trim())) {
             return "";
@@ -434,6 +450,13 @@ public class AgenticRagService {
         java.util.Collections.sort(sorted);
         double max = sorted.get(sorted.size() - 1);
         double med = sorted.get(sorted.size() / 2);
+        // **没触发也要打**（2026-09-28 补）：第一轮实验里"触发行数 0"，
+        // 而报告上看不出是"判据没过"还是"sim 根本没映射进来" —— 仪器不响时的静默最难查。
+        log.info("代码判相关性[{}]：句 {} 条，最高 {} / 中位 {} / 差 {}（阈值 {}）⇒ {}",
+                question.length() > 24 ? question.substring(0, 24) : question,
+                sims.size(), String.format("%.3f", max), String.format("%.3f", med),
+                String.format("%.3f", max - med), props.getAgent().getRelMargin(),
+                (max - med >= props.getAgent().getRelMargin()) ? "触发" : "不触发");
         if (max - med < props.getAgent().getRelMargin()) {
             return "";                       // 没有"明显比其余更相关"的句子 ⇒ 交给【丙】照旧
         }
@@ -1367,7 +1390,7 @@ public class AgenticRagService {
         }
         // **代码判"有没有相关段落"**（`partial-hint=code`）：判断由代码做，
         // 模型只负责引用 —— 详见 relHintOf 的注释（全天所有失败都出在"让模型自己判"上）
-        String relHint = relHintOf(contexts, sentMap);
+        String relHint = relHintOf(contexts, sentMap, question);
 
         int reserve = props.getAgent().getGenerationReserveTokens();
         int budget = Math.max(1024,
