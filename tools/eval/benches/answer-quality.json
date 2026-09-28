@@ -297,6 +297,66 @@
     ]
    },
    "note": "2026-09-29 扩题（由 bench-coverage-probe 的空白数据驱动）；must_find 取该题最像的那句前 30 字，是**变更探测器**不是标准答案。"
+  },
+  {
+   "id": "aq-g18",
+   "kind": "grounded",
+   "q": "Docker 的四种网络模式分别是什么？",
+   "premise": {
+    "material": "some",
+    "must_find": [
+     "docker容器网络目录docker的四种网络模式bridg"
+    ]
+   },
+   "note": "2026-09-29 扩题（bench-coverage-probe 的空白数据驱动 + bench-expand 两闸）；must_find 取该题最像的那句前 30 字，是**变更探测器**不是标准答案。"
+  },
+  {
+   "id": "aq-g19",
+   "kind": "grounded",
+   "q": "微服务的熔断机制是怎么工作的？",
+   "premise": {
+    "material": "some",
+    "must_find": [
+     "服务熔断熔断机制是应对雪崩效应的一种微服务链路保护机制。"
+    ]
+   },
+   "note": "2026-09-29 扩题（bench-coverage-probe 的空白数据驱动 + bench-expand 两闸）；must_find 取该题最像的那句前 30 字，是**变更探测器**不是标准答案。"
+  },
+  {
+   "id": "aq-g21",
+   "kind": "grounded",
+   "q": "一致性哈希算法是怎么工作的？",
+   "premise": {
+    "material": "some",
+    "must_find": [
+     "它通过特殊的哈希函数，让相似的数据以高概率落入同一个“桶”中"
+    ]
+   },
+   "note": "2026-09-29 扩题（bench-coverage-probe 的空白数据驱动 + bench-expand 两闸）；must_find 取该题最像的那句前 30 字，是**变更探测器**不是标准答案。"
+  },
+  {
+   "id": "aq-g22",
+   "kind": "grounded",
+   "q": "LoRA 微调的原理是什么？",
+   "premise": {
+    "material": "some",
+    "must_find": [
+     "冒泡提示云社区博客LoRA微调原理微信微博分享文章到微博复制"
+    ]
+   },
+   "note": "2026-09-29 扩题（bench-coverage-probe 的空白数据驱动 + bench-expand 两闸）；must_find 取该题最像的那句前 30 字，是**变更探测器**不是标准答案。"
+  },
+  {
+   "id": "aq-g23",
+   "kind": "grounded",
+   "q": "Redis 的 RDB 持久化是怎么工作的？",
+   "premise": {
+    "material": "some",
+    "must_find": [
+     "Redis持久化原理—RDB与AOF详细解释"
+    ]
+   },
+   "note": "2026-09-29 扩题（bench-coverage-probe 的空白数据驱动 + bench-expand 两闸）；must_find 取该题最像的那句前 30 字，是**变更探测器**不是标准答案。"
   }
  ]
 }

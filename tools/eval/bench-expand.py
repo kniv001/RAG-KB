@@ -38,13 +38,14 @@ REPO = os.path.dirname(TOOLS)
 sys.path.insert(0, TOOLS)
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 from ruler import corpus                                        # noqa: E402
+from ruler.corpus import psql_rows                               # noqa: E402
 
 TOP, FLOOR, MIN_HITS = 20, 0.65, 3
 
 
 def territory(C, vec):
     lit = "[" + ",".join(f"{x:.7g}" for x in vec) + "]"
-    return C.psql_rows(
+    return psql_rows(
         "SELECT c.id, c.doc_id FROM sentences s JOIN chunks c ON c.id=s.chunk_id "
         "WHERE s.embedding IS NOT NULL AND s.kind <> 'head' "
         "AND 1-(s.embedding <=> '%s'::vector) >= %s "
@@ -54,7 +55,7 @@ def territory(C, vec):
 
 def top1(C, vec):
     lit = "[" + ",".join(f"{x:.7g}" for x in vec) + "]"
-    r = C.psql_rows(
+    r = psql_rows(
         "SELECT s.text FROM sentences s WHERE s.embedding IS NOT NULL AND s.kind <> 'head' "
         "ORDER BY s.embedding <=> '%s'::vector LIMIT 1" % lit, tag="bx2")
     return re.sub(r"\s+", "", r[0][0])[:30] if r else ""
