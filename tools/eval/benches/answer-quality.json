@@ -6,62 +6,98 @@
   {
    "id": "aq-g1",
    "kind": "grounded",
-   "q": "漏桶和令牌桶，哪个允许突发？为什么两者实现一样效果却相反？"
+   "q": "漏桶和令牌桶，哪个允许突发？为什么两者实现一样效果却相反？",
+   "premise": {
+    "material": "some"
+   }
   },
   {
    "id": "aq-g2",
    "kind": "grounded",
-   "q": "AOF 的刷盘策略有哪几种？最坏情况下会丢多少数据？"
+   "q": "AOF 的刷盘策略有哪几种？最坏情况下会丢多少数据？",
+   "premise": {
+    "material": "some"
+   }
   },
   {
    "id": "aq-g3",
    "kind": "grounded",
-   "q": "G1 的 Mixed GC 靠什么决定回收哪些老年代 Region？"
+   "q": "G1 的 Mixed GC 靠什么决定回收哪些老年代 Region？",
+   "premise": {
+    "material": "some"
+   }
   },
   {
    "id": "aq-g4",
    "kind": "grounded",
-   "q": "节点亲和里的硬策略和软策略分别对应哪两个长字段名？"
+   "q": "节点亲和里的硬策略和软策略分别对应哪两个长字段名？",
+   "premise": {
+    "material": "some"
+   }
   },
   {
    "id": "aq-g5",
    "kind": "grounded",
-   "q": "布隆过滤器为什么会有误判？误判率能调吗？"
+   "q": "布隆过滤器为什么会有误判？误判率能调吗？",
+   "premise": {
+    "material": "some"
+   }
   },
   {
    "id": "aq-g6",
    "kind": "grounded",
-   "q": "MySQL 的 MVCC 是怎么实现事务隔离的？"
+   "q": "MySQL 的 MVCC 是怎么实现事务隔离的？",
+   "premise": {
+    "material": "some"
+   }
   },
   {
    "id": "aq-u1",
    "kind": "ungrounded",
-   "q": "Kubernetes Operator 的 Reconcile 循环是怎么写的？"
+   "q": "Kubernetes Operator 的 Reconcile 循环是怎么写的？",
+   "premise": {
+    "material": "none"
+   }
   },
   {
    "id": "aq-u2",
    "kind": "ungrounded",
-   "q": "怎么给 Kafka 做 exactly-once 语义？"
+   "q": "怎么给 Kafka 做 exactly-once 语义？",
+   "premise": {
+    "material": "none"
+   }
   },
   {
    "id": "aq-u3",
    "kind": "ungrounded",
-   "q": "PostgreSQL 的 WAL 归档和 PITR 怎么做？"
+   "q": "PostgreSQL 的 WAL 归档和 PITR 怎么做？",
+   "premise": {
+    "material": "none"
+   }
   },
   {
    "id": "aq-u4",
    "kind": "ungrounded",
-   "q": "Rust 的 async/await 运行时是怎么实现的？"
+   "q": "Rust 的 async/await 运行时是怎么实现的？",
+   "premise": {
+    "material": "none"
+   }
   },
   {
    "id": "aq-u5",
    "kind": "ungrounded",
-   "q": "怎么用 Prometheus 配置告警规则？"
+   "q": "怎么用 Prometheus 配置告警规则？",
+   "premise": {
+    "material": "none"
+   }
   },
   {
    "id": "aq-u6",
    "kind": "ungrounded",
-   "q": "JVM 的 ZGC 和 Shenandoah 有什么区别？"
+   "q": "JVM 的 ZGC 和 Shenandoah 有什么区别？",
+   "premise": {
+    "material": "none"
+   }
   },
   {
    "id": "aq-c1",
@@ -81,32 +117,54 @@
   {
    "id": "aq-p1",
    "kind": "grounded-partial",
-   "q": "Rust 的借用检查器是编译期还是运行期检查？"
+   "q": "Rust 的借用检查器是编译期还是运行期检查？",
+   "premise": {
+    "material": "some"
+   }
   },
   {
    "id": "aq-p2",
    "kind": "grounded-partial",
-   "q": "Kubernetes 的 kube-scheduler 默认调度周期是多少？"
+   "q": "Kubernetes 的 kube-scheduler 默认调度周期是多少？",
+   "premise": {
+    "material": "some"
+   }
   },
   {
    "id": "aq-p3",
    "kind": "grounded-partial",
-   "q": "布隆过滤器在 Redis 里对应哪个命令？"
+   "q": "布隆过滤器在 Redis 里对应哪个命令？",
+   "premise": {
+    "material": "some"
+   }
   },
   {
    "id": "aq-p4",
    "kind": "grounded-partial",
-   "q": "TCP 慢启动的初始拥塞窗口是多少？"
+   "q": "TCP 慢启动的初始拥塞窗口是多少？",
+   "premise": {
+    "material": "some",
+    "breaks_if_found": [
+     "拥塞窗口从一个段的大小开始"
+    ]
+   },
+   "note": "已知偏离（2026-09-29 量出）：本题按 grounded-partial 的定义是「有相关内容、但没有那个具体值」，但库里那篇 TCP 文档（09-17 入库）**写着答案** ——模型 87 次里只有 3 次声明「没有」，其余都在引用。⇒ 它实际测的是**引用纪律**，不是「部分可答」。待定：改标签 / 换题。"
   },
   {
    "id": "aq-p5",
    "kind": "grounded-partial",
-   "q": "PostgreSQL 的 B-tree 索引最多能有多少层？"
+   "q": "PostgreSQL 的 B-tree 索引最多能有多少层？",
+   "premise": {
+    "material": "some"
+   }
   },
   {
    "id": "aq-p6",
    "kind": "grounded-partial",
-   "q": "Docker 容器里 PID 1 的信号处理有什么特殊？"
+   "q": "Docker 容器里 PID 1 的信号处理有什么特殊？",
+   "premise": {
+    "material": "some"
+   }
   }
  ]
 }

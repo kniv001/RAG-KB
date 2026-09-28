@@ -3,11 +3,13 @@
 **模型测评平台的入口**（与管线尺子 `tools/ruler.py` 分开）。
 
   python tools/eval.py ls                       # 有哪些基准
-  python tools/eval.py audit                    # 基准自检（不过就拒跑）
+  python tools/eval.py audit                    # 基准自检（不过就拒跑；**含题面前提核对**）
+  python tools/eval.py health                   # 基准体检（语料长大了，题还成不成立）
   python tools/eval.py collect answer-quality --model qwen3:4b   # 只采集（跑模型，落盘）
   python tools/eval.py score   answer-quality --model qwen3:4b   # 只判分（**改判据不用重跑模型**）
   python tools/eval.py run     answer-quality --model qwen3:4b   # 采集 + 判分
   python tools/eval.py run answer-quality --model qwen3:8b --repeat 2
+  python tools/eval.py run answer-quality --model qwen3:4b --allow-rot  # 前提破了仍要跑
   python tools/eval.py speed   --model qwen3:4b --n 5             # 速度维度（分阶段耗时）
   python tools/eval.py compare answer-quality qwen3:4b qwen3:8b   # 对比两个模型的落盘结果
 
@@ -46,29 +48,52 @@ def cmd_audit():
     return bad
 
 
+def cmd_health(argv):
+    """**基准体检** —— 语料长大了，题还成不成立？三张网一起打。
+
+    三张网**互为盲区**（详见 `runner.audit_bench` 与 `bench-material-probe.py`）：
+      ① **声明式**（本命令内）—— 题面写的 `must_find` / `breaks_if_found` 摘录，纯语料、最快
+      ② **行为式**（`bench-rot-probe.py`）—— 模型"声明没有"的比例；要**跑过**才有读数
+      ③ **材料式**（`bench-material-probe.py`）—— 生产那条路给这道题剩几句；**要应用在跑**
+    只有 ① 能在**不跑模型、不起应用**的情况下随时跑 —— 所以体检默认只做 ①，
+    另两张按需要单独跑（命令里会打出来）。
+    """
+    import subprocess
+    only = [a for a in argv if not a.startswith("--")]
+    names = only or runner.benches()
+    bad = 0
+    for b in names:
+        try:
+            print(runner.audit_bench(runner.load_bench(b)))
+        except SystemExit as e:
+            bad += 1
+            print(e)
+        print()
+    print(f"—— 声明式：{len(names)} 个基准，通过 {len(names) - bad} 个 ——")
+    print("另两张网（按需要单独跑）：")
+    print("  ② 行为式：python tools/eval/bench-rot-probe.py     （要跑过才有读数）")
+    print("  ③ 材料式：python tools/eval/bench-material-probe.py <基准>  （要应用在跑；9 秒/题）")
+    return bad
+
+
 def cmd_run(argv):
     if not argv:
         raise SystemExit("用法：python tools/eval.py run <基准> --model <模型名> [--limit N] [--repeat N] [--tag 后缀] [--only id,kind]")
     name, argv = argv[0], argv[1:]
-    a = {}
-    i = 0
-    while i < len(argv):
-        if argv[i].startswith("--"):
-            a[argv[i][2:]] = argv[i + 1]
-            i += 2
-        else:
-            i += 1
+    a = _flags(argv)
     runner.run(name, a.get("model", "qwen3:4b"),
                limit=int(a.get("limit", 0) or 0),
                repeat=int(a.get("repeat", 1) or 1),
-               tag=a.get("tag", ""), only=a.get("only", ""))
+               tag=a.get("tag", ""), only=a.get("only", ""),
+               allow_rot="allow-rot" in a)
 
 
 def cmd_collect(argv):
     name, argv = argv[0], argv[1:]
     a = _flags(argv)
     runner.collect(name, a.get("model", "qwen3:4b"), int(a.get("limit", 0) or 0),
-                   tag=a.get("tag", ""), only=a.get("only", ""))
+                   tag=a.get("tag", ""), only=a.get("only", ""),
+                   allow_rot="allow-rot" in a)
 
 
 def cmd_score(argv):
@@ -78,11 +103,22 @@ def cmd_score(argv):
 
 
 def _flags(argv):
+    """`--key value` 与**裸开关** `--allow-rot` 都认（后者记成 "true"）。
+
+    为什么要有裸开关：`--allow-rot` 不带值是**开关**不是参数。第一版只认 `--key value`，
+    于是 `--allow-rot` 会把**下一个 token（或空）**吃成它的值 —— 那种解析错误
+    不报错、只是悄悄把开关设成了别的东西。
+    """
     a, i = {}, 0
     while i < len(argv):
         if argv[i].startswith("--"):
-            a[argv[i][2:]] = argv[i + 1]
-            i += 2
+            nxt = argv[i + 1] if i + 1 < len(argv) else None
+            if nxt is None or nxt.startswith("--"):
+                a[argv[i][2:]] = "true"
+                i += 1
+            else:
+                a[argv[i][2:]] = nxt
+                i += 2
         else:
             i += 1
     return a
@@ -134,6 +170,8 @@ def main():
         cmd_ls()
     elif cmd == "audit":
         sys.exit(1 if cmd_audit() else 0)
+    elif cmd == "health":
+        sys.exit(1 if cmd_health(rest) else 0)
     elif cmd in ("run", "collect", "score"):
         if not rest:
             raise SystemExit(f"用法：python tools/eval.py {cmd} <基准> --model <模型名>")

@@ -41,10 +41,32 @@ def load_bench(name):
     return b
 
 
-def audit_bench(b):
-    """基准自检：题型必须认识、判据必须存在、id 唯一。**不过就拒跑**。"""
+def audit_bench(b, allow_rot=False):
+    """基准自检：题型/js 判据/id 唯一 **+ 题面的前提还成不成立**。**不过就拒跑**。
+
+    <p>**为什么加前提核对**（2026-09-29）：答案侧的题**此前只有一句问句**，没有任何东西
+    锚在语料上 —— 而**语料会长大**。`aq-p4` 就是这样坏的：题型写着"库里有相关内容、
+    **但没有那个具体值**"，而库里 09-17 就有了写着答案的那篇文档（题 09-21 才写）。
+    分数照出、标签照旧、**没有任何东西报警**。
+
+    <p>检索侧的尺子早就有这套纪律（靶子锚 `excerpt`、解析不到计入 `unresolved`、
+    审计拒跑）；这里用**同一个 `corpus.contains`** 把那一半能力补上。
+
+    <p>题面可以声明（都可选，没写的题照跑）：
+    <pre>
+      "premise": {
+        "must_find":       ["…摘录…"],   // 库里**必须**还有这段（"有相关内容"那一半）
+        "breaks_if_found": ["…短语…"]    // 库里**一旦出现**这个，前提就破了（"没有那个值"那一半）
+      }
+    </pre>
+
+    ⚠️ **这条的已知盲区：换词**。`breaks_if_found` 是照**当时**的措辞写的；
+    语料若用另一种说法写进了答案，它找不到 ⇒ 审计说"前提成立"而题其实已经烂了。
+    所以它**不是唯一一张网** —— 行为式检测（`bench-rot-probe.py`：看模型"声明没有"的比例）
+    正好补这个盲区（它不看措辞，只看行为）。两张网互为盲区，都要跑。
+    """
     from . import judges
-    bad = []
+    bad, rot = [], []
     ids = [c.get("id") for c in b["cases"]]
     dup = {i for i in ids if ids.count(i) > 1}
     if dup:
@@ -60,10 +82,49 @@ def audit_bench(b):
         kinds[c.get("kind")] = kinds.get(c.get("kind"), 0) + 1
     lines = [f"基准 {b['name']}（schema {SCHEMA}）· {len(b['cases'])} 题 · "
              + "　".join(f"{k} {v}" for k, v in sorted(kinds.items()))]
+
+    # ── 前提核对（要摸语料；摸不到就明说，**不静默跳过**）──────────────
+    n_prem = sum(1 for c in b["cases"] if c.get("premise"))
+    if n_prem:
+        try:
+            import os
+            import sys
+            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            from ruler import corpus
+            C = corpus.load()
+        except Exception as e:                                  # noqa: BLE001
+            lines.append(f"  ！{n_prem} 题声明了前提，但语料读不到（{e}）—— **没核对**")
+            C = None
+        if C is not None:
+            for c in b["cases"]:
+                p = c.get("premise") or {}
+                for phrase in p.get("must_find", []):
+                    if not C.contains(phrase):
+                        rot.append(f"{c['id']} 找不到「{phrase[:24]}…」—— 「有相关内容」那一半不成立了")
+                for phrase in p.get("breaks_if_found", []):
+                    hit = C.contains(phrase, limit=1)
+                    if hit:
+                        rot.append(f"{c['id']} 库里出现了「{phrase[:24]}…」"
+                                   f"（块 {C.ids[hit[0]]}）—— 前提已破")
+            lines.append(f"  {'✓' if not rot else '✗'} 前提核对 {n_prem} 题："
+                         + ("全部成立" if not rot else f"**{len(rot)} 处不成立**"))
+    else:
+        lines.append("  ⚠ 没有一道题声明前提 ⇒ **这道闸现在拦不住语料的增长**"
+                     "（见 bench-rot-probe.py 的行为式检测）")
+
     if bad:
         lines.append(f"  ✗ {len(bad)} 处问题：" + "；".join(bad[:5]))
         raise SystemExit("\n".join(lines) + "\n基准没通过审计 —— 先修，别跑数")
-    lines.append(f"  ✓ 题型与判据齐备，id 唯一")
+    lines.append("  ✓ 题型与判据齐备，id 唯一")
+    if rot:
+        lines.append("  ✗ 前提不成立 " + str(len(rot)) + " 处：")
+        lines += [f"      {x}" for x in rot[:8]]
+        if allow_rot:
+            lines.append("  （--allow-rot：继续跑，但**上面的分数与历史不可比**）")
+        else:
+            raise SystemExit("\n".join(lines) + "\n\n基准的前提已经与语料不符 ——"
+                             "要么改题面（题不再测它声称要测的东西），要么换题。"
+                             "\n真要跑加 --allow-rot。")
     return "\n".join(lines)
 
 
@@ -132,13 +193,33 @@ def ensure_app(wait=120):
                      f"③ 8080 是不是被别的进程占了。日志：{os.path.dirname(TOOLS)}/data/app.log")
 
 
-def collect(bench, model, limit=0, tag="", only=""):
+def corpus_stamp():
+    """当前的**语料戳**（见 `ruler.corpus.Corpus.stamp`）。取不到就返回 ""。
+
+    为什么答案侧也要它：分数是**在某个语料上**跑出来的，而语料会长大。
+    此前落盘只有 `{bench, model, at}` —— 于是**两个不同语料的分数可以直接相减而看不出来**。
+    检索侧的尺子一直带戳（缓存也按戳校验），这一半是补上的。
+    """
+    try:
+        import os
+        import sys
+        sys.path.insert(0, os.path.dirname(TOOLS))
+        from ruler import corpus
+        C = corpus.load()
+        return f"{C.stamp}/{C.n}"
+    except Exception:                                            # noqa: BLE001
+        return ""
+
+
+def collect(bench, model, limit=0, tag="", only="", allow_rot=False):
     ensure_app()
     """采集：跑模型，落盘。
 
     `only` 按 id 或 kind 过滤 ⇒ **不必每次全量测试**（只复验几道题、或只跑某一类）。
     采集端本身**逐题落盘 + 断点续跑**，所以中断了重跑就是接着跑。
     """
+    # **开跑前就过闸**：前提破了就别先烧一遍模型再拒跑（采集是这里最贵的一步）。
+    audit_bench(load_bench(bench), allow_rot=allow_rot)
     out = run_path(bench, model, tag)
     cmd = ["node", os.path.join(HERE, "collect.mjs"),
            "--bench", bench, "--model", model, "--out", out]
@@ -150,7 +231,27 @@ def collect(bench, model, limit=0, tag="", only=""):
     subprocess.run(cmd, cwd=os.path.dirname(TOOLS), check=False)
     if not os.path.exists(out):
         raise SystemExit(f"采集没产出结果：{out}")
+    # **把语料戳补进落盘**（采集端在 Node 里，摸不到 Python 的语料戳）——
+    # 分数必须能回答"这是在哪个语料上跑出来的"，否则跨语料的分数会被静默相减。
+    _stamp_file(out)
     return out
+
+
+def _stamp_file(path):
+    """把当前语料戳写进落盘文件顶层（读不出来就**明说**，不静默）。"""
+    st = corpus_stamp()
+    if not st:
+        print(f"  ！（语料戳取不到 —— {os.path.basename(path)} 里不会带戳，"
+              f"跨语料比较时**没有依据**）")
+        return
+    try:
+        d = json.load(open(path, encoding="utf-8"))
+    except Exception as e:                                       # noqa: BLE001
+        print(f"  ！（落盘读不动，没盖戳：{e}）")
+        return
+    d["corpus"] = st
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False, indent=1)
 
 
 def score(bench_name, model, paths=None, quiet=False, tag=""):
@@ -163,6 +264,13 @@ def score(bench_name, model, paths=None, quiet=False, tag=""):
         if not os.path.exists(p):
             raise SystemExit(f"没有落盘结果：{p}\n先跑：python tools/eval.py collect {bench_name} --model {model}")
     runs = [json.load(open(p, encoding="utf-8")) for p in paths]
+    # **多轮取全通过的前提是"同一份语料"** —— 戳不同就得说，不能悄悄取交集。
+    stamps = {r.get("corpus", "") for r in runs}
+    if len(stamps) > 1:
+        print(f"  ⚠ 这 {len(paths)} 份落盘的**语料戳不同**（{sorted(s or '无戳' for s in stamps)}）"
+              f" —— 它们是**在不同的库上**跑出来的，'取全通过'没有意义")
+    elif stamps and "" in stamps:
+        print(f"  ⚠ 有落盘**不带语料戳**（旧记录）—— 跨语料比较时没有依据")
     first = runs[0]
 
     per = []
@@ -179,7 +287,7 @@ def score(bench_name, model, paths=None, quiet=False, tag=""):
         detail = "　".join(f"{k}={v}" for k, v in rows[0].items() if not k.startswith("_"))
         print(f"  {'✅' if ok else '❌'} [{res['kind']:<9}] {res['q'][:30]:<32}{detail}")
 
-    print(f"\n—— {b['name']} · 模型 {model}"
+    print(f"\n—— {b['name']} · 模型 {model} · 语料 {first.get('corpus') or '（无戳·旧记录）'}"
           + (f" · {len(paths)} 次取全通过" if len(paths) > 1 else "") + " ——")
     kinds = {}
     for p in per:
@@ -294,7 +402,7 @@ def score(bench_name, model, paths=None, quiet=False, tag=""):
     return per
 
 
-def run(bench_name, model, limit=0, repeat=1, tag="", only=""):
+def run(bench_name, model, limit=0, repeat=1, tag="", only="", allow_rot=False):
     """采集 N 次 → 判分（N>1 时取「全部通过」）。
 
     `tag` 用来区分**同一模型的不同条件**（如两个开关臂）—— 不留 tag 的话
@@ -316,7 +424,7 @@ def run(bench_name, model, limit=0, repeat=1, tag="", only=""):
         if repeat > 1:
             print("（已清答案缓存，第 %d/%d 次是真跑）" % (r + 1, repeat))
         print(f"—— 采集 {bench_name} × {model}{tag}" + (f"（第 {r+1}/{repeat} 次）" if repeat > 1 else "") + " ——")
-        paths.append(collect(bench_name, model, limit, t, only=only))
+        paths.append(collect(bench_name, model, limit, t, only=only, allow_rot=allow_rot))
         # **每跑完一次就判一次**：分段式输出 —— 不等全部跑完才知道结果
         score(bench_name, model, [paths[-1]], quiet=True)
         print()

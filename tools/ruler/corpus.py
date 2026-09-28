@@ -250,6 +250,33 @@ class Corpus:
                 out[q] = v
         return out
 
+    def contains(self, phrase, limit=5):
+        """这个短语在语料里出现了吗 —— 返回命中的块下标（最多 `limit` 个）。
+
+        **与 `find` 的差别在于语义，不在实现**：
+          · `find(excerpt)` 是**定位靶子** —— "这段内容在哪块里"，所以带**反向包含**
+            （极短的块整个落在 excerpt 里也算，那是重复块）；
+          · `contains(phrase)` 是**前提探测** —— "这个短语在不在库里"，
+            **绝不能带反向包含**：`breaks_if_found` 的短语通常很长，
+            而一个短块落在它里面恰恰**不算**"库里写了这句话"。
+
+        为什么要有它（2026-09-29）：答案侧的基准此前**只有一句问句**，
+        没有任何东西锚在语料上 —— 语料长大后题目的前提悄悄失效（`aq-p4`：
+        库里 09-17 就有的那篇 TCP 文档写着答案，而题 09-21 才写成"库里没有那个值"）。
+        检索侧的尺子早就有这套纪律（`excerpt` 锚内容 + `unresolved` 计数 + 审计拒跑），
+        这个方法就是把那一半能力给到答案侧。
+        """
+        key = norm(phrase)
+        if not key:
+            return []
+        out = []
+        for i in range(self.n):
+            if key in self._nbody[i]:
+                out.append(i)
+                if len(out) >= limit:
+                    break
+        return out
+
     def line(self):
         return f"语料 {self.n} 块 · 戳 {self.stamp}"
 
