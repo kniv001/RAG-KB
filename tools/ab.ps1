@@ -83,7 +83,9 @@ function Reset-Prod {
     $env:KB_CONTRACT_IN_CODE = 'true'
     # 「部分可答」的措辞档位（off/line/branch）：**默认 off**（生产一字不改）。
     # 按"当前默认"复位 —— 实验跑完不能把它留在某一臂上。
-    $env:KB_PARTIAL_HINT = 'off'
+    $env:KB_PARTIAL_HINT = 'floor'
+    $env:KB_MAT_FLOOR = '0.65'
+    $env:KB_SENT_NOHEAD = 'true'
     # ⚠️ **结构性修复（2026-09-24）**：把**本次实验用的那个开关删掉**，让它回到 yml 默认。
     #
     # 为什么必须有这条：上面那张清单是**手工维护**的，必须与"本次传了什么开关"保持同步 ——
