@@ -22,6 +22,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TOOLS = os.path.dirname(HERE)
 BENCH_DIR = os.path.join(HERE, "benches")
 
+# **控制台是 GBK**：本模块会被别的脚本当库用（那里没经过 `eval.py` 的 reconfigure），
+# 一句 `✓` 就能让整次判分崩在半路。放在模块级，谁来用都安全。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:                                                # noqa: BLE001
+    pass
+
 SCHEMA = "eval/bench@1"
 
 
@@ -264,6 +271,18 @@ def score(bench_name, model, paths=None, quiet=False, tag=""):
         if not os.path.exists(p):
             raise SystemExit(f"没有落盘结果：{p}\n先跑：python tools/eval.py collect {bench_name} --model {model}")
     runs = [json.load(open(p, encoding="utf-8")) for p in paths]
+    # **题型的"改标签"要看得见**：落盘里记的是**采集当时**的 kind，判分也用它 ——
+    # 所以给某道题改了标签（如 2026-09-29 的 aq-p4：grounded-partial → grounded），
+    # **历史落盘仍按旧标签判**（记录就是记录，不回溯改）。不说的话，
+    # 同一道题在"新跑"与"旧落盘"里会有两个分数，而看起来像是抖动。
+    bkind = {c.get("id"): c.get("kind") for c in b["cases"]}
+    diff = {r["id"]: (r.get("kind"), bkind.get(r["id"]))
+            for r in runs[0]["results"]
+            if bkind.get(r["id"]) and r.get("kind") != bkind.get(r["id"])}
+    if diff:
+        print("  ⚠ 有 %d 道题的**标签与基准现在的不一致**（落盘按采集当时的标签判）：" % len(diff))
+        for i, (o, n) in list(diff.items())[:5]:
+            print(f"      {i}：落盘 {o} → 基准现在 {n}")
     # **多轮取全通过的前提是"同一份语料"** —— 戳不同就得说，不能悄悄取交集。
     stamps = {r.get("corpus", "") for r in runs}
     if len(stamps) > 1:

@@ -151,13 +151,17 @@ class Corpus:
 
     def __init__(self):
         rows = psql_rows(
-            "SELECT c.id, coalesce(c.ctx,''), c.content, c.seq, d.name "
+            "SELECT c.id, coalesce(c.ctx,''), c.content, c.seq, d.name, c.doc_id "
             "FROM chunks c JOIN documents d ON d.id=c.doc_id ORDER BY c.id")
         self.ids = [r[0] for r in rows]
         self.ctx = [r[1] for r in rows]
         self.body = [r[2] for r in rows]
         self.seq = [r[3] for r in rows]
+        # ⚠️ **`self.doc` 是文档名，不是 id** —— 库里的关联键却是 `chunks.doc_id`。
+        # 把 `C.doc[i]` 直接塞进 `doc_id = '…'` 的 SQL 里**不报错、只是查不到**
+        # （2026-09-29 一天里踩到第四次）。要按文档过滤就查 `doc_id_of(name)`。
         self.doc = [r[4] for r in rows]
+        self._docid = {r[4]: r[5] for r in rows}
         self.n = len(rows)
         self.text = [(c + "\n" + b) if c else b
                      for c, b in zip(self.ctx, self.body)]
@@ -249,6 +253,20 @@ class Corpus:
             for q, v in zip(uniq[i:i + 8], embed(uniq[i:i + 8])):
                 out[q] = v
         return out
+
+    def doc_id_of(self, name):
+        """文档名 → `documents.id`。
+
+        ⚠️ **`self.doc` 存的是文档名，不是 id** —— 而库里的关联键是 `chunks.doc_id`。
+        这两件事混起来**不报错、只是查不到**（2026-09-29 一天里踩到第四次：
+        探针按 `doc_id` 查、手里拿的却是 `doc`）。
+        要按文档过滤 SQL 就用这个名字查 id，别直接把 `C.doc[i]` 塞进 `doc_id = '…'`。
+        """
+        for i in range(self.n):
+            if self.doc[i] == name:
+                j = self._docid.get(name)
+                return j
+        return None
 
     def contains(self, phrase, limit=5):
         """这个短语在语料里出现了吗 —— 返回命中的块下标（最多 `limit` 个）。
