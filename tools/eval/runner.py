@@ -200,6 +200,21 @@ def ensure_app(wait=120):
                      f"③ 8080 是不是被别的进程占了。日志：{os.path.dirname(TOOLS)}/data/app.log")
 
 
+def bench_sig(b):
+    """**基准指纹**：题目构成（id:kind）的哈希。
+
+    为什么要它（2026-09-29）：**基准自己的构成会变** —— 那天给两个基准加了 22 道题
+    （21→37、14→23）。而分数是"通过数/题数"，**分母变了分数就不可比**，
+    可记录里只有模型名与语料戳，**没有"这是哪一版基准"**。
+    与"语料戳"是同一条纪律：**一个数字脱离了它的量具就没法引用**。
+
+    只哈希 id 与 kind，**不哈希问句文本** —— 改一个错别字不该让全部历史分数失效；
+    而增删题、改题型会。"""
+    import hashlib
+    k = "|".join(f"{c.get('id')}:{c.get('kind')}" for c in b["cases"])
+    return hashlib.sha1(k.encode("utf-8")).hexdigest()[:8]
+
+
 def corpus_stamp():
     """当前的**语料戳**（见 `ruler.corpus.Corpus.stamp`）。取不到就返回 ""。
 
@@ -257,6 +272,10 @@ def _stamp_file(path):
         print(f"  ！（落盘读不动，没盖戳：{e}）")
         return
     d["corpus"] = st
+    try:
+        d["bench_sig"] = bench_sig(load_bench(d.get("bench") or ""))
+    except Exception:                                            # noqa: BLE001
+        pass
     with open(path, "w", encoding="utf-8") as f:
         json.dump(d, f, ensure_ascii=False, indent=1)
 
@@ -271,6 +290,18 @@ def score(bench_name, model, paths=None, quiet=False, tag=""):
         if not os.path.exists(p):
             raise SystemExit(f"没有落盘结果：{p}\n先跑：python tools/eval.py collect {bench_name} --model {model}")
     runs = [json.load(open(p, encoding="utf-8")) for p in paths]
+    # **基准自己变了要看得见**（分母变了分数就不可比）
+    try:
+        cur_sig = bench_sig(b)
+    except Exception:                                            # noqa: BLE001
+        cur_sig = ""
+    sigs = {r.get("bench_sig", "") for r in runs}
+    if cur_sig and sigs - {cur_sig}:
+        print(f"  ⚠ 落盘的**基准指纹**（{sorted(s or '无' for s in sigs)}）与现在的（{cur_sig}）"
+              f"不同 —— 基准的构成变过，**分数不可比**")
+    elif "" in sigs:
+        print("  ⚠ 有落盘**不带基准指纹**（旧记录）—— 与它们比分数时**没有依据**")
+
     # **题型的"改标签"要看得见**：落盘里记的是**采集当时**的 kind，判分也用它 ——
     # 所以给某道题改了标签（如 2026-09-29 的 aq-p4：grounded-partial → grounded），
     # **历史落盘仍按旧标签判**（记录就是记录，不回溯改）。不说的话，
@@ -306,7 +337,8 @@ def score(bench_name, model, paths=None, quiet=False, tag=""):
         detail = "　".join(f"{k}={v}" for k, v in rows[0].items() if not k.startswith("_"))
         print(f"  {'✅' if ok else '❌'} [{res['kind']:<9}] {res['q'][:30]:<32}{detail}")
 
-    print(f"\n—— {b['name']} · 模型 {model} · 语料 {first.get('corpus') or '（无戳·旧记录）'}"
+    print(f"\n—— {b['name']}({cur_sig or '?'}) · 模型 {model} · 语料 "
+          f"{first.get('corpus') or '（无戳·旧记录）'}"
           + (f" · {len(paths)} 次取全通过" if len(paths) > 1 else "") + " ——")
     kinds = {}
     for p in per:
