@@ -53,7 +53,8 @@ public interface SentenceMapper extends BaseMapper<Sentence> {
             <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
               AND embed_model = #{model}
               AND embedding IS NOT NULL
-              <if test="noHead">AND kind &lt;&gt; 'head'</if>
+              <if test="noHead">AND kind &lt;&gt; 'head'
+                AND NOT (text LIKE '%目录%' AND length(text) &gt; 80)</if>
             ORDER BY embedding &lt;=&gt; #{q}::vector
             LIMIT #{limit}
             </script>
@@ -93,7 +94,11 @@ public interface SentenceMapper extends BaseMapper<Sentence> {
               <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
                 AND embed_model = #{model}
                 AND embedding IS NOT NULL
-                <if test="noHead">AND kind &lt;&gt; 'head'</if>
+                <!-- 结构性句子：head 类 + **目录行**（2026-09-28）——
+                     目录行关键词密集 ⇒ 相似度天然高 ⇒ 会挤占材料预算、并让模型以为"有材料"，
+                     实测它让 aq-p5 的答案开头就抄目录。语料里"含『目录』且较长"的只有 7 条（共 8316）。 -->
+                <if test="noHead">AND kind &lt;&gt; 'head'
+                  AND NOT (text LIKE '%目录%' AND length(text) &gt; 80)</if>
             ) t
             WHERE rn &lt;= #{k}
             ORDER BY chunk_id, rn
