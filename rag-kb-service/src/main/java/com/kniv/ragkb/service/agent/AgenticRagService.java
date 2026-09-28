@@ -374,7 +374,7 @@ public class AgenticRagService {
      *  **行为与从前一字不差**。
      */
     private String answerSystem(String category) {
-        return answerSystem(category, "");
+        return answerSystem(category, "", "");
     }
 
     /**
@@ -384,7 +384,7 @@ public class AgenticRagService {
      * 这一句**只加在【丙】上**：全天实测的失败都长在"判丙之后"那一段
      * （判丙的答案 100% 开口说"知识库没有"），而【乙】那半边从来不出问题。
      */
-    private String answerSystem(String category, String relHint) {
+    private String answerSystem(String category, String relHint, String quoteAddrs) {
         // category == null ⇒ 没判定（开关关着，或 Jev 信号不可用）⇒ 走原来的提示词
         if (!props.getAgent().isContractInCode() || category == null) {
             return answerSystem();
@@ -394,7 +394,7 @@ public class AgenticRagService {
             case "乙" -> CONTRACT_YI + partialHint();      // 这一档只对【乙】有意义（部分可答）
             // 【丙】**拼装**（第一拍按开关选）：实测"说知识库没有"的题几乎全是判丙的，
             // 而**加一句不生效**（12/12 没改）⇒ 只能改结构。见 contractBing()
-            default -> contractBing() + partialHint() + relHint;
+            default -> contractBing(quoteAddrs) + partialHint() + relHint;
         };
         return rule + thinkTail();
     }
@@ -846,6 +846,31 @@ public class AgenticRagService {
                    顺便点出库里**确实覆盖**的相关方向（「没有 X，但有 Y 和 Z 两个方向」）。
             """;
 
+    /**
+     * 【丙】的第一拍 —— **无条件先引用版**（开关 {@code partial-hint=quote}）。
+     *
+     * <p>为什么是"无条件"（2026-09-28）：这一天把"让谁来判有没有"试遍了 ——
+     * 模型判（Jev 判类 / 换「有关」/ 加一句 / 改第一拍）全在同一处翻车；
+     * 代码判（相对余弦）也被 29 题**在线**标定否掉（真没有 0.034~0.142 vs
+     * 有一部分 0.035~0.159 · 分不开且方向反）。⇒ **"能不能答这个问题"这个信号不在那里。**
+     *
+     * <p>那就**不做判断**：把最接近的几句**直接摆出来**，命令模型
+     * "**先原样引用**、再说明它们答不答得上"。
+     * 依据：**引用是模型擅长的**（【乙】那半边从来不出问题），而"判断"不是；
+     * 判断权交给**用户**（他看到那几句自己就知道库里有几分）。
+     *
+     * <p>护栏：无资料的题引用完仍应声明"没有"（判据 {@code 声明了没有} + {@code 标注了通用知识}）。
+     * 换句话说这一改**不减少信息**，只把"库里有什么"从**一句断言**换成**原文**。
+     */
+    private static final String BING_BEAT1_QUOTE = """
+              ① **系统已从【参考资料】里挑出与问题最接近的这几句**：%s
+                 请**先原样引用**它们的内容（引用处标 [编号]），并说明**它们是否回答了问题**。
+                 · 若其中有能答上问题的内容 ⇒ 就以它们为依据回答（按【乙】的规矩，标 [编号]）；
+                 · 若它们确实答不上 ⇒ 再说明知识库中没有这方面的资料。
+              ② 然后基于你自己的通用知识补充作答，尽量具体、有条理。
+              ③ 明确标注哪部分是你自己的通用知识、并非来自用户的知识库。
+            """;
+
     private static final String BING_TAIL = """
               ② 然后基于你自己的通用知识作答，尽量具体、有条理。
               ③ 明确标注这部分是通用知识、并非来自用户的知识库（例如另起一行写
@@ -859,11 +884,57 @@ public class AgenticRagService {
      * <p>刻意不写成两份完整的契约文本：这个项目在"复制粘贴的提示词忘了同步"上栽过，
      * 所以三拍各只有一份来源，改哪拍改哪段。
      */
-    private String contractBing() {
-        String beat1 = "lead".equalsIgnoreCase(
-                props.getAgent().getPartialHint() == null ? "" : props.getAgent().getPartialHint().trim())
-                ? BING_BEAT1_LEAD : BING_BEAT1_PLAIN;
+    private String contractBing(String quoteAddrs) {
+        String mode = props.getAgent().getPartialHint() == null ? ""
+                : props.getAgent().getPartialHint().trim();
+        String beat1;
+        if ("lead".equalsIgnoreCase(mode)) {
+            beat1 = BING_BEAT1_LEAD;
+        } else if ("quote".equalsIgnoreCase(mode) && quoteAddrs != null && !quoteAddrs.isBlank()) {
+            beat1 = String.format(BING_BEAT1_QUOTE, quoteAddrs);
+        } else {
+            beat1 = BING_BEAT1_PLAIN;
+        }
         return BING_HEAD + beat1 + BING_TAIL + CONTRACT_COMMON;
+    }
+
+    /**
+     * **无条件**挑出最接近的 N 句的地址（`partial-hint=quote` 用）—— 不做任何判断。
+     *
+     * <p>与 {@link #relHintOf} 的区别就在"无条件"：那个带阈值（已证无效），
+     * 这个只按相似度取前 N 句。地址格式与提示词渲染那一处**必须一致**（`⟨块号.句号⟩`，
+     * 块号 = 它在 contexts 里的位置 + 1）。
+     */
+    private String quoteAddrsOf(List<ChunkHit> contexts,
+                                Map<Long, List<com.kniv.ragkb.domain.entity.Sentence>> sentMap,
+                                int n) {
+        List<Double> all = new ArrayList<>();
+        for (List<com.kniv.ragkb.domain.entity.Sentence> ls : sentMap.values()) {
+            for (com.kniv.ragkb.domain.entity.Sentence s : ls) {
+                if (s.getSim() != null) {
+                    all.add(s.getSim());
+                }
+            }
+        }
+        if (all.size() < 3) {
+            return "";                        // 句子太少 ⇒ 退回原【丙】
+        }
+        List<Double> sorted = new ArrayList<>(all);
+        java.util.Collections.sort(sorted);
+        double floor = sorted.get(Math.max(0, sorted.size() - n));   // 前 N 名的那条线
+        List<String> out = new ArrayList<>();
+        for (int i = 0; i < contexts.size() && out.size() < n; i++) {
+            List<com.kniv.ragkb.domain.entity.Sentence> ls = sentMap.get(contexts.get(i).getId());
+            if (ls == null) {
+                continue;
+            }
+            for (com.kniv.ragkb.domain.entity.Sentence s : ls) {
+                if (s.getSim() != null && s.getSim() >= floor) {
+                    out.add("⟨" + (i + 1) + "." + s.getSeq() + "⟩");
+                }
+            }
+        }
+        return String.join("、", out);
     }
 
     /**
@@ -1391,6 +1462,10 @@ public class AgenticRagService {
         // **代码判"有没有相关段落"**（`partial-hint=code`）：判断由代码做，
         // 模型只负责引用 —— 详见 relHintOf 的注释（全天所有失败都出在"让模型自己判"上）
         String relHint = relHintOf(contexts, sentMap, question);
+        // **无条件先引用**（`partial-hint=quote`）：不做判断，只按相似度取前 5 句把地址摆出来
+        String _pm = props.getAgent().getPartialHint();
+        String quoteAddrs = (_pm != null && "quote".equalsIgnoreCase(_pm.trim()))
+                ? quoteAddrsOf(contexts, sentMap, 5) : "";
 
         int reserve = props.getAgent().getGenerationReserveTokens();
         int budget = Math.max(1024,
@@ -1601,7 +1676,7 @@ public class AgenticRagService {
                 ref.providerId(), ref.model(), TEMPERATURE,
                 // 系统提示的哈希进键 —— 改提示词（含"思考形状"这类开关）自动失效，
                 // 而不是继续拿旧提示词跑出来的答案。见 CacheService.answerKey。
-                CacheService.hash(answerSystem(category, relHint) + "|" + answerPathTag()
+                CacheService.hash(answerSystem(category, relHint, quoteAddrs) + "|" + answerPathTag()
                         // **长期记忆必须进键** —— 它变了答案就可能变。
                         // 不进键的症状是"记忆明明更新了，回答却还是旧的"，
                         // 而且因为缓存命中不报错，**看起来像记忆没生效**。
@@ -1634,7 +1709,7 @@ public class AgenticRagService {
         }
 
         List<ChatMessage> messages = new ArrayList<>();
-        messages.add(ChatMessage.system(answerSystem(category, relHint)));
+        messages.add(ChatMessage.system(answerSystem(category, relHint, quoteAddrs)));
         // 历史放在资料之前：事实依据仍来自资料，历史只用来理解指代
         if (history != null) {
             messages.addAll(history);
