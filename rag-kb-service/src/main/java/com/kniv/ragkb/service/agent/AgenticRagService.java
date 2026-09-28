@@ -399,6 +399,7 @@ public class AgenticRagService {
         return rule + thinkTail();
     }
 
+
     /**
      * **代码判「有没有相关段落」** —— 判据是**相对量**，判断不由模型做。
      *
@@ -432,9 +433,6 @@ public class AgenticRagService {
                              Map<Long, List<com.kniv.ragkb.domain.entity.Sentence>> sentMap,
                              String question) {
         String mode = props.getAgent().getPartialHint();
-        if (mode == null || !"code".equalsIgnoreCase(mode.trim())) {
-            return "";
-        }
         List<Double> sims = new ArrayList<>();
         for (List<com.kniv.ragkb.domain.entity.Sentence> ls : sentMap.values()) {
             for (com.kniv.ragkb.domain.entity.Sentence s : ls) {
@@ -465,6 +463,12 @@ public class AgenticRagService {
                 sims.size(), String.format("%.3f", max), String.format("%.3f", med),
                 String.format("%.3f", max - med), props.getAgent().getRelMargin(),
                 (max - med >= props.getAgent().getRelMargin()) ? "触发" : "不触发", alive);
+        // **仪器不受行为开关影响**（2026-09-28 修）：诊断行必须在**任何模式**下都打 ——
+        // 第一版把它放在 `partial-hint=code` 的早退之后，于是跑 `quote` 那轮
+        // 一条诊断都没有，白采一轮。
+        if (mode == null || !"code".equalsIgnoreCase(mode.trim())) {
+            return "";
+        }
         if (max - med < props.getAgent().getRelMargin()) {
             return "";                       // 没有"明显比其余更相关"的句子 ⇒ 交给【丙】照旧
         }
@@ -898,7 +902,8 @@ public class AgenticRagService {
         String beat1;
         if ("lead".equalsIgnoreCase(mode)) {
             beat1 = BING_BEAT1_LEAD;
-        } else if ("quote".equalsIgnoreCase(mode) && quoteAddrs != null && !quoteAddrs.isBlank()) {
+        } else if (("quote".equalsIgnoreCase(mode) || "floor".equalsIgnoreCase(mode))
+                && quoteAddrs != null && !quoteAddrs.isBlank()) {
             beat1 = String.format(BING_BEAT1_QUOTE, quoteAddrs);
         } else {
             beat1 = BING_BEAT1_PLAIN;
@@ -1470,10 +1475,26 @@ public class AgenticRagService {
         // **代码判"有没有相关段落"**（`partial-hint=code`）：判断由代码做，
         // 模型只负责引用 —— 详见 relHintOf 的注释（全天所有失败都出在"让模型自己判"上）
         String relHint = relHintOf(contexts, sentMap, question);
-        // **无条件先引用**（`partial-hint=quote`）：不做判断，只按相似度取前 5 句把地址摆出来
         String _pm = props.getAgent().getPartialHint();
+        boolean floorMode = _pm != null && "floor".equalsIgnoreCase(_pm.trim());
         String quoteAddrs = (_pm != null && "quote".equalsIgnoreCase(_pm.trim()))
                 ? quoteAddrsOf(contexts, sentMap, 5) : "";
+        if (floorMode && props.getAgent().getMatFloor() > 0) {
+            // **把"有没有"从判断换成过滤**（2026-09-28）：低于地板的句子**不进提示词**；
+            // 整块都没句子了就**整块不进**（**不回退整块** —— 回退会让过滤失效）。
+            // 之后"库里有没有这方面的资料"是**事实**：还剩几句，代码知道、模型看得见。
+            double fl = props.getAgent().getMatFloor();
+            for (List<com.kniv.ragkb.domain.entity.Sentence> ls : sentMap.values()) {
+                ls.removeIf(s -> s.getSim() == null || s.getSim() < fl);
+            }
+            sentMap.values().removeIf(List::isEmpty);
+            contexts.removeIf(h -> !sentMap.containsKey(h.getId()));
+            int alive = sentMap.values().stream().mapToInt(List::size).sum();
+            log.info("材料地板 {}（{}）：过滤后剩 {} 句 / {} 块", fl, question.length() > 20
+                    ? question.substring(0, 20) : question, alive, contexts.size());
+            // 过滤后还有材料 ⇒ 才把"先引用"那一拍打开（**条件是一个事实，不是一个判断**）
+            quoteAddrs = alive >= 3 ? quoteAddrsOf(contexts, sentMap, 5) : "";
+        }
 
         int reserve = props.getAgent().getGenerationReserveTokens();
         int budget = Math.max(1024,
