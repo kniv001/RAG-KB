@@ -226,6 +226,63 @@ public class AgenticRagService {
         return sentMap;
     }
 
+    /** **相邻块补全**（`KB_NEIGHBOR` > 0）：把一个块"缺的那半句"补回来。
+     *
+     *  <p>为什么是补全不是扩召回：命中的那块是**对的**，只是分块按长度切，
+     *  答案落在哪一块是运气。2026-09-26 量过四种边，只有结构边划算
+     *  （相邻块 120/127 @72 句、语义 kNN 图 114@88、随机块对照 113 = 没涨）——
+     *  而它今天才做，是因为**材料地板**把代价照出来了：注入 20 句常常只剩 1~9 句，
+     *  被滤掉的那句往往就在同一篇的邻块里，只是**从来没进过候选**。
+     *
+     *  <p>🔴 **2026-09-29 实测：默认关，而且短期不会再开** —— 它做的事（补候选块）确实发生了
+     *  （候选块 +110%），但**活过地板的只多 8~17 句**，而且**救不回它本来要救的那道题**。
+     *  原因写在 {@code RagProperties.Agent#neighbor} 上：**瓶颈搬家了** ——
+     *  探针那个 120/127 是地板没开时量的，现在约束是 `sim ≥ matFloor`，
+     *  而邻居是**结构边**（相邻 ≠ 相似），补进来也过不了地板。
+     *  下一刀该动的是"块内其余句子"，不是"跨块的边"。
+     *
+     *  <p>三条设计决定（都不是随手写的）：
+     *  <ol>
+     *    <li><b>只补命中块的邻居，不顺着邻块再往外爬</b> —— 那是扩召回，
+     *        实测"边越宽越贵"（同簇 122 分但要拖进 111 块 / 499 句）。</li>
+     *    <li><b>追加在命中块之后</b>，不动原有排序：召回的名次是**检索**给的，
+     *        不该被一个补全步骤改写（引用编号 [1..N] 也就能保持"前面是真正召回的"）。</li>
+     *    <li><b>不设条数上限</b> —— 代价由**地板**决定而不是由块数决定：
+     *        补进来但一句都没活过地板的块会被整块丢掉（下面 floor 那段）。
+     *        真失控了会体现在两根读数上：日志的「候选 N 段」与装入 token。</li>
+     *  </ol>
+     */
+    private void expandNeighbors(List<ChunkHit> contexts) {
+        int span = props.getAgent().getNeighbor();
+        if (span <= 0 || contexts.isEmpty()) {
+            return;
+        }
+        Set<Long> have = new HashSet<>();
+        List<Long> ids = new ArrayList<>();
+        for (ChunkHit h : contexts) {
+            if (h.getId() != null && have.add(h.getId())) {
+                ids.add(h.getId());
+            }
+        }
+        if (ids.isEmpty()) {
+            return;
+        }
+        List<ChunkHit> nbs = chunks.listNeighbors(ids, span, embedding.modelColumn());
+        int added = 0;
+        for (ChunkHit n : nbs) {
+            // **去重是必须的**：两个命中块常常互为邻居（同一篇里连着命中），
+            // 不去重就会把同一段装两遍 —— 白占名额，而且让模型以为"有两个来源说了同一件事"。
+            if (n.getId() != null && have.add(n.getId())) {
+                contexts.add(n);
+                added++;
+            }
+        }
+        // 这一行是"补全到底补了多少"的读数：补 0 段说明命中块本来就首尾相接，
+        // 补了一大堆而**地板存活数没涨**，说明该补的不是邻居（该看检索）。
+        log.info("相邻块补全（±{}）：命中 {} 段 → 新增 {} 段 → 候选 {} 段",
+                span, ids.size(), added, contexts.size());
+    }
+
     /** **选中的句子要进缓存键** —— 键里原本只有开关与**块**内容。
      *
      *  <p>而句子是从 `sentences` 表来的：重建句子表 / 换切分器 / 重灌向量都可能
@@ -1044,6 +1101,8 @@ public class AgenticRagService {
     private final CacheService cache;
     /** 句子级索引（见 {@link com.kniv.ragkb.domain.entity.Sentence}）—— 地址计划 / 分层注入用。 */
     private final com.kniv.ragkb.dao.mapper.SentenceMapper sentences;
+    /** **相邻块补全**（`KB_NEIGHBOR`）要按命中块的 id 把同文档的邻块捞回来。 */
+    private final com.kniv.ragkb.dao.mapper.ChunkMapper chunks;
     /** 分层注入要按问题给句子排序 ⇒ 需要把问题嵌成向量（与检索器同一条路）。 */
     private final com.kniv.ragkb.service.index.EmbeddingService embedding;
     /**
@@ -1459,6 +1518,11 @@ public class AgenticRagService {
         // 所以在这里按优先级裁：先丢摘要，再丢召回片段，再丢最旧的历史，
         // 最后才对资料动手 —— 资料是事实依据，丢了回答就没有根。
         String overview = tree.overview();
+
+        // **相邻块补全要在选句之前**（`KB_NEIGHBOR`）：它做的事就是"把候选变多"，
+        // 然后交给**地板**去筛 —— 顺序反了就等于没补（候选还是那几块）。
+        // 放在这里而不是 `agent()` 的装配处：那样 classic 那条路拿不到，而两者共用本方法。
+        expandNeighbors(contexts);
 
         // **句子要先选，预算才算得对**（2026-09-23 修）。
         //

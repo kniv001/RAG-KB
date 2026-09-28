@@ -8,6 +8,7 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -72,6 +73,43 @@ public interface ChunkMapper extends BaseMapper<Chunk> {
                                    @Param("model") String embedModel,
                                    @Param("docId") String docId,
                                    @Param("limit") int limit);
+
+    /**
+     * **相邻块补全**：给每个命中块，把它同文档里 {@code seq±span} 的块取回来。
+     *
+     * <p>它不是"扩召回"，是**补全** —— 命中的那块是对的，但它常常只是**半句话**：
+     * 分块按长度切，答案落在哪一块是运气。2026-09-26 量过四种"边"（判据 = **靶句**进没进，
+     * multihop-127）：相邻块 {@code seq±1} **120/127 @72 句 / 16 块**，语义 kNN 图 114@88
+     * （命中更低、代价更高）、同文档 121@198、同簇 122@499（拖进 111 块），
+     * 而**随机块对照 113 = 一点没涨** ⇒ 增益来自"这条边有信息"，不是"加得多"。
+     *
+     * <p>这条 SQL 之所以是自连接而不是"先查 doc_id 再查 seq"：一次往返就能补完所有命中，
+     * 而它在**回答之前**，往返的每一毫秒都直接加在 TTFT 上（与 {@link #searchByVector} 同一条理由）。
+     * {@code (doc_id, seq)} 上有唯一约束索引（{@code chunks_doc_id_seq_key}），
+     * 所以这个自连接走索引，不扫表。
+     *
+     * <p>{@code distance} / {@code hits} 都留空：这两种分数是**召回通道**的产物，
+     * 补全块没有参与召回 —— 给它们编一个分数只会让 {@code rank()} 的排序说谎。
+     */
+    @Select("""
+            <script>
+            SELECT n.id, n.doc_id, n.seq, n.content, n.ctx, d.name AS doc_name,
+                   d.source_kind, d.source_url, d.fetched_at,
+                   NULL::float8 AS distance, NULL::int AS hits
+            FROM chunks c
+            JOIN chunks n ON n.doc_id = c.doc_id
+                         AND n.seq BETWEEN c.seq - #{span} AND c.seq + #{span}
+                         AND n.seq &lt;&gt; c.seq
+            JOIN documents d ON d.id = n.doc_id
+            WHERE c.id IN
+            <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+              AND n.embed_model = #{model}
+            ORDER BY n.doc_id, n.seq
+            </script>
+            """)
+    List<ChunkHit> listNeighbors(@Param("ids") Collection<Long> ids,
+                                 @Param("span") int span,
+                                 @Param("model") String embedModel);
 
     @Delete("DELETE FROM chunks WHERE doc_id = #{docId}")
     int deleteByDoc(@Param("docId") String docId);
