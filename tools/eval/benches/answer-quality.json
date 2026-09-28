@@ -165,6 +165,138 @@
    "premise": {
     "material": "some"
    }
+  },
+  {
+   "id": "aq-g7",
+   "kind": "grounded",
+   "q": "GIL 是 Python 语言的特性吗？它存在于哪个解释器里？",
+   "premise": {
+    "material": "some",
+    "must_find": [
+     "GIL并不是Python语言的特性，它是在实现Python解"
+    ]
+   },
+   "note": "2026-09-29 扩题（由 bench-coverage-probe 的空白数据驱动）；must_find 取该题最像的那句前 30 字，是**变更探测器**不是标准答案。"
+  },
+  {
+   "id": "aq-g8",
+   "kind": "grounded",
+   "q": "为什么 Python 的多线程被称为「伪多线程」？",
+   "premise": {
+    "material": "some",
+    "must_find": [
+     "2.GIL的作用1.Python中的多线程被称为“伪多线程”"
+    ]
+   },
+   "note": "2026-09-29 扩题（由 bench-coverage-probe 的空白数据驱动）；must_find 取该题最像的那句前 30 字，是**变更探测器**不是标准答案。"
+  },
+  {
+   "id": "aq-g9",
+   "kind": "grounded",
+   "q": "RAFT 是怎么保证日志在集群中一致的？",
+   "premise": {
+    "material": "some",
+    "must_find": [
+     "Raft使用日志机制来维护不同服务器之间的一致性，它维护以下"
+    ]
+   },
+   "note": "2026-09-29 扩题（第二版问法）：第一版的问句只有 1~2 句过 0.65，**模型直接答「知识库中没有…的资料」**⇒ 那不成其为 grounded 题。按项目既有的门槛（`alive >= 3` 才算有材料）改了问法。"
+  },
+  {
+   "id": "aq-g10",
+   "kind": "grounded",
+   "q": "HNSW 算法的性能主要由哪两个参数控制？",
+   "premise": {
+    "material": "some",
+    "must_find": [
+     "HNSW算法的性能高度依赖于两个关键参数：efConstru"
+    ]
+   },
+   "note": "2026-09-29 扩题（由 bench-coverage-probe 的空白数据驱动）；must_find 取该题最像的那句前 30 字，是**变更探测器**不是标准答案。"
+  },
+  {
+   "id": "aq-g11",
+   "kind": "grounded",
+   "q": "什么是少样本提示（few-shot prompting）？",
+   "premise": {
+    "material": "some",
+    "must_find": [
+     "示例引导，少样本具象化：提供1-3个输入输出示例（Few-s"
+    ]
+   },
+   "note": "2026-09-29 扩题（由 bench-coverage-probe 的空白数据驱动）；must_find 取该题最像的那句前 30 字，是**变更探测器**不是标准答案。"
+  },
+  {
+   "id": "aq-g12",
+   "kind": "grounded",
+   "q": "自注意力机制里的 Q、K、V 分别代表什么？",
+   "premise": {
+    "material": "some",
+    "must_find": [
+     "在自注意力中，Q、K、V都是由同一个输入向量通过线性变换得到"
+    ]
+   },
+   "note": "2026-09-29 扩题（由 bench-coverage-probe 的空白数据驱动）；must_find 取该题最像的那句前 30 字，是**变更探测器**不是标准答案。"
+  },
+  {
+   "id": "aq-g14",
+   "kind": "grounded",
+   "q": "HTTP/2 的多路复用解决了 HTTP/1.1 的什么问题？",
+   "premise": {
+    "material": "some",
+    "must_find": [
+     "HTTP/2的多路复用HTTP/2的多路复用就是为了解决上述"
+    ]
+   },
+   "note": "2026-09-29 扩题（由 bench-coverage-probe 的空白数据驱动）；must_find 取该题最像的那句前 30 字，是**变更探测器**不是标准答案。"
+  },
+  {
+   "id": "aq-g15",
+   "kind": "grounded",
+   "q": "DNS 的递归查询和迭代查询有什么区别？",
+   "premise": {
+    "material": "some",
+    "must_find": [
+     "DNS解析原理:递归&&迭代DNS解析流程分为递归查询和迭代"
+    ]
+   },
+   "note": "2026-09-29 扩题（由 bench-coverage-probe 的空白数据驱动）；must_find 取该题最像的那句前 30 字，是**变更探测器**不是标准答案。"
+  },
+  {
+   "id": "aq-g16",
+   "kind": "grounded",
+   "q": "FP32 转成 INT8 时，超出表示范围的值会被怎么处理？",
+   "premise": {
+    "material": "some",
+    "must_find": [
+     "以前是FP32计算，而现在变成INT8去计算，这是怎么转换的"
+    ]
+   },
+   "note": "2026-09-29 扩题（第二版问法）：第一版的问句只有 1~2 句过 0.65，**模型直接答「知识库中没有…的资料」**⇒ 那不成其为 grounded 题。按项目既有的门槛（`alive >= 3` 才算有材料）改了问法。"
+  },
+  {
+   "id": "aq-g17",
+   "kind": "grounded",
+   "q": "Kafka 的消费组和分区之间是什么关系？",
+   "premise": {
+    "material": "some",
+    "must_find": [
+     "kafka消费组和分区关系详解原文链接：https://bl"
+    ]
+   },
+   "note": "2026-09-29 扩题（由 bench-coverage-probe 的空白数据驱动）；must_find 取该题最像的那句前 30 字，是**变更探测器**不是标准答案。"
+  },
+  {
+   "id": "aq-g20",
+   "kind": "grounded",
+   "q": "TLS 1.3 相比 TLS 1.2 在握手过程上省掉了什么？",
+   "premise": {
+    "material": "some",
+    "must_find": [
+     "这一期带你从TCP三次握手到TLS1.3密钥协商全流程，一次"
+    ]
+   },
+   "note": "2026-09-29 扩题（由 bench-coverage-probe 的空白数据驱动）；must_find 取该题最像的那句前 30 字，是**变更探测器**不是标准答案。"
   }
  ]
 }
