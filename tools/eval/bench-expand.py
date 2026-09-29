@@ -53,6 +53,16 @@ def territory(C, vec):
         tag="bx")
 
 
+def docs_of(rows):
+    """这块地盘**跨了几篇文档** —— `multi`（跨文档）这个题型的**机械定义**。
+
+    为什么要它：题型名叫"跨文档"，可"跨没跨"此前**只是我说了算**。
+    一张表 20 块全在同一篇里，那它就是单文档题，标 `multi` 是**骗自己**
+    （判据里那条"覆盖了所有靶事实"也就退化了）。
+    """
+    return {d for _cid, d in rows}
+
+
 def top1(C, vec):
     lit = "[" + ",".join(f"{x:.7g}" for x in vec) + "]"
     r = psql_rows(
@@ -66,9 +76,11 @@ def main():
         raise SystemExit(__doc__)
     bench, spec = sys.argv[1], sys.argv[2]
     if os.path.exists(spec):
-        items = [(c["id"], c["q"]) for c in json.load(io.open(spec, encoding="utf-8"))]
+        items = [(c["id"], c["q"], c.get("kind", "grounded"))
+                 for c in json.load(io.open(spec, encoding="utf-8"))]
     else:
-        items = [(f"new{i+1}", q.strip()) for i, q in enumerate(spec.split("|")) if q.strip()]
+        items = [(f"new{i+1}", q.strip(), "grounded")
+                 for i, q in enumerate(spec.split("|")) if q.strip()]
 
     C = corpus.load()
     print(C.line())
@@ -82,7 +94,7 @@ def main():
     print(f"{bench}：现有 {len(b['cases'])} 题，地盘 {len(covered)} 块\n")
 
     added = 0
-    for (cid, q), vec in zip(items, corpus.embed([q for _, q in items])):
+    for (cid, q, kind), vec in zip(items, corpus.embed([q for _, q, _ in items])):
         if cid in ids:
             print(f"  ！{cid} 已存在，跳过")
             continue
@@ -90,13 +102,17 @@ def main():
         if len(rows) < MIN_HITS:
             print(f"  ✗ {cid} 材料只有 {len(rows)} 句（< {MIN_HITS}）—— 不加：{q[:36]}")
             continue
+        ndocs = len(docs_of(rows))
+        if kind == "multi" and ndocs < 2:
+            print(f"  ✗ {cid} 地盘只有 {ndocs} 篇文档 —— 自称 multi 却没跨文档：{q[:32]}")
+            continue
         fresh = [r for r in rows if r[0] not in covered]
         if not fresh:
             print(f"  ✗ {cid} 没带来新覆盖 —— 不加：{q[:36]}")
             continue
         mf = top1(C, vec)
         b["cases"].append({
-            "id": cid, "kind": "grounded", "q": q,
+            "id": cid, "kind": kind, "q": q,
             "premise": {"material": "some", "must_find": [mf]},
             "note": "2026-09-29 扩题（bench-coverage-probe 的空白数据驱动 + bench-expand 两闸）；"
                     "must_find 取该题最像的那句前 30 字，是**变更探测器**不是标准答案。",
@@ -104,7 +120,7 @@ def main():
         for r in fresh:
             covered.add(r[0])
         added += 1
-        print(f"  ✓ {cid}  +{len(fresh)} 块新覆盖（材料 {len(rows)} 句）  {q[:34]}")
+        print(f"  ✓ {cid}  +{len(fresh)} 块新覆盖（材料 {len(rows)} 句 / {ndocs} 篇）  {q[:34]}")
     io.open(p, "w", encoding="utf-8").write(json.dumps(b, ensure_ascii=False, indent=1) + "\n")
     print(f"\n⇒ {bench} 现在 {len(b['cases'])} 题（本批 +{added}）")
     print("   下一步：`python tools/eval.py audit` 过一遍前提核对")

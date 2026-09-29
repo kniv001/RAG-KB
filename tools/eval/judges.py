@@ -648,8 +648,13 @@ def judge(kind, answer, sources, question, cites=None, targets=None):
             # ⇒ 题面为每个靶声明 `expect`（答案里**应出现**的那个值/短语），
             #   判据看的是它有没有出现；**文档覆盖只留作诊断**。
             want = [t.get("expect", "") for t in tgt if t.get("expect")]
+            # **比对走 `_covers`**（两边各过一遍数字归一）—— 与 `引用对得上` /
+            # `该引没引` 是三处同一个口径。
+            # 不能这里用裸 `in`：答案写「3:0」而 `expect` 写「三比零」、
+            # 或答案写「1分43秒49」而 `expect` 写「一分四三」都会被判"没覆盖"——
+            # 而那是**同一件事的两种写法**（`2026-09-29-判据修一处字面匹配` 那一族）。
             aa = _norm(answer)
-            fact_got = [w for w in want if _norm(w) in aa]
+            fact_got = [w for w in want if _covers(_norm(w), aa)]
             if want:
                 r["覆盖了所有靶事实"] = len(fact_got) == len(want)
             r["_覆盖"] = (f"事实 {len(fact_got)}/{len(want)}　"
