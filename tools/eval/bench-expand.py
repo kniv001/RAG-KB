@@ -19,10 +19,22 @@
 `must_find` 取**该题最像的那句**的前 30 字：按构造一定在库里，
 而它的作用是**变更探测器**（库里没有了 ⇒ 前提破了），**不是"标准答案"**。
 
+## 两种**目的**（闸跟着目的走）
+
+扩题有两种完全不同的目的，而**闸不能一套用到底**（2026-09-29 实测被拦出来的）：
+
+  · `--purpose cover`（默认）**补空白**：库里有一片没被任何题够到
+    ⇒ 要的是"**带来新覆盖**"
+  · `--purpose type` **扩题型**：库里已有题，但要一种**新的问法/形状**
+    （如跨文档 `multi`）⇒ 要的是"**新形状**"，而它**常常不带来新覆盖**
+    （实测 `nl-m4` 就是这么被误拦的）
+
+材料那道闸**两种都适用**（任何题都要能被检索到，否则不成其为题）。
+
 ## 用法
 
-    python tools/eval/bench-expand.py <基准> <候选文件.json|逗号分隔的问句>
-    # 候选文件格式：[{"id":"nl-g9","q":"…"}, …]
+    python tools/eval/bench-expand.py <基准> <候选文件.json> [--purpose cover|type]
+    # 候选文件格式：[{"id":"nl-g9","q":"…","kind":"multi"}, …]
 
 写完**跑一遍 `python tools/eval.py audit`**：前提核对会当场抓出"摘录写错/题写歪"。
 """
@@ -75,6 +87,9 @@ def main():
     if len(sys.argv) < 3:
         raise SystemExit(__doc__)
     bench, spec = sys.argv[1], sys.argv[2]
+    purpose = "cover"
+    if "--purpose" in sys.argv:
+        purpose = sys.argv[sys.argv.index("--purpose") + 1]
     if os.path.exists(spec):
         items = [(c["id"], c["q"], c.get("kind", "grounded"))
                  for c in json.load(io.open(spec, encoding="utf-8"))]
@@ -107,9 +122,11 @@ def main():
             print(f"  ✗ {cid} 地盘只有 {ndocs} 篇文档 —— 自称 multi 却没跨文档：{q[:32]}")
             continue
         fresh = [r for r in rows if r[0] not in covered]
-        if not fresh:
+        if not fresh and purpose == "cover":
             print(f"  ✗ {cid} 没带来新覆盖 —— 不加：{q[:36]}")
             continue
+        if not fresh:
+            print(f"  · {cid} 没带来新覆盖，但 purpose=type ⇒ 只看形状")
         mf = top1(C, vec)
         b["cases"].append({
             "id": cid, "kind": kind, "q": q,
@@ -122,7 +139,7 @@ def main():
         added += 1
         print(f"  ✓ {cid}  +{len(fresh)} 块新覆盖（材料 {len(rows)} 句 / {ndocs} 篇）  {q[:34]}")
     io.open(p, "w", encoding="utf-8").write(json.dumps(b, ensure_ascii=False, indent=1) + "\n")
-    print(f"\n⇒ {bench} 现在 {len(b['cases'])} 题（本批 +{added}）")
+    print(f"\n⇒ {bench} 现在 {len(b['cases'])} 题（本批 +{added}，purpose={purpose}）")
     print("   下一步：`python tools/eval.py audit` 过一遍前提核对")
 
 
