@@ -40,6 +40,29 @@ LOG = os.path.join(REPO, "data", "app.log")
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 FLOOR_RE = re.compile(r"材料地板 ([\d.]+)（(.{0,20})）：过滤后剩 (\d+) 句 / (\d+) 块")
+
+
+def newest_material_json(bench, after=None):
+    """取 `material-probe.mjs` 刚落盘的那份读数（**端点版**）。
+
+    为什么优先用它（2026-09-29）：日志那条路有三个脆弱点 —— 睡短了静默漏题、
+    日志轮转、**按"问题前 20 字"当键**（撞了/编码变了就找不到，而失败的样子同样是"没采到"）。
+    端点的读数**按题号**索引，且"没有读数"是一个**明确的回答**（探针会把它记成 miss）。
+    ⚠️ 换尺子要先证能对上 —— 两边的键本来就是同一个（问题前 20 字），所以
+    `--src log` 可以随时把旧读法跑一遍来比对。
+    """
+    import glob
+    pats = sorted(glob.glob(os.path.join(REPO, "data", f"_material_{bench}_*.json")))
+    if not pats:
+        return None
+    p = pats[-1]                       # 文件名带时刻 ⇒ 字典序即时间序
+    if after and os.path.getmtime(p) < after:
+        return None
+    try:
+        d = json.load(io.open(p, encoding="utf-8"))
+    except Exception:
+        return None
+    return p, d
 # 题型 → 它默认该有的材料状态（写进 premise 的默认值；题面写了就以题面为准）
 DEFAULT = {
     "grounded": "some",
@@ -76,18 +99,33 @@ def main():
     bench = json.load(io.open(os.path.join(HERE, "benches", name + ".json"), encoding="utf-8"))
     cases = {c["id"]: c for c in bench["cases"]}
 
+    src = "json" if "--src" not in sys.argv else sys.argv[sys.argv.index("--src") + 1]
     subprocess.run(["node", os.path.join(TOOLS, "clear-answers.mjs")],
                    cwd=REPO, check=False, stdout=subprocess.DEVNULL)
     t0 = time.strftime("%Y-%m-%dT%H:%M:%S")
-    print(f"采材料：{name} {len(cases)} 题（不等生成）……", flush=True)
+    t_json = time.time()
+    print(f"采材料：{name} {len(cases)} 题（不等生成，读数走{src}）……", flush=True)
     subprocess.run(["node", os.path.join(HERE, "material-probe.mjs"),
-                    "--bench", name, "--model", "qwen3:4b", "--wait", "9000"], cwd=REPO)
-    got = read_floor_since(t0)
+                    "--bench", name, "--model", "qwen3:4b", "--timeout", "25000"]
+                   + (["--no-json"] if src == "log" else []), cwd=REPO)
 
     keyed = {}
-    for cid, c in cases.items():
-        pre = (c.get("q") or "")[:20]
-        keyed[cid] = got.get(pre)
+    if src == "json":
+        j = newest_material_json(name, after=t_json - 5)
+        if j:
+            path, d = j
+            for it in d.get("items", []):
+                r = it.get("rec")
+                keyed[it["id"]] = (r["aliveSent"], r["aliveChunks"]) if r else None
+            print(f"（读数来自诊断端点：{os.path.basename(path)} · "
+                  f"没读数 {d.get('miss', 0)} 题）")
+        else:
+            print("！没找到探针落盘的 JSON —— 退回日志读法")
+            src = "log"
+    if src == "log":
+        got = read_floor_since(t0)
+        for cid, c in cases.items():
+            keyed[cid] = got.get((c.get("q") or "")[:20])
 
     print(f"\n===== {name}：每题的**材料** vs 题面声明 =====")
     print(f"{'题':<8}{'题型':<18}{'剩句/块':>10}{'声明':>7}{'现状':>7}   ")

@@ -223,6 +223,7 @@ public class AgenticRagService {
         log.info("句子注入（{}）：注入 {} 段 / 其中 {} 段有句子 / 共 {} 句",
                 props.getAgent().isSentWindow() ? "分层窗口" : "全量地址",
                 contexts.size(), covered, nSent);
+        diag.injected(question, contexts.size(), (int) covered, nSent);
         return sentMap;
     }
 
@@ -252,7 +253,7 @@ public class AgenticRagService {
      *        真失控了会体现在两根读数上：日志的「候选 N 段」与装入 token。</li>
      *  </ol>
      */
-    private void expandNeighbors(List<ChunkHit> contexts) {
+    private void expandNeighbors(String question, List<ChunkHit> contexts) {
         int span = props.getAgent().getNeighbor();
         if (span <= 0 || contexts.isEmpty()) {
             return;
@@ -281,6 +282,7 @@ public class AgenticRagService {
         // 补了一大堆而**地板存活数没涨**，说明该补的不是邻居（该看检索）。
         log.info("相邻块补全（±{}）：命中 {} 段 → 新增 {} 段 → 候选 {} 段",
                 span, ids.size(), added, contexts.size());
+        diag.neighbor(question, ids.size(), added, contexts.size());
     }
 
     /** **选中的句子要进缓存键** —— 键里原本只有开关与**块**内容。
@@ -521,6 +523,11 @@ public class AgenticRagService {
                 sims.size(), String.format("%.3f", max), String.format("%.3f", med),
                 String.format("%.3f", max - med), props.getAgent().getRelMargin(),
                 (max - med >= props.getAgent().getRelMargin()) ? "触发" : "不触发", alive);
+        diag.bands(question,
+                (int) sims.stream().filter(v -> v >= 0.55).count(),
+                (int) sims.stream().filter(v -> v >= 0.60).count(),
+                (int) sims.stream().filter(v -> v >= 0.65).count(),
+                (int) sims.stream().filter(v -> v >= 0.70).count());
         // **仪器不受行为开关影响**（2026-09-28 修）：诊断行必须在**任何模式**下都打 ——
         // 第一版把它放在 `partial-hint=code` 的早退之后，于是跑 `quote` 那轮
         // 一条诊断都没有，白采一轮。
@@ -1132,6 +1139,13 @@ public class AgenticRagService {
      */
     private final com.kniv.ragkb.service.tree.TreeService tree;
 
+    /**
+     * 诊断记录（**只读、内存、最近 64 题**）。见 {@link com.kniv.ragkb.service.diag.DiagMaterial}：
+     * 把下面那几行日志里的数**顺手抄一份**，让尺子拿到的是**返回值**而不是**日志文本**。
+     * ⚠️ 它**不改变任何行为** —— 每个调用点都只是抄已经算出来的变量。
+     */
+    private final com.kniv.ragkb.service.diag.DiagMaterial diag;
+
     /** 一次问答的产物。queries 记录实际检索过哪些查询，便于事后复盘检索质量。 */
     public record AgentResult(String answer, List<ChunkHit> sources, int rounds, List<String> queries) {
     }
@@ -1543,7 +1557,10 @@ public class AgenticRagService {
         // **相邻块补全要在选句之前**（`KB_NEIGHBOR`）：它做的事就是"把候选变多"，
         // 然后交给**地板**去筛 —— 顺序反了就等于没补（候选还是那几块）。
         // 放在这里而不是 `agent()` 的装配处：那样 classic 那条路拿不到，而两者共用本方法。
-        expandNeighbors(contexts);
+        // **本轮读数从空开始**（在写任何一项之前）—— 否则同一个问题跑第二遍时，
+        // 探针会读到"上一轮的数字 + 这一轮的时间戳"。见 DiagMaterial#begin。
+        diag.begin(question);
+        expandNeighbors(question, contexts);
 
         // **句子要先选，预算才算得对**（2026-09-23 修）。
         //
@@ -1601,6 +1618,11 @@ public class AgenticRagService {
             int alive = sentMap.values().stream().mapToInt(List::size).sum();
             log.info("材料地板 {}（{}）：过滤后剩 {} 句 / {} 块", fl, question.length() > 20
                     ? question.substring(0, 20) : question, alive, contexts.size());
+            // **这一行是材料探针的终点**：它一到，这题的读数就齐了 ⇒ 顺带把开关也记上，
+            // 读的人不必再猜这一臂跑的是什么。（`at` 也会被这一笔记成最新 ⇒ 探针靠它判断"到了"。）
+            diag.floor(question, fl, byBlock ? "block" : "sent", alive, contexts.size());
+            diag.switches(question, props.getAgent().getSentChunkK(),
+                    props.getAgent().getNeighbor(), props.getAgent().getSentWindowM());
             // 过滤后还有材料 ⇒ 才把"先引用"那一拍打开（**条件是一个事实，不是一个判断**）
             quoteAddrs = alive >= 3 ? quoteAddrsOf(contexts, sentMap, 5) : "";
         }
