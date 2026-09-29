@@ -25,7 +25,7 @@ from eval import judges                                          # noqa: E402
 TAG = sys.argv[1] if len(sys.argv) > 1 else "__acc"
 BENCH = sys.argv[2] if len(sys.argv) > 2 else "answer-quality"
 files = sorted(glob.glob(os.path.join(ROOT, "tools", "eval", "_runs",
-                                      f"{BENCH}__qwen3-4b__r*{TAG}.json")))
+                                      f"{BENCH}__qwen3-4b__*{TAG}.json")))
 
 
 def replay(x):
@@ -48,8 +48,11 @@ def metrics(rows):
     byk, passed, fails = {}, 0, []
     for x in rows:
         k = x.get("kind")
+        # ⚠️ **必须带上 `targets`** —— 不带的话 `multi` 那几道的
+        # "覆盖了所有靶事实"会是 None，而 `passes` **跳过 None** ⇒ 新判据**静默失效**。
+        # （2026-09-29：给题型加判据的那天忘了同步这里，是本项目最熟悉的一族错。）
         row = judges.judge(k, x["answer"], x.get("sources") or [], x.get("q") or "",
-                           (x.get("stats") or {}).get("cites"))
+                           (x.get("stats") or {}).get("cites"), x.get("targets"))
         bad = [q for q in (judges.PASS.get(k) or []) if row.get(q) is False]
         a = byk.setdefault(k, [0, 0, 0])
         a[0] += 1

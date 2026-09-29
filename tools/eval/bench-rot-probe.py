@@ -68,7 +68,8 @@ def main():
                 s = stat.setdefault(i, [0, 0, 0])       # [次数, 通过, 声明没有]
                 s[0] += 1
                 r = judges.judge(x.get("kind"), x["answer"], x.get("sources") or [],
-                                 x.get("q") or "", (x.get("stats") or {}).get("cites"))
+                                 x.get("q") or "", (x.get("stats") or {}).get("cites"),
+                                 x.get("targets"))
                 s[1] += 0 if [k for k in judges.PASS[x["kind"]] if r.get(k) is False] else 1
                 s[2] += 1 if judges.declares_missing(x["answer"]) else 0
         if not stat:
