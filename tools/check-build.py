@@ -46,7 +46,11 @@ def class_files():
         base = os.path.join(ROOT, m, "target", "classes")
         for dirpath, _dirs, files in os.walk(base):
             for f in files:
-                if f.endswith(".class"):
+                # ⚠️ **只管 class 会漏掉资源** —— `application.yml` 也打进产物，
+                # 而"jar 里是旧 yml"与"jar 里是旧 class"一样致命（2026-09-29 实测：
+                # 新加的 `mat-floor-mode` 只在 yml 里，check-build 报"缺失"，
+                # 差点被当成构建没生效）。资源只认这几类文本文件。
+                if f.endswith(".class") or f.endswith((".yml", ".yaml", ".xml", ".properties")):
                     yield os.path.join(dirpath, f)
 
 
@@ -65,7 +69,7 @@ def jar_entries():
             try:
                 with zipfile.ZipFile(io.BytesIO(z.read(n))) as inner:
                     for m in inner.namelist():
-                        if m.endswith(".class"):
+                        if m.endswith((".class", ".yml", ".yaml", ".xml", ".properties")):
                             yield f"{JAR}!{n}!{m}", inner.read(m)
             except zipfile.BadZipFile:
                 continue
@@ -94,7 +98,7 @@ def main():
         for n in scan(name, data, args):
             hits[n].append(name.replace(ROOT + os.sep, ""))
 
-    print(f"扫了 target/classes {n_files} 个 class、fat jar 内 {n_jar} 个 class")
+    print(f"扫了 target/classes {n_files} 个 class/资源、fat jar 内 {n_jar} 个")
     if n_files == 0 and n_jar == 0:
         raise SystemExit("！一个产物都没扫到 —— 先构建（`mvn -DskipTests package`）")
 

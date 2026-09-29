@@ -39,6 +39,9 @@ ARMS = {
     "off": {},
     "nb": {"KB_NEIGHBOR": "1"},
     "nbk": {"KB_NEIGHBOR": "1", "KB_SENT_CHUNK_K": "5"},
+    # **地板按块判**（`mat-floor-mode=block`）：块的最大相似度过关 ⇒ 整块留下。
+    # 依据见 `RagProperties.Agent#matFloorMode`（逐句过地板把块内其余句子一起扔了）。
+    "blk": {"KB_MAT_FLOOR_MODE": "block"},
 }
 
 FLOOR_RE = re.compile(r"材料地板 ([\d.]+)（(.{0,20})）：过滤后剩 (\d+) 句 / (\d+) 块")

@@ -87,6 +87,7 @@ function Reset-Prod {
     # 按"当前默认"复位 —— 实验跑完不能把它留在某一臂上。
     $env:KB_PARTIAL_HINT = 'floor'
     $env:KB_MAT_FLOOR = '0.65'
+    $env:KB_MAT_FLOOR_MODE = 'sent'
     $env:KB_SENT_NOHEAD = 'true'
     # ⚠️ **结构性修复（2026-09-24）**：把**本次实验用的那个开关删掉**，让它回到 yml 默认。
     #

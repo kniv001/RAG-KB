@@ -1549,10 +1549,29 @@ public class AgenticRagService {
             // 整块都没句子了就**整块不进**（**不回退整块** —— 回退会让过滤失效）。
             // 之后"库里有没有这方面的资料"是**事实**：还剩几句，代码知道、模型看得见。
             double fl = props.getAgent().getMatFloor();
-            for (List<com.kniv.ragkb.domain.entity.Sentence> ls : sentMap.values()) {
-                ls.removeIf(s -> s.getSim() == null || s.getSim() < fl);
+            // **`mat-floor-mode`（2026-09-29 加）**：地板**按句**判还是**按块**判。
+            //
+            // `sent`（默认、现行的）：逐句过 —— 简单、可预测，代价是**块内其余句子被一起扔掉**。
+            // 实测三条把代价量出来了：① `grounded-partial` 10 道里 **4 道被清空**
+            // ② `aq-p5` 那块**过了地板**（存活 2 句），而同一块里"索引 level 变成 3 层"
+            // 那句被滤掉 ⇒ 模型改口说"知识库没有具体资料" ③ ⑦（逐块挑句）与 ⑧（邻块）
+            // 都救不回它 —— 因为它们补的是**别的块**，而丢的是**同一块里**的句子。
+            //
+            // `block`：块的最大相似度过关 ⇒ **整块留下**（它的句子是上下文，不是噪声）。
+            // 判据仍是"材料在不在提示词里"，只是**粒度**从句子换成块。
+            // ⚠️ 代价与风险：装进去的句子多了（token 涨），而"假材料感"可能回来 ——
+            // 要按老规矩量（伤害 / 未标引用值 / 护栏 / token），**材料侧先用材料探针量**。
+            boolean byBlock = "block".equalsIgnoreCase(
+                    String.valueOf(props.getAgent().getMatFloorMode()).trim());
+            if (byBlock) {
+                sentMap.values().removeIf(ls -> ls.stream()
+                        .noneMatch(s -> s.getSim() != null && s.getSim() >= fl));
+            } else {
+                for (List<com.kniv.ragkb.domain.entity.Sentence> ls : sentMap.values()) {
+                    ls.removeIf(s -> s.getSim() == null || s.getSim() < fl);
+                }
+                sentMap.values().removeIf(List::isEmpty);
             }
-            sentMap.values().removeIf(List::isEmpty);
             // ⚠️ `sentMap` 上面被**重新赋值**过 ⇒ 不是 effectively final ⇒ 不能在 lambda 里捕获。
             // 第一版写的就是 `contexts.removeIf(h -> !sentMap.containsKey(...))`，
             // 于是**编译不过** —— 而那次构建又被"服务模块跳过重编"掩盖了（见下方教训）。
