@@ -46,17 +46,18 @@ def read_since(t0):
     return out
 
 
-def main():
-    qs = [q for q in sys.argv[1:] if q.strip()]
-    if not qs:
-        raise SystemExit(__doc__)
-    # 造一个只有这些题的临时基准（探针按基准名找题库）
+def measure(qs, wait="9000"):
+    """对这几道问句跑**生产线**，返回 `{问句前 20 字: (句数, 块数)}`。
+
+    抽成函数是为了让 **`bench-expand` 直接拿它当第二道闸** ——
+    以前闸只在注释里写"这是粗筛"，那不叫闸（2026-09-29 扩题时被三道失败题照出来的）。
+    """
     import io
     import json
     tmp = "material-probe-tmp"
     p = os.path.join(HERE, "benches", tmp + ".json")
     io.open(p, "w", encoding="utf-8").write(json.dumps({
-        "schema": "eval/bench@1", "name": tmp, "note": "临时",
+        "schema": "eval/bench@1", "name": tmp, "note": "临时（material-probe-one 用，跑完即删）",
         "cases": [{"id": f"c{i+1}", "kind": "grounded", "q": q} for i, q in enumerate(qs)],
     }, ensure_ascii=False, indent=1))
     try:
@@ -65,16 +66,23 @@ def main():
         t0 = time.strftime("%Y-%m-%dT%H:%M:%S")
         subprocess.run(["node", os.path.join(HERE, "material-probe.mjs"),
                         "--bench", tmp, "--model", "qwen3:4b",
-                        "--wait", "9000"], cwd=REPO)
-        got = read_since(t0)
-        print()
-        for i, q in enumerate(qs):
-            v = got.get(q[:20])
-            mark = "✓" if (v and v[0] >= 3) else ("△" if v and v[0] else "✗")
-            print(f"  {mark} 剩 {v[0] if v else '?'} 句 / {v[1] if v else '?'} 块　{q[:46]}")
-        print("\n（✓ ≥3 = 项目自己那条「有材料」的门槛；✗ = 生产口径下会被答成「库里没有」）")
+                        "--wait", str(wait)], cwd=REPO)
+        return read_since(t0)
     finally:
         os.unlink(p)
+
+
+def main():
+    qs = [q for q in sys.argv[1:] if q.strip()]
+    if not qs:
+        raise SystemExit(__doc__)
+    got = measure(qs)
+    print()
+    for q in qs:
+        v = got.get(q[:20])
+        mark = "✓" if (v and v[0] >= 3) else ("△" if v and v[0] else "✗")
+        print(f"  {mark} 剩 {v[0] if v else '?'} 句 / {v[1] if v else '?'} 块　{q[:46]}")
+    print("\n（✓ ≥3 = 项目自己那条「有材料」的门槛；✗ = 生产口径下会被答成「库里没有」）")
 
 
 if __name__ == "__main__":

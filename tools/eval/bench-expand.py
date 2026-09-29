@@ -41,8 +41,18 @@
     python tools/eval/bench-expand.py <基准> <候选文件.json> [--purpose cover|type]
     # 候选文件格式：[{"id":"nl-g9","q":"…","kind":"multi"}, …]
 
+## 第二道闸：**生产线复核**（默认开）
+
+粗筛过了之后，脚本会**对这些问句跑一遍生产线**（`material-probe.mjs`：发完请求就断开、
+不等生成）——**只剩 <3 句的直接丢掉**。为什么非要有这一步：粗筛的集合与系统的集合
+**不一样**（它数全库 top-20，系统数召回到的块），实测把 0 句的题放进去过。
+
+应用没在跑时**默认拒写**（不是"跳过并照写" —— 那是本项目最熟悉的一族错）；
+确知自己在干什么可以加 `--no-verify`。
+
 写完**跑一遍 `python tools/eval.py audit`**：前提核对会当场抓出"摘录写错/题写歪"。
 """
+import importlib.util
 import io
 import json
 import os
@@ -56,6 +66,11 @@ sys.path.insert(0, TOOLS)
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 from ruler import corpus                                        # noqa: E402
 from ruler.corpus import psql_rows                               # noqa: E402
+# 复用 `material-probe-one.py` 的 `measure()`（文件名带连字符 ⇒ 只能按路径加载）
+_spec = importlib.util.spec_from_file_location(
+    "material_probe_one", os.path.join(HERE, "material-probe-one.py"))
+mpo = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(mpo)
 
 TOP, FLOOR, MIN_HITS = 20, 0.65, 3
 
@@ -68,6 +83,16 @@ def territory(C, vec):
         "AND 1-(s.embedding <=> '%s'::vector) >= %s "
         "ORDER BY s.embedding <=> '%s'::vector LIMIT %d" % (lit, FLOOR, lit, TOP),
         tag="bx")
+
+
+def app_up():
+    """应用在不在 —— 生产线复核过不去就不写（**拒绝，而不是静默跳过**）。"""
+    import urllib.request
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:8080/actuator/health", timeout=3) as r:
+            return b'"status":"UP"' in r.read()
+    except Exception:                                            # noqa: BLE001
+        return False
 
 
 def docs_of(rows):
@@ -143,10 +168,33 @@ def main():
             covered.add(r[0])
         added += 1
         print(f"  ✓ {cid}  +{len(fresh)} 块新覆盖（材料 {len(rows)} 句 / {ndocs} 篇）  {q[:34]}")
+
+    # ── 第二道闸：**生产线复核** ────────────────────────────────────────
+    # 粗筛的集合与系统的集合**不一样**（粗筛数全库 top-20，系统数召回到的块）
+    # ⇒ 实测把"0 句"的题放进去了（aq-g11）。**这道闸以生产线的读数为准。**
+    if added and "--no-verify" not in sys.argv:
+        if not app_up():
+            print("\n！应用没在跑 —— **拒绝写入**（不是「跳过并照写」，那是本项目最熟悉的一族错）。"
+                  "\n  先起应用，或明确加 --no-verify。")
+            return 1
+        qs = [c["q"] for c in b["cases"][-added:]]
+        print(f"\n生产线复核 {len(qs)} 题（发完请求就断开，9 秒/题）……", flush=True)
+        got = mpo.measure(qs)
+        keep, drop = [], []
+        for c in b["cases"][-added:]:
+            v = got.get(c["q"][:20])
+            (keep if (v and v[0] >= MIN_HITS) else drop).append((c, v))
+        for c, v in drop:
+            print(f"  ✗ {c['id']} 生产线只剩 {v[0] if v else '?'} 句（<{MIN_HITS}）—— **丢掉**")
+        b["cases"] = b["cases"][:-added] + [c for c, _ in keep]
+        added = len(keep)
+        print(f"  复核后保留 {added} 题")
+
     io.open(p, "w", encoding="utf-8").write(json.dumps(b, ensure_ascii=False, indent=1) + "\n")
     print(f"\n⇒ {bench} 现在 {len(b['cases'])} 题（本批 +{added}，purpose={purpose}）")
     print("   下一步：`python tools/eval.py audit` 过一遍前提核对")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)
