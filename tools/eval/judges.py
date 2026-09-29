@@ -560,7 +560,7 @@ def sentence_citation_local(cites, sources, answer):
     return checked, bad
 
 
-def judge(kind, answer, sources, question, cites=None):
+def judge(kind, answer, sources, question, cites=None, targets=None):
     """返回 {判据名: True/False/None}，None = 该题不适用这一条。
 
     {@code cites} = 后端规范化时剥出来的句子级引用（`"4.3,2.11"`），
@@ -618,7 +618,45 @@ def judge(kind, answer, sources, question, cites=None):
         r["没整段照抄"] = lc < COPY_RUN
     r["没抄提示词"] = not echoes_prompt(answer)
 
-    if kind == "grounded":                      # 【乙】有资料
+    if kind == "multi":
+        # 【乙·跨文档】答案要靠**不止一篇**文档才能答全 —— 判据因此多一条：
+        # **引到的来源覆盖了所有靶文档吗**。
+        #
+        # 为什么要有这一类（2026-09-29）：新闻短讯（以及用户预判会继续长的**热搜短词条**）
+        # 每一篇只有 1~2 块，**一个事实常常散在好几篇里**（"某人这届拿了几块金牌"
+        # 要跨 4~5 篇）。现有各类判据都只看"有没有引用、引用对不对"，
+        # **没有一条问"该找的那几篇，你找齐了吗"** —— 而"检索只覆盖了一部分"
+        # 恰恰是这套系统最容易悄悄出的错（共享 20 句窗口）。
+        #
+        # 靶文档由题面声明（`targets: [{"doc": "文档名片段", "excerpt": "逐字摘录"}]`），
+        # 采集时**整份题面随结果落盘**（`collect.mjs` 里 `...cs`）⇒ 判分仍是纯函数。
+        r["有引用"] = has_cite(answer)
+        r["引用有效"] = cites_valid(answer, len(sources))
+        tgt = [t for t in (targets or []) if isinstance(t, dict)]
+        if tgt:
+            # ⚠️ **不能写 `cites(answer)`** —— `judge` 的形参就叫 `cites`（句子级引用串），
+            # 它**遮蔽了模块级的 `cites()` 函数**（判据里早就有的命名坑）。
+            # 直接取编号，别绕那个名字。
+            nums = {int(m.group(1)) for m in _CITE.finditer(answer or "")}
+            cited = {s.get("docName") or s.get("docId") or ""
+                     for n, s in enumerate(sources or [], 1) if n in nums}
+            doc_got = [t for t in tgt if any(t.get("doc", "") in d for d in cited)]
+            # ⚠️ **判据量的是"靶事实"，不是"靶文档"**（第一版写反了，实测被抓）：
+            # `nl-m1` 回答**答全了**（两块金牌 + 两个纪录），只是没引 `[5] 综合消息` ——
+            # 因为**同一个事实同时在 3 篇里**（新闻的常态：同一件事多家报）。
+            # 拿"引了哪几篇"当判据 ⇒ 把**答对了的**判成失败。
+            # ⇒ 题面为每个靶声明 `expect`（答案里**应出现**的那个值/短语），
+            #   判据看的是它有没有出现；**文档覆盖只留作诊断**。
+            want = [t.get("expect", "") for t in tgt if t.get("expect")]
+            aa = _norm(answer)
+            fact_got = [w for w in want if _norm(w) in aa]
+            if want:
+                r["覆盖了所有靶事实"] = len(fact_got) == len(want)
+            r["_覆盖"] = (f"事实 {len(fact_got)}/{len(want)}　"
+                          f"文档 {len(doc_got)}/{len(tgt)}（引到 {len(cited)} 篇）")
+            # 逐字落地率对跨文档题同样适用（值不能凭记忆写）
+            r["数字有据"] = None if not total else (grounded / total >= 0.5)
+    elif kind == "grounded":                    # 【乙】有资料
         r["有引用"] = has_cite(answer)
         r["引用有效"] = cites_valid(answer, len(sources))
         # 【乙】的契约是「不得编造资料里没有的内容」。数字**逐字**落地率过低
@@ -691,6 +729,8 @@ PASS = {
     # **不加 `数字有据`**：那会给"正确地补充了通用知识并标注"的答案判假失败
     # （那个值本来就不在资料里）—— 而标注过就是合法行为。
     "grounded-partial": ["走对了出口", "无标签泄漏", "没抄提示词", "没整段照抄"],
+    # 【乙·跨文档】：多一条"覆盖了所有靶来源" —— 见 judge() 里那一段
+    "multi": ["有引用", "引用有效", "覆盖了所有靶事实", "无标签泄漏", "没抄提示词", "没整段照抄"],
     "ungrounded": ["声明了没有", "标注了通用知识", "无标签泄漏", "没抄提示词"],
     "chitchat": ["没误报「知识库没有」", "无标签泄漏", "没抄提示词"],
     # 【甲·自身能力】：唯一的失败模式与 chitchat 同形（误报"知识库没有"），

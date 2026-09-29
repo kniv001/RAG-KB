@@ -104,6 +104,16 @@ def audit_bench(b, allow_rot=False):
             C = None
         if C is not None:
             for c in b["cases"]:
+                # **跨文档题的靶子也要核**（`targets`）：题面声明的每一篇都得真在库里，
+                # 否则"缺了哪一篇"会被算成模型的错（而其实是题面过期了）。
+                for t in (c.get("targets") or []):
+                    if not isinstance(t, dict) or not t.get("excerpt"):
+                        if c.get("kind") == "multi":
+                            rot.append(f"{c['id']} 有靶子没写 excerpt —— 核不了")
+                        continue
+                    if not C.contains(t["excerpt"]):
+                        rot.append(f"{c['id']} 靶摘录找不到「{t['excerpt'][:20]}…」"
+                                   f"（{t.get('doc', '?')[:18]}）")
                 p = c.get("premise") or {}
                 for phrase in p.get("must_find", []):
                     if not C.contains(phrase):
@@ -327,7 +337,8 @@ def score(bench_name, model, paths=None, quiet=False, tag=""):
     for i, res in enumerate(first["results"]):
         rows = [judges.judge(r["results"][i]["kind"], r["results"][i]["answer"],
                              r["results"][i]["sources"] or [], r["results"][i]["q"],
-                             ((r["results"][i].get("stats") or {}).get("cites")))
+                             ((r["results"][i].get("stats") or {}).get("cites")),
+                             r["results"][i].get("targets"))
                 for r in runs]
         need = judges.PASS[res["kind"]]
         ok = all(judges.passes(r, res["kind"]) for r in rows)
@@ -422,7 +433,8 @@ def score(bench_name, model, paths=None, quiet=False, tag=""):
         for i, res in enumerate(first["results"]):
             for r in runs:
                 row = judges.judge(r["results"][i]["kind"], r["results"][i]["answer"],
-                                   r["results"][i]["sources"] or [], r["results"][i]["q"])
+                                   r["results"][i]["sources"] or [], r["results"][i]["q"],
+                                   None, r["results"][i].get("targets"))
                 for k in judges.PASS[res["kind"]]:
                     if row.get(k) is not None:
                         cnt.setdefault(k, [0, 0])
