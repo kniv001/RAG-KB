@@ -30,31 +30,10 @@ $jar = Join-Path $repo 'rag-kb-web\target\rag-kb.jar'
 $java = 'C:\Program Files\Java\jdk-21\bin\java.exe'
 $env:KB_DB_PASSWORD = (Get-Content 'D:\vs\rag-kb\data\pgapp.txt' -Raw).Trim()
 
-# 生产当前默认（2026-09-29）。$null = **删掉这个变量**，让它回到 yml 默认。
-$PROD = [ordered]@{
-    KB_SENT_CHUNK_K   = '0'
-    KB_NEIGHBOR       = '0'
-    KB_MAT_FLOOR      = '0.65'
-    KB_MAT_FLOOR_MODE = 'sent'
-    KB_SENT_NOHEAD    = 'true'
-    KB_PARTIAL_HINT   = 'floor'
-    KB_TOP_K          = $null
-    # ⚠️ **这两个是 2026-10-06 补的，代价是 7 天**。
-    #
-    # 本脚本 09-29 那轮跑完之后，`finally` 里 `Stop-App` + `Apply-Prod` + `Start-App`
-    # **重启了生产**，而上面那张表里没有抓取开关 ⇒ 新实例的 `KB_FEED_POLL` 是空的
-    # ⇒ `FeedPoller` 在 `if (!props.isPollEnabled()) return;` 直接返回
-    # ⇒ **生产 7 天一条新闻都没抓**（`/api/feed/stats` 那句「上轮抓取：**还没跑过**」是铁证；
-    #    `data/app.log` 每天只剩 ~480 字节）。
-    # 后果不是"少抓了几天"，而是**那 7 天的入口曲线在测一批冻住的语料** ——
-    # 而它长得完全像一条增长曲线（同一批语料重复测 7 次，数字当然几乎不动）。
-    #
-    # ⇒ 教训与 `ab.ps1` 开头那段**逐字同构**，只是这次漏在"清单不全"上：
-    # **本表必须与"生产当前姿态"同步，每多一个长期开着的开关就要在这里多一行。**
-    # 现在再加一道防线：清单里每一项都会在复位时**打印出来**，漏了至少看得见。
-    KB_FEED_POLL      = 'true'
-    KB_WEB_ENABLED    = 'true'
-}
+# **生产姿态不写在这里** —— 点源 `scripts\prod-posture.ps1`（唯一定义处）。
+# 2026-10-06 之前这里是**本地抄的一份**，而它漏了 `KB_FEED_POLL`/`KB_WEB_ENABLED`
+# ⇒ 本脚本那次复位重启把生产留在了"抓取关着"的状态，**信息流 7 天一条没抓**。
+. (Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\prod-posture.ps1')
 
 function Stop-App {
     Get-CimInstance Win32_Process -Filter "name='java.exe'" |
@@ -79,17 +58,7 @@ function Start-App {
 function Apply-Prod {
     # **打印出来**：清单漏了一项时，至少在日志里看得见"它没被设"
     # （2026-10-06 那次就是因为清单漏了两项、而复位**什么都不说**，7 天后才发现）
-    $shown = @()
-    foreach ($k in $PROD.Keys) {
-        if ($null -eq $PROD[$k]) {
-            Remove-Item -Path "Env:$k" -ErrorAction SilentlyContinue
-            $shown += "$k=(删)"
-        } else {
-            Set-Item -Path "Env:$k" -Value $PROD[$k]
-            $shown += "$k=$($PROD[$k])"
-        }
-    }
-    Write-Host "    复位到生产：$($shown -join ' · ')"
+    Write-Host "    复位到生产：$(Set-KbProdPosture)"
 }
 
 function Stamp { (Get-Date).ToString('HHmmss') }

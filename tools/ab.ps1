@@ -60,47 +60,27 @@ function Start-App($on) {
 
 function Reset-Prod {
     Stop-App
-    # **三个开关显式全关** —— 不靠"没设就是默认"，那正是残留能溜进来的地方
-    $env:KB_TWO_STAGE = 'false'
-    $env:KB_CTX_IN_PROMPT = 'false'
-    $env:KB_SHAPE_THINKING = 'false'
-    # **每一个被 Start-App 设过的开关都要在这里显式复位** —— 它们是同一个
-    # PowerShell 进程的环境变量，不复位就会被 Reset-Prod 启动的那个进程继承，
-    # 于是"实验结束了但生产还跑在实验路径上"（本脚本第一段防的就是这个）。
-    $env:KB_NO_RESTATE = 'false'
-    $env:KB_SENT_ADDR = 'false'
-    # ⚠️ **这条按"当前默认"复位，不是按 false** —— 2026-09-23 起分层注入**默认开**
-    # （转正复验：装入 token −30%、时间不变、质量不变）。硬写 false 会把实验结束后的
-    # 生产留在**旧路**上 —— 与下面 KB_CONTRACT_IN_CODE 那条是同一个坑。
-    $env:KB_SENT_WINDOW = 'true'
-    $env:KB_JEV_PICK = 'false'
-    $env:KB_ASPECTS = 'false'
-    # 逐块挑句：**0 = 生产默认（走全局 top-20）**，转正后这里要跟着改成新的 k。
-    $env:KB_SENT_CHUNK_K = '0'
-    # 相邻块补全：**0 = 生产默认（关）** —— 与上面那条是**一对**（同开才有实测的增益）。
-    $env:KB_NEIGHBOR = '0'
-    # ⚠️ **这个按"当前默认"复位，不是按 false** —— 2026-09-22 起契约进代码是**默认开**的，
-    # 硬写 false 会让每次实验结束都把生产留在**旧路**上（正是本脚本第一段防的那种残留）。
-    # 复位 = 回到生产真实默认，不是回到 false。
-    $env:KB_CONTRACT_IN_CODE = 'true'
-    # 「部分可答」的措辞档位（off/line/branch）：**默认 off**（生产一字不改）。
-    # 按"当前默认"复位 —— 实验跑完不能把它留在某一臂上。
-    $env:KB_PARTIAL_HINT = 'floor'
-    $env:KB_MAT_FLOOR = '0.65'
-    $env:KB_MAT_FLOOR_MODE = 'sent'
-    $env:KB_SENT_NOHEAD = 'true'
-    # ⚠️ **结构性修复（2026-09-24）**：把**本次实验用的那个开关删掉**，让它回到 yml 默认。
+    # **姿态不写在这里** —— 点源 `scripts\prod-posture.ps1`（唯一定义处）。
     #
-    # 为什么必须有这条：上面那张清单是**手工维护**的，必须与"本次传了什么开关"保持同步 ——
-    # 而 2026-09-24 跑 `-Switch KB_TOP_K` 时清单里没有它，于是**生产被留在 top-k=24 上**
-    # （实测装入 token 3206 → 6694，翻倍，而没有任何报错）。这正是本脚本开头那段
-    # 「实验脚本不该改变生产行为」防的事，只是这次漏在了"清单不全"上。
-    # 删掉变量比"再补一行"可靠：**清单要么别维护、要么就得维护全**，而后者靠人记。
+    # 2026-10-06 之前这里是**本地抄的一份**（17 行），而 `tools\mat-arm.ps1` 里另抄了一份
+    # （12 行）—— **两份互不相同**，而且**两份都没有 `KB_FEED_POLL`/`KB_WEB_ENABLED`**。
+    # 代价：09-29 那次复位重启把生产留在"抓取关着"的状态 ⇒ **信息流 7 天一条没抓**，
+    # 而它长得完全正常（health 绿、隧道通、日志每天 ~480 字节）。
+    # ⇒ 抄三份必然对不上；收到一处之后，"生产姿态"只有一个来源。
+    . (Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\prod-posture.ps1')
+
+    # ⚠️ **本次实验用的那个开关也要删掉**，让它回到 yml 默认（2026-09-24 的教训：
+    # 那次跑 `-Switch KB_TOP_K` 而清单里没有它，生产被留在 top-k=24，装入 token 翻倍）。
+    # 这条与上面的姿态表**互补**：表管"所有历史上被设过的开关"，这条管"这一次的"。
     Remove-Item -Path "Env:$Switch" -ErrorAction SilentlyContinue
+    if ($KB_PROD.Contains($Switch)) { Write-Host "（$Switch 也在姿态表里，已被表覆盖）" }
+    Write-Host "    复位到生产：$(Set-KbProdPosture)"
     Start-Process -FilePath $java -ArgumentList '-jar', $jar `
         -WorkingDirectory $repo -WindowStyle Hidden
     Start-Sleep -Seconds 25
-    Write-Host "`n（已复位：前三个开关关、契约进代码=默认开）"
+    # 这一行原来是"（已复位：前三个开关关、契约进代码=默认开）" ——
+    # 那是**照着本地清单写的散文**，而清单已经删了。姿态的真相由 Set-KbProdPosture 逐项打印。
+    Write-Host "`n（已复位 —— 逐项见上面那行「复位到生产：…」）"
 }
 
 try {
