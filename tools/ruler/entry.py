@@ -100,10 +100,17 @@ def hang(flat, words, topk=TOPK):
     """把议题挂到入口上 —— **每个议题最多挂 topk 个**（封顶 = 不串）。
 
     挂哪几个：命中词里**最长的优先**（更长的字面更具体），并去掉被更长片段包含的短片段。
+
+    ⚠️ **排序必须是确定的**（2026-10-06 修）：原来是 `sorted(hit, key=len, reverse=True)`
+    —— **只按长度排，同长度的并列由 set 的迭代顺序决定，而 `str` 的 hash 每进程随机**
+    （CPython 的 `PYTHONHASHSEED`）。后果：**同一批语料连跑三次得到 58/59/58 个入口**，
+    而 `PYTHONHASHSEED=0` 之后三次全是 58。⇒ 那 ±1 的"抖动"**是仪器的，不是语料的**；
+    当时若不看，7 天后会报出"入口数稳定在 57~59" —— 而那份"稳定"里混着自己的 hash 种子。
+    **并列要有个确定的名字序兜底。**
     """
     out = defaultdict(list)
     for tid, tg in flat.items():
-        hit = sorted((g for g in tg if g in words), key=len, reverse=True)
+        hit = sorted((g for g in tg if g in words), key=lambda g: (-len(g), g))
         picked = []
         for g in hit:
             if not any(g in k for k in picked):
@@ -113,6 +120,23 @@ def hang(flat, words, topk=TOPK):
         for g in picked:
             out[g].append(tid)
     return out
+
+
+def feed_stamp():
+    """**信息流语料戳** —— 一个分数要能说清"这是哪批语料"。
+
+    与 `corpus.Corpus.stamp`（那块是 877 块的知识库）不是一回事：这一层量的是**议题**，
+    所以戳要盖在**信息流**上（条目数 + 最后一次入库时刻 + 议题数）。
+    ⚠️ 没有它，**"同一批语料被重复测了 7 次"与"7 天的增长曲线"在 CSV 里长得一模一样**
+    —— 2026-09-29~10-05 那份曲线正是这么来的（见每日脚本的注释）。
+    """
+    import hashlib
+    r = corpus.psql_rows(
+        "SELECT (SELECT count(*) FROM feed_items) || '|' || "
+        "(SELECT coalesce(max(fetched_at)::text,'-') FROM feed_items) || '|' || "
+        "(SELECT count(*) FROM feed_topics)")
+    raw = r[0][0] if r and r[0] else "-"
+    return hashlib.md5(raw.encode("utf-8")).hexdigest()[:12]
 
 
 def measure(lo=LO, hi=HI, topk=TOPK, day_cut=None):
@@ -125,6 +149,7 @@ def measure(lo=LO, hi=HI, topk=TOPK, day_cut=None):
     h = hang(flat, words, topk)
     covered = len({tid for tids in h.values() for tid in tids})
     return {
+        "feedStamp": feed_stamp(),
         "items": len(titles),
         "topicsAll": len(by_topic),
         "topicsMulti": len(flat),
